@@ -3,6 +3,8 @@ import svelte from '@astrojs/svelte';
 
 // https://astro.build/config
 export default defineConfig({
+  site: 'https://binarytreecode.github.io',
+  base: '/horario',
   integrations: [svelte()],
   devToolbar: {
     enabled: false
