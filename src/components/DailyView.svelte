@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { Activity, Category } from '../lib/types.ts';
   import { parseTime, getActivityColor, formatTime } from '../lib/stores.ts';
-  import { Clock, Edit3, Copy, Trash2 } from 'lucide-svelte';
+  import { Clock, Edit3, Copy, Trash2, ListChecks } from 'lucide-svelte';
   import { db } from '../lib/db.ts';
 
   interface Props {
@@ -229,6 +229,8 @@
     >
       {#each dayActivities as activity}
         {@const pos = calculateActivityPosition(activity.startTime, activity.endTime)}
+        {@const totalSteps = activity.steps?.length || 0}
+        {@const doneSteps = activity.steps?.filter(s => s.completed).length || 0}
         <div 
           class="daily-activity-card glass-panel" 
           role="button"
@@ -241,7 +243,14 @@
           style="top: {pos.top}; height: {pos.height}; border-left-color: {getActivityColor(activity.categoryId, categories)}"
         >
           <div class="activity-content">
-            <div class="activity-name">{activity.name}</div>
+            <div class="activity-title-group">
+              <span class="activity-name">{activity.name}</span>
+              {#if totalSteps > 0}
+                <span class="activity-steps-badge" class:all-done={doneSteps === totalSteps && totalSteps > 0} title="{doneSteps} de {totalSteps} pasos completados">
+                  <ListChecks size={12} /> {doneSteps}/{totalSteps}
+                </span>
+              {/if}
+            </div>
             <div class="activity-time">
               {#if activity.startTime === activity.endTime}
                 {format12h(activity.startTime)}
@@ -252,7 +261,7 @@
             <button 
               class="edit-btn" 
               onclick={(e) => { e.stopPropagation(); onEditActivity(activity.id!); }}
-              title="Editar actividad"
+              title="Editar actividad y ver pasos"
             >
               <Edit3 size={14} />
             </button>
@@ -402,6 +411,14 @@
     opacity: 0.8;
   }
 
+  .activity-title-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+  }
+
   .activity-name {
     font-weight: 700;
     font-size: 1rem;
@@ -409,7 +426,25 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    flex: 1;
+  }
+
+  .activity-steps-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: rgba(45, 90, 39, 0.1);
+    color: var(--color-green-dark);
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.15rem 0.4rem;
+    border-radius: 6px;
+    white-space: nowrap;
+    border: 1px solid rgba(45, 90, 39, 0.15);
+  }
+
+  .activity-steps-badge.all-done {
+    background: rgba(45, 90, 39, 0.2);
+    color: var(--color-green-dark);
   }
 
   .edit-btn {

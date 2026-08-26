@@ -2,7 +2,7 @@
   import type { Activity, Category } from '../lib/types.ts';
   import { parseTime, getActivityColor, formatTime } from '../lib/stores.ts';
   import { db } from '../lib/db.ts';
-  import { Copy, Trash2 } from 'lucide-svelte';
+  import { Copy, Trash2, ListChecks } from 'lucide-svelte';
 
   interface Props {
     activities: Activity[];
@@ -165,7 +165,14 @@
               style="grid-row: {rowStart} / {rowEnd}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
               onclick={() => onEditActivity(activity.id!)}
             >
-              <div class="activity-title">{activity.name}</div>
+              <div class="activity-title">
+                {activity.name}
+                {#if activity.steps && activity.steps.length > 0}
+                  <span class="grid-steps-icon" title="{activity.steps.length} pasos">
+                    <ListChecks size={10} />
+                  </span>
+                {/if}
+              </div>
             </button>
           {/each}
         </div>
@@ -291,6 +298,19 @@
 
   .activity-title {
     font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25rem;
+  }
+
+  .grid-steps-icon {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.3);
+    padding: 1px 3px;
+    border-radius: 4px;
+    font-size: 0.65rem;
   }
 
   .custom-context-menu {

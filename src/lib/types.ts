@@ -1,10 +1,18 @@
+export interface ActivityStep {
+  id: string;
+  title: string;
+  completed?: boolean;
+}
+
 export interface Activity {
   id?: number;
   categoryId: string;
   name: string;
+  description?: string;
   startTime: string; // HH:mm
   endTime: string;   // HH:mm
-  daysOfWeek: number[]; // 0-6 (0 is Sunday or Monday? Let's use 0 = Monday, 1 = Tuesday...)
+  daysOfWeek: number[]; // 0-6 (0 = Lunes, 6 = Domingo)
+  steps?: ActivityStep[];
 }
 
 export interface Category {

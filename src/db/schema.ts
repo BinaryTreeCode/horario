@@ -1,5 +1,6 @@
-﻿import { pgTable, text, varchar, integer, timestamp, serial, uuid, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, text, varchar, integer, timestamp, serial, uuid, boolean, jsonb } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
+import type { ActivityStep } from '../lib/types';
 
 /**
  * 1. Tabla de Usuarios
@@ -29,16 +30,18 @@ export const categories = pgTable('categories', {
 
 /**
  * 3. Tabla de Actividades
- * Almacena los bloques de horario semanales y diarios.
+ * Almacena los bloques de horario semanales y diarios con sus pasos/subtareas.
  */
 export const activities = pgTable('activities', {
   id: serial('id').primaryKey(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   categoryId: varchar('category_id', { length: 50 }).references(() => categories.id, { onDelete: 'cascade' }).notNull(),
   name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
   startTime: varchar('start_time', { length: 10 }).notNull(), // Ej: "08:00"
   endTime: varchar('end_time', { length: 10 }).notNull(),     // Ej: "09:30"
   daysOfWeek: integer('days_of_week').array().notNull(),      // Ej: [0, 1, 2, 3, 4]
+  steps: jsonb('steps').$type<ActivityStep[]>().default([]),  // Lista de pasos / checklist
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

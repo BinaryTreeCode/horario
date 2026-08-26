@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { db } from '../lib/db.ts';
-  import type { Activity, Category } from '../lib/types.ts';
-  import { X, Trash2, CheckCircle } from 'lucide-svelte';
+  import type { Activity, Category, ActivityStep } from '../lib/types.ts';
+  import { X, Trash2, CheckCircle, Plus, CheckSquare, Square, ListChecks, Sparkles } from 'lucide-svelte';
 
   interface Props {
     id: number | null;
@@ -15,9 +15,12 @@
 
   let categoryId = $state('');
   let name = $state('');
+  let description = $state('');
   let startTime = $state('08:00');
   let endTime = $state('09:00');
   let daysOfWeek = $state([0, 1, 2, 3, 4, 5, 6]);
+  let steps = $state<ActivityStep[]>([]);
+  let newStepInput = $state('');
 
   // Derived category color for preview
   const activeCategory = $derived(categories.find(c => c.id === categoryId));
@@ -66,7 +69,6 @@
   const startTimeOptions = $derived(
     (() => {
       const opts = allTimes().filter(t => parseMinutes(t.value) < settings.endHour * 60);
-      // If the loaded startTime is not in the options, add it
       if (startTime && !opts.some(o => o.value === startTime)) {
         opts.push({ value: startTime, label: format12h(startTime) });
         opts.sort((a, b) => parseMinutes(a.value) - parseMinutes(b.value));
@@ -78,7 +80,6 @@
   const endTimeOptions = $derived(() => {
     const sMin = parseMinutes(startTime);
     const opts = allTimes().filter(t => parseMinutes(t.value) > sMin);
-    // If the loaded endTime is not in the options, add it
     if (endTime && !opts.some(o => o.value === endTime)) {
       opts.push({ value: endTime, label: format12h(endTime) });
       opts.sort((a, b) => parseMinutes(a.value) - parseMinutes(b.value));
@@ -99,6 +100,42 @@
     endTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
   }
 
+  function addStep() {
+    if (!newStepInput.trim()) return;
+    steps = [
+      ...steps,
+      {
+        id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        title: newStepInput.trim(),
+        completed: false
+      }
+    ];
+    newStepInput = '';
+  }
+
+  function removeStep(stepId: string) {
+    steps = steps.filter(s => s.id !== stepId);
+  }
+
+  function toggleStep(stepId: string) {
+    steps = steps.map(s => s.id === stepId ? { ...s, completed: !s.completed } : s);
+  }
+
+  function applyRoutinePresets() {
+    const defaultRoutineSteps = [
+      'Beber vaso con agua y estirar',
+      'Aseo personal / Ducha',
+      'Desayuno nutritivo',
+      'Revisar objetivos del día'
+    ];
+    const newSteps = defaultRoutineSteps.map(t => ({
+      id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title: t,
+      completed: false
+    }));
+    steps = [...steps, ...newSteps];
+  }
+
   const days = [
     { label: 'L', index: 0 },
     { label: 'M', index: 1 },
@@ -115,13 +152,14 @@
       if (activity) {
         categoryId = activity.categoryId;
         name = activity.name;
+        description = activity.description || '';
         startTime = activity.startTime;
         endTime = activity.endTime;
         daysOfWeek = [...activity.daysOfWeek];
+        steps = activity.steps ? [...activity.steps] : [];
       }
     } else {
-      // Set defaults based on settings
-      const defaultStart = Math.max(settings.startHour, 8); // default to 8:00 AM, but respect startHour
+      const defaultStart = Math.max(settings.startHour, 8);
       const defaultEnd = Math.min(defaultStart + 1, settings.endHour);
       
       const startHStr = defaultStart.toString().padStart(2, '0');
@@ -142,12 +180,14 @@
       const activity: Activity = {
         categoryId,
         name,
+        description,
         startTime,
         endTime,
-        daysOfWeek: [...daysOfWeek]
+        daysOfWeek: [...daysOfWeek],
+        steps: $state.snapshot(steps)
       };
 
-      console.log('Saving activity:', activity);
+      console.log('Saving activity with steps:', activity);
 
       if (id !== null) {
         activity.id = id;
@@ -156,7 +196,6 @@
         await db.activities.add(activity);
       }
       
-      console.log('Activity saved successfully');
       onClose();
     } catch (error: any) {
       console.error('Failed to save activity:', error);
@@ -209,7 +248,70 @@
 
       <div class="form-group">
         <label>¿Qué vas a hacer?</label>
-        <input type="text" bind:value={name} placeholder="Ej. Sesión de Dibujo" required class="input-large" />
+        <input type="text" bind:value={name} placeholder="Ej. Rutina Matutina" required class="input-large" />
+      </div>
+
+      <!-- Sección de Pasos / Subtareas -->
+      <div class="steps-box">
+        <div class="steps-header">
+          <div class="steps-title">
+            <ListChecks size={18} />
+            <span>Pasos / Subtareas ({steps.length})</span>
+          </div>
+          {#if steps.length === 0}
+            <button type="button" class="preset-btn-sparkle" onclick={applyRoutinePresets}>
+              <Sparkles size={14} /> Sugerir rutina
+            </button>
+          {/if}
+        </div>
+
+        <div class="step-add-row">
+          <input 
+            type="text" 
+            bind:value={newStepInput} 
+            placeholder="Escribe un paso y presiona Enter..." 
+            class="step-input"
+            onkeydown={e => { if (e.key === 'Enter') { e.preventDefault(); addStep(); } }}
+          />
+          <button type="button" class="btn-add-step" onclick={addStep} title="Agregar paso">
+            <Plus size={18} /> Añadir
+          </button>
+        </div>
+
+        {#if steps.length > 0}
+          <div class="steps-list">
+            {#each steps as step, index (step.id)}
+              <div class="step-item" class:completed={step.completed}>
+                <button 
+                  type="button" 
+                  class="step-check-btn" 
+                  onclick={() => toggleStep(step.id)}
+                  title={step.completed ? "Marcar como pendiente" : "Marcar como completado"}
+                >
+                  {#if step.completed}
+                    <CheckSquare size={18} class="check-icon done" />
+                  {:else}
+                    <Square size={18} class="check-icon" />
+                  {/if}
+                </button>
+                <input 
+                  type="text" 
+                  bind:value={step.title} 
+                  class="step-text-input" 
+                  class:done-text={step.completed}
+                />
+                <button 
+                  type="button" 
+                  class="step-delete-btn" 
+                  onclick={() => removeStep(step.id)}
+                  title="Eliminar paso"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <div class="time-controls-box">
@@ -288,6 +390,165 @@
 </div>
 
 <style>
+  .steps-box {
+    background: #f8faf9;
+    border: 1px solid rgba(45, 90, 39, 0.15);
+    border-radius: 12px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .steps-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .steps-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--color-green-dark);
+  }
+
+  .preset-btn-sparkle {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: rgba(45, 90, 39, 0.08);
+    border: 1px dashed var(--color-green-dark);
+    color: var(--color-green-dark);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.6rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .preset-btn-sparkle:hover {
+    background: var(--color-green-dark);
+    color: white;
+  }
+
+  .step-add-row {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .step-input {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    background: white;
+  }
+
+  .btn-add-step {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: var(--color-green-dark);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .btn-add-step:hover {
+    background: var(--color-green-moss);
+  }
+
+  .steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 200px;
+    overflow-y: auto;
+    padding-right: 0.25rem;
+  }
+
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: white;
+    padding: 0.4rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid rgba(0,0,0,0.06);
+    transition: background 0.2s, border-color 0.2s;
+  }
+
+  .step-item.completed {
+    background: rgba(45, 90, 39, 0.05);
+    border-color: rgba(45, 90, 39, 0.2);
+  }
+
+  .step-check-btn {
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    color: #999;
+    transition: color 0.2s;
+  }
+
+  .step-check-btn:hover {
+    color: var(--color-green-dark);
+  }
+
+  .check-icon.done {
+    color: var(--color-green-dark);
+  }
+
+  .step-text-input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: 0.85rem;
+    padding: 0.2rem 0.4rem;
+    color: var(--text-main);
+  }
+
+  .step-text-input:focus {
+    outline: none;
+    background: rgba(0,0,0,0.02);
+    border-radius: 4px;
+  }
+
+  .step-text-input.done-text {
+    text-decoration: line-through;
+    color: #888;
+  }
+
+  .step-delete-btn {
+    background: transparent;
+    border: none;
+    padding: 0.25rem;
+    cursor: pointer;
+    color: #cc8888;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    transition: all 0.2s;
+  }
+
+  .step-delete-btn:hover {
+    color: #dc2626;
+    background: #fee2e2;
+  }
+
   .modal-overlay {
     position: fixed;
     top: 0;
