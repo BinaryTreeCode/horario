@@ -1,0 +1,66 @@
+:root {
+  --font-heading: 'Outfit', -apple-system, system-ui, sans-serif;
+  --font-body: 'Inter', -apple-system, system-ui, sans-serif;
+
+  /* Forest & Furry Palette */
+  --color-green-dark: #2d5a27;
+  --color-green-moss: #4a7c44;
+  --color-brown-bark: #5c4033;
+  --color-brown-soil: #8b5a2b;
+  --color-sky-day: #7fb3d5;
+  --color-sky-night: #1a2a44;
+  --color-fur-cream: #f4e9d9;
+  --color-fur-tan: #efd5b1;
+
+  /* BG & UI */
+  --page-bg: #f8f9fa;
+  --panel-bg: rgba(255, 255, 255, 0.7);
+  --border-color: rgba(92, 64, 51, 0.2);
+  --text-main: #2d3436;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-body);
+  background-color: var(--page-bg);
+  background-image: 
+    radial-gradient(circle at 2px 2px, rgba(92, 64, 51, 0.05) 1px, transparent 0);
+  background-size: 24px 24px;
+  color: var(--text-main);
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-heading);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(92, 64, 51, 0.12);
+}
+
+.btn {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  background: var(--color-green-dark);
+  color: white;
+  transition: all 0.2s;
+}
+
+.btn:hover {
+  background: var(--color-green-moss);
+}
+
+.btn-secondary {
+  background: var(--color-brown-bark);
+}
+
+.btn-secondary:hover {
+  background: var(--color-brown-soil);
+}

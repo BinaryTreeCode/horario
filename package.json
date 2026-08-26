@@ -1,0 +1,29 @@
+{
+  "name": "meh",
+  "type": "module",
+  "version": "0.0.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "NODE_OPTIONS='--max-old-space-size=4096' astro dev",
+    "build": "NODE_OPTIONS='--max-old-space-size=4096' astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/svelte": "^8.0.2",
+    "astro": "^6.0.6",
+    "d3-color": "^3.1.0",
+    "d3-scale": "^4.0.2",
+    "d3-shape": "^3.2.0",
+    "dexie": "^4.3.0",
+    "layerchart": "^1.0.13",
+    "lucide-svelte": "^0.577.0",
+    "svelte": "^5.54.0",
+    "svelte-dnd-action": "^0.9.69"
+  },
+  "devDependencies": {
+    "lightningcss": "^1.32.0"
+  }
+}
