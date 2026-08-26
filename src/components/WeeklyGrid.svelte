@@ -189,10 +189,12 @@
   .weekly-grid-container {
     display: flex;
     overflow-x: auto;
-    min-width: 800px;
+    -webkit-overflow-scrolling: touch;
+    min-width: 650px;
     padding-bottom: 1rem;
     padding-top: 10px;
     position: relative;
+    scrollbar-width: thin;
   }
 
   .time-column {

@@ -165,4 +165,16 @@
     font-weight: 600;
     color: var(--text-main);
   }
+
+  @media (max-width: 768px) {
+    .stats-container {
+      width: 100%;
+      gap: 1rem;
+    }
+    .stat-card {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 1rem;
+    }
+  }
 </style>

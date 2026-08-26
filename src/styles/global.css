@@ -19,6 +19,10 @@
   --text-main: #2d3436;
 }
 
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -29,6 +33,7 @@ body {
   background-size: 24px 24px;
   color: var(--text-main);
   line-height: 1.5;
+  -webkit-tap-highlight-color: transparent;
 }
 
 h1, h2, h3, h4 {

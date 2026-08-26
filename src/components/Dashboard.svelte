@@ -280,9 +280,48 @@
     }
   }
 
+  @media (max-width: 768px) {
+    .dashboard {
+      padding: 0.75rem;
+      gap: 1rem;
+    }
+    .dashboard-header {
+      padding: 0.75rem 1rem;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .header-left {
+      width: 100%;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .header-right {
+      width: 100%;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
+    .grid-section {
+      padding: 0.5rem;
+    }
+  }
+
   @media (max-width: 640px) {
     .hide-mobile {
       display: none;
+    }
+    .btn-plus {
+      padding-left: 0.5rem;
+      padding-right: 0.5rem;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .logo {
+      font-size: 1.1rem;
+    }
+    .view-tabs button {
+      padding: 0.35rem 0.6rem;
+      font-size: 0.8rem;
     }
   }
 </style>

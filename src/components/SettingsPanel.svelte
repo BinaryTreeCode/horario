@@ -544,4 +544,29 @@
     line-height: 1.4;
     text-align: center;
   }
+
+  .category-edit-item input[type="text"] {
+    flex: 1;
+    min-width: 0;
+  }
+
+  @media (max-width: 640px) {
+    .modal-content {
+      max-width: 100%;
+      padding: 1.25rem;
+    }
+    .modal-header {
+      margin-bottom: 1.25rem;
+    }
+    .settings-sections {
+      gap: 1.25rem;
+    }
+    .range-selector {
+      padding: 0.75rem;
+      gap: 1rem;
+    }
+    .backup-actions {
+      flex-direction: column;
+    }
+  }
 </style>

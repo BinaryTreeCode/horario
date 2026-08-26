@@ -304,12 +304,15 @@
   .modal-content {
     width: 95%;
     max-width: 500px;
+    max-height: 92vh;
     padding: 0;
-    overflow: hidden;
+    overflow-y: auto;
     background: white;
     border-radius: 16px;
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
     animation: slideUp 0.3s ease-out;
+    display: flex;
+    flex-direction: column;
   }
 
   @keyframes slideUp {
@@ -320,6 +323,7 @@
   .category-preview {
     height: 10px;
     width: 100%;
+    flex-shrink: 0;
   }
 
   .modal-header, form {
@@ -331,6 +335,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-shrink: 0;
   }
 
   form {
@@ -412,6 +417,8 @@
 
   .duration-chips {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 0.5rem;
   }
 
@@ -532,13 +539,14 @@
 
   .presets {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     margin-top: 0.5rem;
   }
 
   .preset-btn {
     font-size: 0.75rem;
-    padding: 0.25rem 0.5rem;
+    padding: 0.35rem 0.6rem;
     background: rgba(92, 64, 51, 0.05);
     border: 1px solid rgba(92, 64, 51, 0.1);
     border-radius: 4px;
@@ -552,6 +560,7 @@
     padding: 1.5rem 2rem;
     border-top: 1px solid rgba(0,0,0,0.05);
     background: #fcfcfc;
+    flex-shrink: 0;
   }
 
   .footer-right {
@@ -571,9 +580,64 @@
     font-size: 0.9rem;
   }
 
+  .btn-danger {
+    background: #fee2e2;
+    color: #dc2626;
+  }
+
+  .btn-danger:hover {
+    background: #fecaca;
+  }
+
   .btn-primary {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+  }
+
+  @media (max-width: 540px) {
+    .modal-header, form, .modal-footer {
+      padding: 1rem 1.25rem;
+    }
+    .modal-header h2 {
+      font-size: 1.25rem;
+    }
+    .input-large {
+      font-size: 1rem;
+      padding: 0.65rem;
+    }
+    .time-controls-box {
+      padding: 0.85rem;
+    }
+    .time-row-modern {
+      gap: 0.5rem;
+    }
+    .time-select-modern {
+      font-size: 0.9rem;
+      padding: 0.4rem;
+    }
+    .days-selector {
+      gap: 0.25rem;
+    }
+    .day-toggle {
+      height: 36px;
+      font-size: 0.8rem;
+    }
+    .modal-footer {
+      flex-direction: column-reverse;
+      gap: 0.75rem;
+    }
+    .footer-right {
+      width: 100%;
+      justify-content: space-between;
+    }
+    .footer-right .btn {
+      flex: 1;
+      justify-content: center;
+    }
+    .btn-danger {
+      width: 100%;
+      justify-content: center;
+    }
   }
 </style>

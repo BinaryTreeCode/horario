@@ -231,9 +231,13 @@
         {@const pos = calculateActivityPosition(activity.startTime, activity.endTime)}
         <div 
           class="daily-activity-card glass-panel" 
+          role="button"
+          tabindex="0"
           draggable="true"
           ondragstart={(e) => handleDragStart(e, activity)}
           oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
+          onclick={() => onEditActivity(activity.id!)}
+          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onEditActivity(activity.id!); }}
           style="top: {pos.top}; height: {pos.height}; border-left-color: {getActivityColor(activity.categoryId, categories)}"
         >
           <div class="activity-content">
@@ -245,7 +249,11 @@
                 {format12h(activity.startTime)} - {format12h(activity.endTime)}
               {/if}
             </div>
-            <button class="edit-btn" onclick={() => onEditActivity(activity.id!)}>
+            <button 
+              class="edit-btn" 
+              onclick={(e) => { e.stopPropagation(); onEditActivity(activity.id!); }}
+              title="Editar actividad"
+            >
               <Edit3 size={14} />
             </button>
           </div>
@@ -533,5 +541,75 @@
 
   .custom-context-menu button.delete-btn:hover {
     background: #fff5f5;
+  }
+
+  @media (max-width: 768px) {
+    .daily-header {
+      padding: 1rem;
+    }
+    .daily-header h2 {
+      font-size: 1.25rem;
+    }
+    .current-time-display {
+      font-size: 0.8rem;
+      padding: 0.35rem 0.75rem;
+    }
+    .daily-container {
+      margin: 1rem 0.5rem;
+    }
+    .time-track {
+      width: 55px;
+    }
+    .hour-marker {
+      font-size: 0.7rem;
+      padding-right: 0.35rem;
+    }
+    .activities-track {
+      margin-left: 0.5rem;
+    }
+    .daily-activity-card {
+      padding: 0.4rem 0.6rem;
+    }
+    .activity-content {
+      padding-right: 2rem;
+      gap: 0.5rem;
+    }
+    .activity-name {
+      font-size: 0.9rem;
+    }
+    .activity-time {
+      font-size: 0.75rem;
+    }
+    .edit-btn {
+      opacity: 0.85;
+      padding: 0.25rem;
+      right: 0.4rem;
+    }
+    .time-bar {
+      left: -0.5rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .daily-activity-card {
+      padding: 0.3rem 0.5rem;
+    }
+    .activity-content {
+      padding-right: 1.75rem;
+      gap: 0.25rem;
+    }
+    .activity-name {
+      font-size: 0.82rem;
+    }
+    .activity-time {
+      font-size: 0.7rem;
+    }
+    .time-track {
+      width: 48px;
+    }
+    .hour-marker {
+      font-size: 0.65rem;
+      padding-right: 0.2rem;
+    }
   }
 </style>
