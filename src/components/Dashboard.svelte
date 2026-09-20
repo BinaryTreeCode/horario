@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { db } from '../lib/db.ts';
+  import type { Activity } from '../lib/types.ts';
   import { 
     activitiesStore, 
     categoriesStore, 
     settingsStore,
+    dayOverridesStore,
     parseTime,
     formatTime
   } from '../lib/stores.ts';
@@ -13,20 +15,33 @@
   import DonutCharts from './DonutCharts.svelte';
   import SettingsPanel from './SettingsPanel.svelte';
   import ActivityModal from './ActivityModal.svelte';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp } from 'lucide-svelte';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, Cloud, CloudOff, RefreshCw } from 'lucide-svelte';
+  import { onSyncChange, syncNow } from '../lib/sync';
+  import type { SyncStatus } from '../lib/types';
 
   let currentView = $state('week'); // 'week' | 'day'
+
+  // Estado de sincronización para el badge del header
+  let syncStatus = $state<SyncStatus>('local');
+  $effect(() => {
+    const off = onSyncChange((s) => { syncStatus = s; });
+    return off;
+  });
   let selectedDay = $state(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1); // 0 = Mon, 6 = Sun
   
   let showSettings = $state(false);
   let showActivityModal = $state(false);
-  let editingActivityId = $state<number | null>(null);
+  let editingActivityId = $state<string | null>(null);
+  let modalTargetDay = $state<number | null>(null);
+  let initialActivityData = $state<Activity | null>(null);
 
   // Derive settings
   const settingsObj = $derived($settingsStore?.length ? $settingsStore.reduce((acc: any, s: any) => ({ ...acc, [s.key]: s.value }), { startHour: 7, endHour: 23 }) : { startHour: 7, endHour: 23 });
 
-  function openActivityModal(id: number | null = null) {
+  function openActivityModal(id: string | null = null, day: number | null = null, initialData: Activity | null = null) {
     editingActivityId = id;
+    modalTargetDay = day !== null ? day : (currentView === 'day' ? selectedDay : null);
+    initialActivityData = initialData;
     showActivityModal = true;
   }
 
@@ -36,11 +51,39 @@
   }
 
   async function coverGapsAbove() {
+    const startH = settingsObj.startHour;
+
+    if (currentView === 'day') {
+      const overrides = $state.snapshot($dayOverridesStore) || [];
+      const currentOverride = overrides.find(o => o.day === selectedDay);
+
+      if (currentOverride && currentOverride.activities?.length > 0) {
+        const dayActs = currentOverride.activities.map(a => ({ ...a }));
+        dayActs.sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+
+        let prevEnd = startH;
+        for (const act of dayActs) {
+          const actStart = parseTime(act.startTime);
+          if (actStart > prevEnd) {
+            const duration = parseTime(act.endTime) - actStart;
+            act.startTime = formatTime(prevEnd);
+            act.endTime = formatTime(prevEnd + duration);
+          }
+          prevEnd = parseTime(act.endTime);
+        }
+
+        await db.dayOverrides.put({
+          day: selectedDay,
+          activities: dayActs,
+          updatedAt: Date.now()
+        });
+        return;
+      }
+    }
+
     const list = $state.snapshot($activitiesStore) || [];
     if (list.length === 0) return;
 
-    const startH = settingsObj.startHour;
-    
     // Copy the activities to work with them
     const updatedActivities = list.map(a => ({ 
       ...a, 
@@ -72,12 +115,12 @@
           if (original && (original.startTime !== act.startTime || original.endTime !== act.endTime)) {
             await db.activities.update(act.id!, { 
               startTime: act.startTime,
-              endTime: act.endTime 
+              endTime: act.endTime,
+              updatedAt: Date.now()
             });
           }
         }
       });
-      console.log('Successfully adjusted all activities by shifting them upwards');
     } catch (err: any) {
       console.error('Failed to adjust activities:', err);
       alert('Error al ajustar las actividades: ' + (err.message || err));
@@ -103,9 +146,22 @@
       <button class="btn btn-secondary" onclick={coverGapsAbove} title="Ajustar todas las actividades para cubrir el espacio superior sobrante">
         <ChevronsUp size={20} /> <span class="hide-mobile">Ajustar Arriba</span>
       </button>
-      <button class="btn btn-plus" onclick={() => openActivityModal()}>
+      <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)}>
         <Plus size={20} /> <span class="hide-mobile">Nueva Actividad</span>
       </button>
+      {#if syncStatus !== 'local'}
+        <button
+          class="sync-badge"
+          class:syncing={syncStatus === 'syncing'}
+          class:error={syncStatus === 'error'}
+          onclick={() => syncNow(true).catch(() => {})}
+          title={syncStatus === 'synced' ? 'Sincronizado con la nube — clic para refrescar' : syncStatus === 'syncing' ? 'Sincronizando…' : syncStatus === 'offline' ? 'Sin conexión — se sincronizará al volver' : 'Error de sincronización — clic para reintentar'}
+        >
+          {#if syncStatus === 'synced'}<Cloud size={16} />
+          {:else if syncStatus === 'syncing'}<RefreshCw size={16} />
+          {:else}<CloudOff size={16} />{/if}
+        </button>
+      {/if}
       <button class="btn btn-secondary btn-icon" onclick={() => showSettings = true}>
         <Settings size={20} />
       </button>
@@ -121,8 +177,9 @@
               activities={$activitiesStore || []} 
               categories={$categoriesStore || []} 
               settings={settingsObj}
+              dayOverrides={$dayOverridesStore || []}
               onSelectDay={handleDaySelect}
-              onEditActivity={openActivityModal}
+              onEditActivity={(id) => openActivityModal(id, null)}
             />
           </div>
           <div class="stats-section">
@@ -139,7 +196,8 @@
             activities={$activitiesStore || []} 
             categories={$categoriesStore || []} 
             settings={settingsObj}
-            onEditActivity={openActivityModal}
+            dayOverrides={$dayOverridesStore || []}
+            onEditActivity={(id, initialData) => openActivityModal(id, selectedDay, initialData)}
           />
         </div>
       {/if}
@@ -158,9 +216,11 @@
   {#if showActivityModal}
     <ActivityModal 
       id={editingActivityId}
+      targetDay={modalTargetDay}
+      initialData={initialActivityData}
       categories={$categoriesStore || []}
       settings={settingsObj}
-      onClose={() => showActivityModal = false}
+      onClose={() => { showActivityModal = false; modalTargetDay = null; initialActivityData = null; }}
     />
   {/if}
 </div>
@@ -226,6 +286,39 @@
   .header-right {
     display: flex;
     gap: 0.75rem;
+  }
+
+  .sync-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid rgba(45, 90, 39, 0.25);
+    color: var(--color-green-dark);
+    border-radius: 50%;
+    width: 38px;
+    height: 38px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .sync-badge:hover {
+    background: rgba(45, 90, 39, 0.08);
+  }
+
+  .sync-badge.syncing {
+    animation: spin 1.2s linear infinite;
+    pointer-events: none;
+  }
+
+  .sync-badge.error {
+    color: #e53e3e;
+    border-color: rgba(229, 62, 62, 0.4);
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 
   .btn-plus {

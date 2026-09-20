@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { db, exportData, importData } from '../lib/db.ts';
+  import { db, exportData, validateImport, importValidatedData, type ValidationResult } from '../lib/db.ts';
+  import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange } from '../lib/sync';
+  import type { SyncStatus } from '../lib/types';
+  import { Cloud, CloudUpload, LogIn, LogOut, RefreshCw, UserPlus } from 'lucide-svelte';
   import type { Category } from '../lib/types.ts';
   import { X, Save, Plus, Trash2, Download, Upload, GripVertical } from 'lucide-svelte';
   import { dndzone } from 'svelte-dnd-action';
@@ -17,6 +20,100 @@
   let endHour = $state(0);
   let localCategories = $state<Category[]>([]);
   let initialized = $state(false);
+  let panelEl: HTMLElement | undefined = $state();
+
+  // ── Cuenta y sincronización ──
+  let loggedIn = $state(false);
+  let authLoading = $state(true);
+  let syncStatus = $state<SyncStatus>('local');
+  let authEmail = $state('');
+  let authPassword = $state('');
+  let authName = $state('');
+  let authMode = $state<'login' | 'register'>('login');
+  let authError = $state('');
+  let authBusy = $state(false);
+  let syncMessage = $state('');
+
+  $effect(() => {
+    isLoggedIn().then(v => { loggedIn = v; authLoading = false; });
+    const off = onSyncChange((s) => { syncStatus = s; });
+    return off;
+  });
+
+  async function handleAuth() {
+    authError = '';
+    authBusy = true;
+    try {
+      const op = authMode;
+      const body: Record<string, string> = { email: authEmail, password: authPassword };
+      if (authName) body.name = authName;
+      const res = await fetch(`/api/auth?op=${op}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        authError = data?.error ?? 'Error de autenticación';
+        return;
+      }
+      loggedIn = true;
+      authPassword = '';
+      syncMessage = 'Sincronizando…';
+      await initialSyncAfterLogin();
+      syncMessage = '✅ Sincronizado con la nube';
+    } catch (err: any) {
+      authError = err?.message ?? 'Error de red';
+    } finally {
+      authBusy = false;
+    }
+  }
+
+  async function handleLogout() {
+    await fetch('/api/auth?op=logout', { method: 'POST', credentials: 'same-origin' });
+    loggedIn = false;
+    authEmail = '';
+    resetSyncAfterLogout();
+    syncMessage = '';
+  }
+
+  async function handleManualSync() {
+    syncMessage = 'Sincronizando…';
+    try {
+      await syncNow(true);
+      syncMessage = '✅ Sincronizado';
+    } catch (err: any) {
+      syncMessage = '⚠️ ' + (err?.message ?? 'Error de sync');
+    }
+  }
+
+  // Cerrar con Esc y atrapar el foco dentro del panel
+  $effect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    panelEl?.focus();
+    return () => window.removeEventListener('keydown', handleKey);
+  });
+
+  function trapFocus(e: KeyboardEvent) {
+    if (e.key !== 'Tab' || !panelEl) return;
+    const focusables = panelEl.querySelectorAll<HTMLElement>(
+      'button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 
   // Drag and drop for categories
   const flipDurationMs = 300;
@@ -59,15 +156,48 @@
 
   async function saveSettings() {
     try {
-      await db.settings.put({ id: 'startHour', key: 'startHour', value: startHour });
-      await db.settings.put({ id: 'endHour', key: 'endHour', value: endHour });
-      
-      if (localCategories.length > 0) {
-        // Use bulkPut to update existing categories or add new ones
-        await db.categories.bulkPut($state.snapshot(localCategories));
+      const stampSet = Date.now();
+      await db.settings.put({ id: 'startHour', key: 'startHour', value: startHour, updatedAt: stampSet });
+      await db.settings.put({ id: 'endHour', key: 'endHour', value: endHour, updatedAt: stampSet });
+
+      const snapshot: Category[] = $state.snapshot(localCategories).map((c, i) => ({ ...c, order: i }));
+
+      // Borrado real: eliminar de la BD las categorías que ya no están en la lista
+      const keptIds = new Set(snapshot.map(c => c.id));
+      const existing = await db.categories.toArray();
+      const removed = existing.filter(c => !keptIds.has(c.id));
+
+      // Reasignar actividades (y overrides) que usaban categorías eliminadas
+      if (removed.length > 0) {
+        const removedIds = new Set(removed.map(c => c.id));
+        await db.transaction('rw', db.activities, db.categories, db.dayOverrides, async () => {
+          const acts = await db.activities.toArray();
+          const orphans = acts.filter(a => removedIds.has(a.categoryId));
+          if (orphans.length > 0) {
+            const stamp = Date.now();
+            await db.activities.bulkPut(orphans.map(a => ({ ...a, categoryId: 'rutina', updatedAt: stamp })));
+          }
+          const overrides = await db.dayOverrides.toArray();
+          const dirtyOverrides = overrides.filter(o => o.activities?.some(a => removedIds.has(a.categoryId)));
+          if (dirtyOverrides.length > 0) {
+            const stampOv = Date.now();
+            await db.dayOverrides.bulkPut(dirtyOverrides.map(o => ({
+              ...o,
+              activities: o.activities.map(a => removedIds.has(a.categoryId) ? { ...a, categoryId: 'rutina' } : a),
+              updatedAt: stampOv
+            })));
+          }
+          const stampCat = Date.now();
+          await db.categories.bulkPut(removed.map(c => ({ ...c, deletedAt: stampCat, updatedAt: stampCat })));
+        });
+        const names = removed.map(c => `"${c.label}"`).join(', ');
+        alert(`Se eliminaron las categorías ${names}. Sus actividades ahora pertenecen a "Rutina".`);
       }
-      
-      console.log('Settings and categories saved successfully');
+
+      if (snapshot.length > 0) {
+        await db.categories.bulkPut(snapshot);
+      }
+
       onClose();
     } catch (err: any) {
       console.error('Error saving settings:', err);
@@ -109,26 +239,68 @@
       a.href = url;
       a.download = `planificador-datos-${new Date().toISOString().split('T')[0]}.json`;
       a.click();
-      URL.revokeObjectURL(url);
+      // Revocar con delay: revocar inmediatamente puede cortar la descarga en algunos navegadores
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (err: any) {
       alert('Error al exportar: ' + err.message);
     }
   }
 
+  // Límite de tamaño razonable para un archivo de respaldo (~30 MB)
+  const MAX_IMPORT_SIZE = 30 * 1024 * 1024;
+
   async function handleImport(event: Event) {
     const input = event.target as HTMLInputElement;
+    input.value = ''; // permite re-seleccionar el mismo archivo si falló
     if (!input.files?.length) return;
-    
+
     const file = input.files[0];
+    if (file.size > MAX_IMPORT_SIZE) {
+      alert(`El archivo es demasiado grande (${(file.size / 1024 / 1024).toFixed(1)} MB). El límite es 30 MB.`);
+      return;
+    }
+
     const reader = new FileReader();
+    reader.onerror = () => {
+      alert('No se pudo leer el archivo. Verifica que exista y que tengas permisos sobre él.');
+    };
     reader.onload = async (e) => {
       try {
         const text = e.target?.result as string;
-        await importData(text);
-        alert('Datos importados con éxito. La aplicación se recargará para aplicar los cambios.');
+
+        // 1) Validar ANTES de tocar la base de datos
+        const validation = validateImport(text);
+        if (!validation.valid) {
+          alert('❌ No se pudo importar:\n\n' + validation.error);
+          return;
+        }
+
+        // 2) Confirmar con resumen + advertencias antes de reemplazar TODO
+        const { summary, warnings } = validation;
+        const s = summary;
+        const summaryLines = [
+          `• Actividades: ${s.activities}`,
+          `• Categorías: ${s.categories}`,
+          `• Ajustes: ${s.settings}`,
+          `• Ediciones temporales por día: ${s.dayOverrides}`
+        ].join('\n');
+        const warnBlock = warnings.length > 0
+          ? '\n\n⚠️ Advertencias:\n' + warnings.map(w => '• ' + w).join('\n')
+          : '';
+        const confirmed = confirm(
+          '¿Importar este archivo?\n\n' +
+          'REEMPLAZARÁ TODOS tus datos actuales por el contenido del archivo:\n\n' +
+          summaryLines + warnBlock +
+          '\n\nEsta acción no se puede deshacer. ¿Continuar?'
+        );
+        if (!confirmed) return;
+
+        // 3) Importar dentro de transacción atómica
+        await importValidatedData(validation);
+        alert('✅ Datos importados con éxito.');
         window.location.reload();
       } catch (err: any) {
-        alert('Error al importar: ' + err.message);
+        alert('Error al importar: ' + (err?.message || 'Error desconocido'));
       }
     };
     reader.readAsText(file);
@@ -136,13 +308,52 @@
 </script>
 
 <div class="modal-overlay" onclick={onClose}>
-  <div class="modal-content glass-panel" onclick={e => e.stopPropagation()}>
+  <div class="modal-content glass-panel" tabindex="-1" bind:this={panelEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
     <header class="modal-header">
       <h2>Configuración</h2>
       <button class="close-btn" onclick={onClose}><X size={20} /></button>
     </header>
 
     <div class="settings-sections">
+      <!-- ── Cuenta y respaldo en la nube ── -->
+      <section class="settings-section">
+        <h3><Cloud size={16} /> Cuenta y respaldo en la nube</h3>
+        {#if authLoading}
+          <p class="sync-hint">Comprobando sesión…</p>
+        {:else if loggedIn}
+          <div class="sync-status-row">
+            <span class="sync-dot sync-{syncStatus}" aria-hidden="true"></span>
+            <span class="sync-status-text">
+              {#if syncStatus === 'synced'}Sincronizado con la nube{:else if syncStatus === 'syncing'}Sincronizando…{:else if syncStatus === 'error'}Error de sincronización{:else if syncStatus === 'offline'}Sin conexión — cambios guardados localmente{:else}Solo local (sin respaldo en la nube){/if}
+            </span>
+            <button class="btn-sync-refresh" onclick={handleManualSync} title="Sincronizar ahora" disabled={syncStatus === 'syncing'}>
+              <RefreshCw size={14} />
+            </button>
+            <button class="btn-sync-logout" onclick={handleLogout} title="Cerrar sesión">
+              <LogOut size={14} /> Salir
+            </button>
+          </div>
+          {#if syncMessage}<p class="sync-hint">{syncMessage}</p>{/if}
+        {:else}
+          <p class="sync-hint">Crea una cuenta o inicia sesión para respaldar tus datos y sincronizarlos entre dispositivos. Todo sigue funcionando offline.</p>
+          <div class="auth-tabs">
+            <button class:active={authMode === 'login'} onclick={() => authMode = 'login'}>Iniciar sesión</button>
+            <button class:active={authMode === 'register'} onclick={() => authMode = 'register'}>Crear cuenta</button>
+          </div>
+          <div class="auth-form">
+            {#if authMode === 'register'}
+              <input type="text" placeholder="Nombre (opcional)" bind:value={authName} autocomplete="name" />
+            {/if}
+            <input type="email" placeholder="Email" bind:value={authEmail} autocomplete="email" />
+            <input type="password" placeholder="Contraseña (mín. 8 caracteres)" bind:value={authPassword} autocomplete={authMode === 'login' ? 'current-password' : 'new-password'} />
+            {#if authError}<p class="auth-error">{authError}</p>{/if}
+            <button class="btn btn-primary auth-submit" onclick={handleAuth} disabled={authBusy || !authEmail || !authPassword}>
+              {#if authMode === 'login'}<LogIn size={15} /> Entrar{:else}<UserPlus size={15} /> Crear cuenta{/if}
+            </button>
+          </div>
+        {/if}
+      </section>
+
       <section class="settings-section">
         <h3>Límites del Horario (Rango diario)</h3>
         <div class="range-selector">
@@ -227,7 +438,7 @@
               <input type="file" accept=".json" onchange={handleImport} hidden />
             </label>
           </div>
-          <p class="backup-info">Exporta tus actividades y categorías para respaldarlas o moverlas a otro navegador.</p>
+          <p class="backup-info">Exporta actividades, categorías, ediciones temporales e imágenes para respaldarlas o moverlas a otro navegador. Al importar se te pedirá confirmación y verás un resumen antes de reemplazar tus datos.</p>
         </div>
       </section>
     </div>
@@ -543,6 +754,151 @@
     margin: 0;
     line-height: 1.4;
     text-align: center;
+  }
+
+  /* ── Cuenta y sincronización ── */
+  .settings-section h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .sync-hint {
+    font-size: 0.78rem;
+    color: #666;
+    margin: 0;
+    line-height: 1.45;
+  }
+
+  .sync-status-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+
+  .sync-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .sync-dot.sync-synced { background: #2d5a27; box-shadow: 0 0 6px rgba(45, 90, 39, 0.5); }
+  .sync-dot.sync-syncing { background: #f59e0b; animation: pulse 1.2s infinite; }
+  .sync-dot.sync-error { background: #e53e3e; }
+  .sync-dot.sync-offline { background: #a0aec0; }
+  .sync-dot.sync-local { background: #a0aec0; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .sync-status-text {
+    flex: 1;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-main);
+    min-width: 0;
+  }
+
+  .btn-sync-refresh,
+  .btn-sync-logout {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-brown-bark, #5c4033);
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  .btn-sync-refresh:hover:not(:disabled) {
+    background: rgba(45, 90, 39, 0.08);
+    color: var(--color-green-dark, #2d5a27);
+  }
+
+  .btn-sync-refresh:disabled {
+    opacity: 0.5;
+    cursor: wait;
+  }
+
+  .btn-sync-logout:hover {
+    background: #fff5f5;
+    color: #e53e3e;
+  }
+
+  .auth-tabs {
+    display: flex;
+    background: rgba(0, 0, 0, 0.04);
+    border-radius: 10px;
+    padding: 3px;
+    gap: 2px;
+  }
+
+  .auth-tabs button {
+    flex: 1;
+    border: none;
+    background: transparent;
+    padding: 0.45rem 0.5rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #888;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .auth-tabs button.active {
+    background: white;
+    color: var(--color-green-dark, #2d5a27);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  }
+
+  .auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .auth-form input {
+    padding: 0.55rem 0.75rem;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    min-width: 0;
+  }
+
+  .auth-form input:focus {
+    outline: none;
+    border-color: rgba(45, 90, 39, 0.5);
+  }
+
+  .auth-error {
+    margin: 0;
+    font-size: 0.78rem;
+    color: #e53e3e;
+    font-weight: 600;
+  }
+
+  .auth-submit {
+    justify-content: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+  }
+
+  .auth-submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .category-edit-item input[type="text"] {

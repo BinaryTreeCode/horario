@@ -10,15 +10,37 @@
 
   let { activities, categories }: Props = $props();
 
-  // Helper to calculate total hours per category
+  // Helper to calculate total hours per category.
+  // Overlaps are NOT double-counted: intervals are merged per time slot and
+  // each merged slice is divided evenly among the categories covering it.
   function getStats(filterActivities: Activity[]) {
-    const stats: Record<string, number> = {};
+    // 1) Expand to concrete (start, end, category) intervals for one day
+    const intervals: { start: number; end: number; categoryId: string }[] = [];
     filterActivities.forEach((a: Activity) => {
-      const duration = parseTime(a.endTime) - parseTime(a.startTime);
-      const days = a.daysOfWeek.length;
-      const total = duration * (filterActivities === activities ? days : 1);
-      stats[a.categoryId] = (stats[a.categoryId] || 0) + total;
+      const s = parseTime(a.startTime);
+      const e = parseTime(a.endTime);
+      if (e <= s) return;
+      const occurrences = filterActivities === activities ? a.daysOfWeek.length : 1;
+      for (let i = 0; i < occurrences; i++) {
+        intervals.push({ start: s, end: e, categoryId: a.categoryId });
+      }
     });
+    if (intervals.length === 0) return [];
+
+    // 2) Collect breakpoints and compute per-slice coverage
+    const points = [...new Set(intervals.flatMap(iv => [iv.start, iv.end]))].sort((x, y) => x - y);
+    const stats: Record<string, number> = {};
+
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const covering = intervals.filter(iv => iv.start <= a && iv.end >= b);
+      if (covering.length === 0) continue;
+      const slice = (b - a) / covering.length; // el tramo se reparte entre las categorías activas
+      covering.forEach(iv => {
+        stats[iv.categoryId] = (stats[iv.categoryId] || 0) + slice;
+      });
+    }
 
     return categories
       .map((c: Category) => ({
