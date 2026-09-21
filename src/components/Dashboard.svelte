@@ -15,6 +15,8 @@
   import DonutCharts from './DonutCharts.svelte';
   import SettingsPanel from './SettingsPanel.svelte';
   import ActivityModal from './ActivityModal.svelte';
+  import Toasts from './Toasts.svelte';
+  import { toastErr } from '../lib/toast';
   import { Settings, Calendar, Clock, Plus, ChevronsUp, Cloud, CloudOff, RefreshCw } from 'lucide-svelte';
   import { onSyncChange, syncNow } from '../lib/sync';
   import type { SyncStatus } from '../lib/types';
@@ -123,7 +125,7 @@
       });
     } catch (err: any) {
       console.error('Failed to adjust activities:', err);
-      alert('Error al ajustar las actividades: ' + (err.message || err));
+      toastErr('Error al ajustar las actividades: ' + (err.message || err));
     }
   }
 </script>
@@ -133,20 +135,20 @@
   <header class="dashboard-header glass-panel">
     <div class="header-left">
       <div class="logo">🌲 Nature Planner</div>
-      <nav class="view-tabs">
-        <button class:active={currentView === 'week'} onclick={() => currentView = 'week'}>
+      <nav class="view-tabs" aria-label="Cambiar vista">
+        <button class:active={currentView === 'week'} onclick={() => currentView = 'week'} aria-label="Ver semana" aria-pressed={currentView === 'week'}>
           <Calendar size={18} /> Semana
         </button>
-        <button class:active={currentView === 'day'} onclick={() => currentView = 'day'}>
+        <button class:active={currentView === 'day'} onclick={() => currentView = 'day'} aria-label="Ver día" aria-pressed={currentView === 'day'}>
           <Clock size={18} /> Día
         </button>
       </nav>
     </div>
     <div class="header-right">
-      <button class="btn btn-secondary" onclick={coverGapsAbove} title="Ajustar todas las actividades para cubrir el espacio superior sobrante">
+      <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label="Ajustar todas las actividades para cubrir el espacio superior sobrante" title="Ajustar todas las actividades para cubrir el espacio superior sobrante">
         <ChevronsUp size={20} /> <span class="hide-mobile">Ajustar Arriba</span>
       </button>
-      <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)}>
+      <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label="Nueva Actividad">
         <Plus size={20} /> <span class="hide-mobile">Nueva Actividad</span>
       </button>
       {#if syncStatus !== 'local'}
@@ -162,11 +164,19 @@
           {:else}<CloudOff size={16} />{/if}
         </button>
       {/if}
-      <button class="btn btn-secondary btn-icon" onclick={() => showSettings = true}>
+      <button class="btn btn-secondary btn-icon" onclick={() => showSettings = true} aria-label="Abrir ajustes">
         <Settings size={20} />
       </button>
     </div>
   </header>
+
+  {#if syncStatus === 'error' || syncStatus === 'offline'}
+    <div class="sync-banner glass-panel" role="alert">
+      <CloudOff size={16} />
+      <span>{syncStatus === 'error' ? 'No se pudo sincronizar con la nube.' : 'Sin conexión: los cambios se guardan localmente.'}</span>
+      <button class="sync-retry" onclick={() => syncNow(true).catch(() => {})}>Reintentar</button>
+    </div>
+  {/if}
 
   <main class="dashboard-main">
     <div class="view-container">
@@ -223,6 +233,8 @@
       onClose={() => { showActivityModal = false; modalTargetDay = null; initialActivityData = null; }}
     />
   {/if}
+
+  <Toasts />
 </div>
 
 <style>
@@ -288,6 +300,36 @@
     gap: 0.75rem;
   }
 
+  /* Targets táctiles >= 42px en el header */
+  .header-right .btn {
+    min-height: 42px;
+  }
+
+  /* Banner de estado de sincronización */
+  .sync-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 1rem;
+    border-radius: 12px;
+    border: 1px solid rgba(224, 170, 68, 0.4);
+    background: rgba(255, 244, 224, 0.92);
+    color: #6b4d16;
+    font-size: 0.88rem;
+  }
+  .sync-banner span { flex: 1; }
+  .sync-retry {
+    border: none;
+    background: #2f6b3f;
+    color: #f2f8f2;
+    border-radius: 10px;
+    padding: 0.45rem 0.9rem;
+    min-height: 40px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .sync-retry:hover { filter: brightness(1.1); }
+
   .sync-badge {
     display: flex;
     align-items: center;
@@ -296,8 +338,8 @@
     border: 1px solid rgba(45, 90, 39, 0.25);
     color: var(--color-green-dark);
     border-radius: 50%;
-    width: 38px;
-    height: 38px;
+    width: 42px;
+    height: 42px;
     cursor: pointer;
     transition: all 0.2s;
   }
@@ -367,7 +409,9 @@
     .week-layout {
       grid-template-columns: 1fr;
     }
+    /* Donuts primero en pantallas angostas: resumen visible sin scroll largo */
     .stats-section {
+      order: -1;
       flex-direction: row;
       flex-wrap: wrap;
     }

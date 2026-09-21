@@ -5,6 +5,8 @@
   import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon } from 'lucide-svelte';
   import { db, newId } from '../lib/db.ts';
   import ImageLightbox from './ImageLightbox.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
+  import { toastOk, toastErr } from '../lib/toast';
 
   interface Props {
     day: number;
@@ -156,14 +158,22 @@
   }
 
   async function restoreDefaultTemplate() {
-    if (confirm('¿Restaurar la plantilla por defecto para este día? Se perderán los cambios temporales.')) {
-      await db.dayOverrides.delete(day);
-    }
+    if (!currentOverride) return;
+    confirmRestore = true;
+  }
+
+  async function doRestoreDefault() {
+    await db.dayOverrides.delete(day);
+    toastOk('Plantilla por defecto restaurada');
   }
 
   async function saveAsPermanentTemplate() {
     if (!currentOverride?.activities) return;
-    if (!confirm('¿Aplicar estos cambios temporales como la plantilla semanal permanente?')) return;
+    confirmSavePermanent = true;
+  }
+
+  async function doSavePermanent() {
+    if (!currentOverride?.activities) return;
 
     const overrideActs = currentOverride.activities;
 
@@ -189,7 +199,12 @@
 
     // Remove the override since it's now the master
     await db.dayOverrides.delete(day);
+    toastOk('Cambios aplicados como plantilla semanal');
   }
+
+  let confirmDelete = $state(false);
+  let confirmRestore = $state(false);
+  let confirmSavePermanent = $state(false);
 
   // Drag and Drop
   let draggedActivityId = $state<string | null>(null);
@@ -363,22 +378,32 @@
     closeContextMenu();
   }
 
-  async function deleteActivity() {
+  function askDeleteActivity() {
     if (!contextMenu.activityId) { closeContextMenu(); return; }
-    if (!confirm('¿Eliminar esta actividad?')) { closeContextMenu(); return; }
-
-    if (isTemporaryMode) {
-      const overrideActs = await ensureOverride();
-      const filtered = overrideActs.filter(a => a.id !== contextMenu.activityId);
-      await db.dayOverrides.put({
-        day,
-        activities: filtered,
-        updatedAt: Date.now()
-      });
-    } else {
-      await db.activities.delete(contextMenu.activityId);
-    }
+    confirmDelete = true;
     closeContextMenu();
+  }
+
+  async function deleteActivity() {
+    const id = contextMenu.activityId;
+    if (!id) return;
+
+    try {
+      if (isTemporaryMode) {
+        const overrideActs = await ensureOverride();
+        const filtered = overrideActs.filter(a => a.id !== id);
+        await db.dayOverrides.put({
+          day,
+          activities: filtered,
+          updatedAt: Date.now()
+        });
+      } else {
+        await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });
+      }
+      toastOk('Actividad eliminada');
+    } catch (err: any) {
+      toastErr('No se pudo eliminar: ' + (err?.message || err));
+    }
   }
 </script>
 
@@ -509,11 +534,35 @@
           <ImageIcon size={16} /> Ver imagen
         </button>
       {/if}
-      <button class="delete-btn" onclick={deleteActivity}>
+      <button class="delete-btn" onclick={askDeleteActivity}>
         <Trash2 size={16} /> Eliminar
       </button>
     </div>
   {/if}
+
+  <ConfirmDialog
+    bind:open={confirmDelete}
+    title="Eliminar actividad"
+    message="¿Eliminar esta actividad del día? Esta acción no se puede deshacer."
+    confirmText="Eliminar"
+    danger
+    on:confirm={deleteActivity}
+  />
+  <ConfirmDialog
+    bind:open={confirmRestore}
+    title="Restaurar plantilla"
+    message="¿Restaurar la plantilla por defecto para este día? Se perderán los cambios temporales."
+    confirmText="Restaurar"
+    danger
+    on:confirm={doRestoreDefault}
+  />
+  <ConfirmDialog
+    bind:open={confirmSavePermanent}
+    title="Aplicar como plantilla semanal"
+    message="¿Aplicar estos cambios temporales como la plantilla semanal permanente? Reemplazará las actividades de este día en toda la semana."
+    confirmText="Aplicar"
+    on:confirm={doSavePermanent}
+  />
 
   {#if viewingImageActivity}
     <ImageLightbox activity={viewingImageActivity} onClose={() => viewingImageActivity = null} />

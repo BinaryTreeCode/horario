@@ -147,11 +147,11 @@
     const file = input.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      alert('El archivo seleccionado no es una imagen.');
+      toastErr('El archivo seleccionado no es una imagen.');
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      alert('La imagen es muy grande (máximo 2 MB) para guardarla en la base de datos local.');
+      toastErr('La imagen es muy grande (máximo 2 MB) para guardarla en la base de datos local.');
       return;
     }
     const reader = new FileReader();
@@ -226,6 +226,7 @@
       completed: false
     }));
     steps = [...steps, ...newSteps];
+    toastOk('4 pasos sugeridos agregados');
   }
 
   const days = [
@@ -273,10 +274,13 @@
     }
   });
 
+  import ConfirmDialog from './ConfirmDialog.svelte';
+  import { toastOk, toastErr } from '../lib/toast';
+
   async function save() {
     try {
       if (!categoryId) {
-        alert('Por favor selecciona una categoría');
+        toastErr('Por favor selecciona una categoría');
         return;
       }
 
@@ -331,10 +335,11 @@
         }
       }
 
+      toastOk(id !== null ? 'Actividad actualizada ✓' : 'Actividad creada ✓');
       onClose();
     } catch (error: any) {
       console.error('Failed to save activity:', error);
-      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
+      toastErr('Error al guardar: ' + (error.message || 'Error desconocido'));
     }
   }
 
@@ -355,9 +360,12 @@
         // Borrado suave (tombstone) para que el sync lo propague a otros dispositivos
         await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });
       }
+      toastOk('Actividad eliminada');
       onClose();
     }
   }
+
+  let confirmRemove = $state(false);
 
   function toggleDay(index: number) {
     if (daysOfWeek.includes(index)) {
@@ -380,7 +388,7 @@
   <div class="modal-content glass-panel" tabindex="-1" bind:this={modalEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
     <header class="modal-header">
       <h2>{id !== null ? 'Editar' : 'Nueva'} Actividad</h2>
-      <button class="close-btn" onclick={onClose}><X size={20} /></button>
+      <button class="close-btn" onclick={onClose} aria-label="Cerrar sin guardar"><X size={20} /></button>
     </header>
 
     <form onsubmit={e => { e.preventDefault(); save(); }}>
@@ -406,8 +414,8 @@
       {/if}
 
       <div class="form-group">
-        <label>Categoría</label>
-        <select bind:value={categoryId} required>
+        <label for="act-category">Categoría</label>
+        <select id="act-category" bind:value={categoryId} required>
           {#each categories as cat}
             <option value={cat.id}>{cat.label}</option>
           {/each}
@@ -415,8 +423,8 @@
       </div>
 
       <div class="form-group">
-        <label>¿Qué vas a hacer?</label>
-        <input type="text" bind:value={name} placeholder="Ej. Rutina Matutina" required class="input-large" />
+        <label for="act-name">¿Qué vas a hacer?</label>
+        <input id="act-name" type="text" bind:value={name} placeholder="Ej. Rutina Matutina" required class="input-large" />
       </div>
 
       <!-- Sección de Imagen de la rutina -->
@@ -475,7 +483,7 @@
             <span>Pasos / Subtareas ({steps.length})</span>
           </div>
           {#if steps.length === 0}
-            <button type="button" class="preset-btn-sparkle" onclick={applyRoutinePresets}>
+            <button type="button" class="preset-btn-sparkle" onclick={applyRoutinePresets} aria-label="Sugerir pasos de rutina según la categoría">
               <Sparkles size={14} /> Sugerir rutina
             </button>
           {/if}
@@ -486,10 +494,11 @@
             type="text"
             bind:value={newStepInput}
             placeholder="Escribe un paso y presiona Enter..."
+            aria-label="Nuevo paso"
             class="step-input"
             onkeydown={e => { if (e.key === 'Enter') { e.preventDefault(); addStep(); } }}
           />
-          <button type="button" class="btn-add-step" onclick={addStep} title="Agregar paso">
+          <button type="button" class="btn-add-step" onclick={addStep} title="Agregar paso" aria-label="Agregar paso">
             <Plus size={18} /> Añadir
           </button>
         </div>
@@ -533,8 +542,8 @@
       <div class="time-controls-box">
         <div class="time-row-modern">
           <div class="time-picker-group">
-            <label>Desde</label>
-            <select bind:value={startTime} class="time-select-modern">
+            <label for="act-start">Desde</label>
+            <select id="act-start" bind:value={startTime} class="time-select-modern">
               {#each startTimeOptions as opt}
                 <option value={opt.value}>{opt.label}</option>
               {/each}
@@ -544,8 +553,8 @@
           <span class="to-separator">a</span>
 
           <div class="time-picker-group">
-            <label>Hasta</label>
-            <select bind:value={endTime} class="time-select-modern">
+            <label for="act-end">Hasta</label>
+            <select id="act-end" bind:value={endTime} class="time-select-modern">
               {#each endTimeOptions() as opt}
                 <option value={opt.value}>{opt.label}</option>
               {/each}
@@ -579,6 +588,8 @@
                 type="button"
                 class="day-toggle"
                 class:selected={daysOfWeek.includes(day.index)}
+                aria-pressed={daysOfWeek.includes(day.index)}
+                aria-label="{['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][day.index]}"
                 onclick={() => toggleDay(day.index)}
               >
                 {day.label}
@@ -594,7 +605,7 @@
 
       <footer class="modal-footer">
         {#if id !== null}
-          <button type="button" class="btn btn-danger" onclick={remove}>
+          <button type="button" class="btn btn-danger" onclick={() => confirmRemove = true}>
             <Trash2 size={18} /> Eliminar
           </button>
         {/if}
@@ -608,6 +619,15 @@
     </form>
   </div>
 </div>
+
+<ConfirmDialog
+  bind:open={confirmRemove}
+  title="Eliminar actividad"
+  message="¿Eliminar esta actividad? Esta acción no se puede deshacer."
+  confirmText="Eliminar"
+  danger
+  on:confirm={remove}
+/>
 
 {#if showImagePreview && previewActivity}
   <ImageLightbox activity={previewActivity} onClose={() => { showImagePreview = false; previewActivity = null; }} />
@@ -1232,6 +1252,17 @@
     border-top: 1px solid rgba(0,0,0,0.05);
     background: #fcfcfc;
     flex-shrink: 0;
+  }
+
+  /* Footer pegajoso en móviles: Cancelar/Guardar siempre visibles */
+  @media (max-width: 640px) {
+    .modal-footer {
+      position: sticky;
+      bottom: 0;
+      z-index: 10;
+      box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.08);
+      background: #ffffff;
+    }
   }
 
   .footer-right {

@@ -7,6 +7,9 @@
   import { X, Save, Plus, Trash2, Download, Upload, GripVertical } from 'lucide-svelte';
   import { dndzone } from 'svelte-dnd-action';
   import { flip } from 'svelte/animate';
+  import ConfirmDialog from './ConfirmDialog.svelte';
+  import { toastOk, toastErr } from '../lib/toast';
+  import Toasts from './Toasts.svelte';
 
   interface Props {
     settings: { startHour: number; endHour: number };
@@ -33,6 +36,11 @@
   let authError = $state('');
   let authBusy = $state(false);
   let syncMessage = $state('');
+
+  // Confirmaciones (diálogo propio) y datos del import pendiente
+  let confirmRestoreCats = $state(false);
+  let confirmImport = $state(false);
+  let pendingImport = $state<{ validation: ValidationResult; summary: string; warnings: string[] } | null>(null);
 
   $effect(() => {
     isLoggedIn().then(v => { loggedIn = v; authLoading = false; });
@@ -191,17 +199,18 @@
           await db.categories.bulkPut(removed.map(c => ({ ...c, deletedAt: stampCat, updatedAt: stampCat })));
         });
         const names = removed.map(c => `"${c.label}"`).join(', ');
-        alert(`Se eliminaron las categorías ${names}. Sus actividades ahora pertenecen a "Rutina".`);
+        toastOk(`Categorías eliminadas: ${names}. Sus actividades ahora pertenecen a "Rutina".`);
       }
 
       if (snapshot.length > 0) {
         await db.categories.bulkPut(snapshot);
       }
 
+      toastOk('Ajustes guardados ✓');
       onClose();
     } catch (err: any) {
       console.error('Error saving settings:', err);
-      alert('Error al guardar: ' + (err.message || 'Error desconocido'));
+      toastErr('Error al guardar: ' + (err.message || 'Error desconocido'));
     }
   }
 
@@ -223,11 +232,14 @@
     );
   }
 
-  async function restoreDefaults() {
-    if (confirm('¿Restablecer todas las categorías a las originales? (No se guardará hasta hacer clic en Guardar Todo)')) {
-      const { INITIAL_CATEGORIES } = await import('../lib/db.ts');
-      localCategories = [...INITIAL_CATEGORIES];
-    }
+  function restoreDefaults() {
+    confirmRestoreCats = true;
+  }
+
+  async function restoreDefaultsConfirm() {
+    const { INITIAL_CATEGORIES } = await import('../lib/db.ts');
+    localCategories = [...INITIAL_CATEGORIES];
+    toastOk('Categorías restablecidas — pulsa Guardar Todo para aplicar');
   }
 
   async function handleExport() {
@@ -242,7 +254,7 @@
       // Revocar con delay: revocar inmediatamente puede cortar la descarga en algunos navegadores
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (err: any) {
-      alert('Error al exportar: ' + err.message);
+      toastErr('Error al exportar: ' + err.message);
     }
   }
 
@@ -256,13 +268,13 @@
 
     const file = input.files[0];
     if (file.size > MAX_IMPORT_SIZE) {
-      alert(`El archivo es demasiado grande (${(file.size / 1024 / 1024).toFixed(1)} MB). El límite es 30 MB.`);
+      toastErr(`El archivo es demasiado grande (${(file.size / 1024 / 1024).toFixed(1)} MB). El límite es 30 MB.`);
       return;
     }
 
     const reader = new FileReader();
     reader.onerror = () => {
-      alert('No se pudo leer el archivo. Verifica que exista y que tengas permisos sobre él.');
+      toastErr('No se pudo leer el archivo. Verifica que exista y que tengas permisos sobre él.');
     };
     reader.onload = async (e) => {
       try {
@@ -271,39 +283,41 @@
         // 1) Validar ANTES de tocar la base de datos
         const validation = validateImport(text);
         if (!validation.valid) {
-          alert('❌ No se pudo importar:\n\n' + validation.error);
+          toastErr('No se pudo importar:\n' + validation.error);
           return;
         }
 
         // 2) Confirmar con resumen + advertencias antes de reemplazar TODO
         const { summary, warnings } = validation;
         const s = summary;
-        const summaryLines = [
-          `• Actividades: ${s.activities}`,
-          `• Categorías: ${s.categories}`,
-          `• Ajustes: ${s.settings}`,
-          `• Ediciones temporales por día: ${s.dayOverrides}`
-        ].join('\n');
-        const warnBlock = warnings.length > 0
-          ? '\n\n⚠️ Advertencias:\n' + warnings.map(w => '• ' + w).join('\n')
-          : '';
-        const confirmed = confirm(
-          '¿Importar este archivo?\n\n' +
-          'REEMPLAZARÁ TODOS tus datos actuales por el contenido del archivo:\n\n' +
-          summaryLines + warnBlock +
-          '\n\nEsta acción no se puede deshacer. ¿Continuar?'
-        );
-        if (!confirmed) return;
-
-        // 3) Importar dentro de transacción atómica
-        await importValidatedData(validation);
-        alert('✅ Datos importados con éxito.');
-        window.location.reload();
+        pendingImport = {
+          validation,
+          summary: [
+            `Actividades: ${s.activities}`,
+            `Categorías: ${s.categories}`,
+            `Ajustes: ${s.settings}`,
+            `Ediciones temporales por día: ${s.dayOverrides}`
+          ].join('\n'),
+          warnings: warnings.slice(0, 6)
+        };
+        confirmImport = true;
       } catch (err: any) {
-        alert('Error al importar: ' + (err?.message || 'Error desconocido'));
+        toastErr('Error al importar: ' + (err?.message || 'Error desconocido'));
       }
     };
     reader.readAsText(file);
+  }
+
+  async function doImport() {
+    if (!pendingImport) return;
+    try {
+      await importValidatedData(pendingImport.validation);
+      confirmImport = false;
+      toastOk('Datos importados con éxito ✓');
+      setTimeout(() => window.location.reload(), 600);
+    } catch (err: any) {
+      toastErr('Error al importar: ' + (err?.message || 'Error desconocido'));
+    }
   }
 </script>
 
@@ -311,7 +325,7 @@
   <div class="modal-content glass-panel" tabindex="-1" bind:this={panelEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
     <header class="modal-header">
       <h2>Configuración</h2>
-      <button class="close-btn" onclick={onClose}><X size={20} /></button>
+      <button class="close-btn" onclick={onClose} aria-label="Cerrar ajustes"><X size={20} /></button>
     </header>
 
     <div class="settings-sections">
@@ -359,8 +373,8 @@
         <div class="range-selector">
           <div class="range-inputs-horizontal">
             <div class="form-group-compact">
-              <label>Empieza a las:</label>
-              <select bind:value={startHour}>
+              <label for="set-start">Empieza a las:</label>
+              <select id="set-start" bind:value={startHour}>
                 {#each startOptions as opt}
                   <option value={opt.value}>{opt.label}</option>
                 {/each}
@@ -370,8 +384,8 @@
             <div class="to-text">a las</div>
 
             <div class="form-group-compact">
-              <label>Termina a las:</label>
-              <select bind:value={endHour}>
+              <label for="set-end">Termina a las:</label>
+              <select id="set-end" bind:value={endHour}>
                 {#each endOptions as opt}
                   <option value={opt.value}>{opt.label}</option>
                 {/each}
@@ -408,9 +422,9 @@
               <div class="grip-handle">
                 <GripVertical size={16} />
               </div>
-              <input type="color" value={cat.color} oninput={e => updateCategory(cat.id, 'color', e.currentTarget.value)} />
-              <input type="text" value={cat.label} oninput={e => updateCategory(cat.id, 'label', e.currentTarget.value)} />
-              <button class="remove-cat" onclick={() => removeCategory(cat.id)}>
+              <input type="color" value={cat.color} aria-label="Color de {cat.label}" oninput={e => updateCategory(cat.id, 'color', e.currentTarget.value)} />
+              <input type="text" value={cat.label} aria-label="Nombre de la categoría" oninput={e => updateCategory(cat.id, 'label', e.currentTarget.value)} />
+              <button class="remove-cat" onclick={() => removeCategory(cat.id)} aria-label="Quitar la categoría {cat.label}">
                 <Trash2 size={16} />
               </button>
             </div>
@@ -451,6 +465,28 @@
     </footer>
   </div>
 </div>
+
+<ConfirmDialog
+  bind:open={confirmRestoreCats}
+  title="Restablecer categorías"
+  message="¿Restablecer todas las categorías a las originales? Los cambios no se aplican hasta que pulses Guardar Todo."
+  confirmText="Restablecer"
+  on:confirm={() => restoreDefaultsConfirm()}
+/>
+
+<ConfirmDialog
+  bind:open={confirmImport}
+  title="¿Importar este archivo?"
+  message={pendingImport
+    ? `REEMPLAZARÁ TODOS tus datos actuales por el contenido del archivo:\n\n${pendingImport.summary}${pendingImport.warnings.length ? '\n\n⚠️ Advertencias:\n• ' + pendingImport.warnings.join('\n• ') : ''}\n\nEsta acción no se puede deshacer.`
+    : ''}
+  confirmText="Importar"
+  danger
+  on:confirm={doImport}
+  on:cancel={() => pendingImport = null}
+/>
+
+<Toasts />
 
 <style>
   .modal-overlay {
@@ -547,6 +583,7 @@
   .form-group-compact select {
     width: 100%;
     padding: 0.5rem;
+    min-height: 42px;
     font-size: 0.85rem;
   }
 
@@ -615,6 +652,7 @@
 
   input[type="text"], select {
     padding: 0.6rem;
+    min-height: 42px;
     border: 1px solid rgba(0,0,0,0.1);
     border-radius: 8px;
     background: white;

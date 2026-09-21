@@ -4,6 +4,8 @@
   import { db } from '../lib/db.ts';
   import { Copy, Trash2, ListChecks, ImageIcon } from 'lucide-svelte';
   import ImageLightbox from './ImageLightbox.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
+  import { toastOk } from '../lib/toast';
 
   interface Props {
     activities: Activity[];
@@ -23,7 +25,7 @@
   
   // 15-minute precision (4 slots per hour)
   const slotsPerHour = 4;
-  const slotHeightPx = 16;
+  const slotHeightPx = 26; // ≥26px/slot: bloques de 15min tocables (~44px los de 30min, 104px los de 1h)
   const totalSlots = $derived(totalHours * slotsPerHour);
 
   const hours = $derived(Array.from({ length: totalHours + 1 }, (_, i) => startHour + i));
@@ -223,19 +225,28 @@
     closeContextMenu();
   }
 
-  async function deleteActivity() {
-    if (contextMenu.activityId) {
-      if (confirm('¿Eliminar esta actividad?')) {
-        await db.activities.update(contextMenu.activityId, { deletedAt: Date.now(), updatedAt: Date.now() });
-        // Propagar el borrado a las ediciones temporales (dayOverrides) que la copiaron
-        const overrides = await db.dayOverrides.toArray();
-        const dirty = overrides
-          .filter(o => o.activities?.some(a => a.id === contextMenu.activityId))
-          .map(o => ({ ...o, activities: o.activities.filter(a => a.id !== contextMenu.activityId) }));
-        if (dirty.length > 0) await db.dayOverrides.bulkPut(dirty);
-      }
-    }
+  let confirmDelete = $state(false);
+
+  function askDeleteActivity() {
+    if (contextMenu.activityId) confirmDelete = true;
     closeContextMenu();
+  }
+
+  async function deleteActivity() {
+    const id = contextMenu.activityId;
+    if (!id) return;
+    try {
+      await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });
+      // Propagar el borrado a las ediciones temporales (dayOverrides) que la copiaron
+      const overrides = await db.dayOverrides.toArray();
+      const dirty = overrides
+        .filter(o => o.activities?.some(a => a.id === id))
+        .map(o => ({ ...o, activities: o.activities.filter(a => a.id !== id) }));
+      if (dirty.length > 0) await db.dayOverrides.bulkPut(dirty);
+      toastOk('Actividad eliminada');
+    } catch (err: any) {
+      console.error(err);
+    }
   }
 </script>
 
@@ -258,10 +269,11 @@
   </div>
 
   <div class="days-columns">
+    <div class="scroll-hint" aria-hidden="true">Deslizá para ver todos los días →</div>
     {#each days as day, i}
       {@const dayData = getDayActivitiesWithLayout(i)}
       <div class="day-column">
-        <button class="day-header" onclick={() => onSelectDay(i)}>
+        <button class="day-header" onclick={() => onSelectDay(i)} aria-label="Ver {day} en vista de día">
           <span class="day-name">{day}</span>
           {#if dayOverrides.some(o => o.day === i && o.activities?.length >= 0)}
             <span class="day-temp-badge" title="Tiene edición temporal activa en la vista diaria">⚡</span>
@@ -284,6 +296,7 @@
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
               style="grid-row: {rowStart} / {rowEnd}; grid-column: {activity.colStart} / span {activity.colSpan}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
               onclick={() => onEditActivity(activity.id!)}
+              aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{activity.steps?.length ? `, ${activity.steps.length} pasos` : ''}"
               title="{activity.name} • {format12h(activity.startTime)} - {format12h(activity.endTime)}"
             >
               <div class="activity-title">
@@ -315,7 +328,7 @@
 
   {#if contextMenu.show}
     <div class="custom-context-menu glass-panel" style="top: {contextMenu.y}px; left: {contextMenu.x}px">
-      <button onclick={duplicateActivity}>
+      <button onclick={duplicateActivity} aria-label="Duplicar actividad como bloque independiente">
         <Copy size={16} /> Duplicar (Independiente)
       </button>
       {#if viewingImageActivity === null && activityHasImage}
@@ -323,11 +336,20 @@
           <ImageIcon size={16} /> Ver imagen
         </button>
       {/if}
-      <button class="delete-btn" onclick={deleteActivity}>
+      <button class="delete-btn" onclick={askDeleteActivity}>
         <Trash2 size={16} /> Eliminar
       </button>
     </div>
   {/if}
+
+  <ConfirmDialog
+    bind:open={confirmDelete}
+    title="Eliminar actividad"
+    message="La actividad se eliminará de toda la semana (y de las ediciones temporales). Esta acción no se puede deshacer."
+    confirmText="Eliminar"
+    danger
+    on:confirm={deleteActivity}
+  />
 
   {#if viewingImageActivity}
     <ImageLightbox activity={viewingImageActivity} onClose={() => viewingImageActivity = null} />
@@ -413,7 +435,7 @@
   }
 
   .day-header {
-    height: 40px;
+    height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -478,7 +500,7 @@
     color: white;
     margin: 1px;
     border-radius: 4px;
-    padding: 2px 4px;
+    padding: 2px 5px;
     text-align: left;
     border: none;
     cursor: grab;
@@ -487,10 +509,17 @@
     opacity: 0.93;
     transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
     min-width: 0;
+    min-height: 24px;
     display: flex;
     flex-direction: column;
     justify-content: center;
     box-sizing: border-box;
+  }
+  .activity-item:hover,
+  .activity-item:focus-visible {
+    opacity: 1;
+    z-index: 5;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.25);
   }
 
   .activity-item:active {
@@ -525,7 +554,32 @@
   .activity-title span {
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+    white-space: normal;
+    word-break: break-word;
+    min-width: 0;
+  }
+
+  /* Hint de scroll horizontal solo en pantallas angostas */
+  .scroll-hint {
+    display: none;
+  }
+  @media (max-width: 768px) {
+    .scroll-hint {
+      display: block;
+      font-size: 0.75rem;
+      color: #6b7a6e;
+      padding: 2px 4px 6px;
+      text-align: center;
+      animation: hint-fade 5s ease forwards;
+    }
+  }
+  @keyframes hint-fade {
+    0%, 70% { opacity: 1; }
+    100% { opacity: 0.35; }
   }
 
   .grid-steps-icon {
