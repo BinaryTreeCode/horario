@@ -258,8 +258,8 @@
     }
   }
 
-  // Límite de tamaño razonable para un archivo de respaldo (~30 MB)
-  const MAX_IMPORT_SIZE = 30 * 1024 * 1024;
+  // Límite de tamaño razonable para un archivo de respaldo (~10 MB; las imágenes viven en la nube)
+  const MAX_IMPORT_SIZE = 10 * 1024 * 1024;
 
   async function handleImport(event: Event) {
     const input = event.target as HTMLInputElement;
@@ -268,7 +268,7 @@
 
     const file = input.files[0];
     if (file.size > MAX_IMPORT_SIZE) {
-      toastErr(`El archivo es demasiado grande (${(file.size / 1024 / 1024).toFixed(1)} MB). El límite es 30 MB.`);
+      toastErr(`El archivo es demasiado grande (${(file.size / 1024 / 1024).toFixed(1)} MB). El límite es ${MAX_IMPORT_SIZE / 1024 / 1024} MB.`);
       return;
     }
 
@@ -298,7 +298,10 @@
             `Ajustes: ${s.settings}`,
             `Ediciones temporales por día: ${s.dayOverrides}`
           ].join('\n'),
-          warnings: warnings.slice(0, 6)
+          warnings:
+            warnings.length > 6
+              ? [...warnings.slice(0, 6), `… y ${warnings.length - 6} advertencias más`]
+              : warnings
         };
         confirmImport = true;
       } catch (err: any) {
@@ -313,8 +316,19 @@
     try {
       await importValidatedData(pendingImport.validation);
       confirmImport = false;
-      toastOk('Datos importados con éxito ✓');
-      setTimeout(() => window.location.reload(), 600);
+
+      // Con sesión activa: push completo inmediato. Los registros importados suelen
+      // traer updatedAt antiguos (o 0) y no entrarían en el push incremental.
+      if (await isLoggedIn()) {
+        try {
+          await syncNow(true);
+          toastOk('Datos importados y sincronizados con la nube ✓');
+        } catch {
+          toastErr('Datos importados en este dispositivo. La subida a la nube falló — reintenta desde el banner de sincronización.');
+        }
+      } else {
+        toastOk('Datos importados con éxito ✓');
+      }
     } catch (err: any) {
       toastErr('Error al importar: ' + (err?.message || 'Error desconocido'));
     }
