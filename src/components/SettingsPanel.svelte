@@ -263,10 +263,9 @@
 
   async function handleImport(event: Event) {
     const input = event.target as HTMLInputElement;
-    input.value = ''; // permite re-seleccionar el mismo archivo si falló
-    if (!input.files?.length) return;
-
-    const file = input.files[0];
+    const file = input.files?.[0];
+    input.value = ''; // reset DESPUÉS de capturar el file (asignar value='' limpia input.files)
+    if (!file) return;
     if (file.size > MAX_IMPORT_SIZE) {
       toastErr(`El archivo es demasiado grande (${(file.size / 1024 / 1024).toFixed(1)} MB). El límite es ${MAX_IMPORT_SIZE / 1024 / 1024} MB.`);
       return;
@@ -463,7 +462,7 @@
             
             <label class="btn btn-secondary btn-backup import-label">
               <Upload size={18} /> Importar JSON
-              <input type="file" accept=".json" onchange={handleImport} hidden />
+              <input type="file" accept=".json,.txt,application/json,text/plain" onchange={handleImport} hidden />
             </label>
           </div>
           <p class="backup-info">Exporta actividades, categorías, ediciones temporales e imágenes para respaldarlas o moverlas a otro navegador. Al importar se te pedirá confirmación y verás un resumen antes de reemplazar tus datos.</p>

@@ -35,6 +35,16 @@ describe('validateImport', () => {
     expect(r.error).toContain('JSON');
   });
 
+  test('JSON con BOM de Windows (\uFEFF) → se importa normalmente', () => {
+    const r = validateImport('\uFEFF' + validFile());
+    expect(r.valid).toBe(true);
+    expect(r.summary.activities).toBe(1);
+  });
+
+  test('JSON con espacios/saltos alrededor → se importa normalmente', () => {
+    expect(validateImport('   ' + validFile() + '\n\n').valid).toBe(true);
+  });
+
   test('no-objeto (array o string) → error', () => {
     expect(validateImport('[]').valid).toBe(false);
     expect(validateImport('"hola"').valid).toBe(false);

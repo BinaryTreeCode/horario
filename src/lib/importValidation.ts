@@ -86,10 +86,12 @@ export function validateImport(jsonString: string): ValidationResult {
   const { summary, warnings, _activities, _categories, _settings, _dayOverrides } = result;
 
   let data: any;
+  // El Bloc de notas de Windows guarda UTF-8 con BOM (\uFEFF); JSON.parse lo rechaza.
+  const cleaned = jsonString.replace(/^\uFEFF/, '').trim();
   try {
-    data = JSON.parse(jsonString);
-  } catch {
-    result.error = 'El archivo no es un JSON válido. Verifica que no esté dañado o incompleto.';
+    data = JSON.parse(cleaned);
+  } catch (err: any) {
+    result.error = `El archivo no es un JSON válido${err?.message ? ` (${err.message})` : ''}. Verifica que no esté dañado o incompleto.`;
     return result;
   }
 
