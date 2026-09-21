@@ -270,11 +270,13 @@ export async function initDB() {
 export async function exportData(): Promise<string> {
   try {
     return await db.transaction('r', db.activities, db.categories, db.settings, db.dayOverrides, async () => {
+      // Excluye tombstones (deletedAt): el export es para migrar/respaldar datos vivos,
+      // no para replicar borrados que el sync ya propagó.
       const [activities, categories, settings, dayOverrides] = await Promise.all([
-        db.activities.toArray(),
-        db.categories.toArray(),
-        db.settings.toArray(),
-        db.dayOverrides.toArray()
+        db.activities.filter(a => !a.deletedAt).toArray(),
+        db.categories.filter(c => !c.deletedAt).toArray(),
+        db.settings.filter(s => !s.deletedAt).toArray(),
+        db.dayOverrides.filter(o => !o.deletedAt).toArray()
       ]);
       return JSON.stringify({
         app: 'nature-planner',

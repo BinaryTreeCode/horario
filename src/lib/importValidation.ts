@@ -259,19 +259,43 @@ export function validateImport(jsonString: string): ValidationResult {
       warnings.push(`Edición temporal del día ${o.day + 1}: lista de actividades inválida. Será ignorada.`);
       continue;
     }
+    if (o.activities.length === 0) {
+      warnings.push(`Edición temporal del día ${o.day + 1}: vacía. Será ignorada (no genera filas fantasma).`);
+      continue;
+    }
     const validOvActs: Activity[] = [];
     for (const [j, a] of o.activities.entries()) {
       if (isValidActivityData(a)) {
+        if (a?.image !== undefined && a.image !== null && !isValidImage(a.image)) {
+          warnings.push(`Edición temporal del día ${o.day + 1}: actividad #${j + 1} "${a.name}": imagen con formato no reconocido. Se guardará sin imagen.`);
+        }
         validOvActs.push({
           ...a,
           id: normalizeId(a.id, genId),
+          categoryId: typeof a.categoryId === 'string' && a.categoryId ? a.categoryId.slice(0, 64) : 'rutina',
           name: a.name.trim().slice(0, 255),
+          description: typeof a.description === 'string' ? a.description.slice(0, 2000) : undefined,
+          image: isValidImage(a.image) ? a.image : undefined,
+          daysOfWeek: [...new Set((a.daysOfWeek ?? []) as number[])].sort((x: number, y: number) => x - y),
+          steps: Array.isArray(a.steps)
+            ? a.steps
+                .filter((st: any) => typeof st?.title === 'string' && st.title.trim())
+                .map((st: any) => ({
+                  id: typeof st.id === 'string' && st.id ? st.id : genId(),
+                  title: st.title.trim(),
+                  completed: !!st.completed
+                }))
+            : undefined,
           updatedAt: normStamp(a.updatedAt),
           deletedAt: undefined
         });
         continue;
       }
       warnings.push(`Edición temporal del día ${o.day + 1}: actividad #${j + 1} inválida. Será ignorada.`);
+    }
+    if (validOvActs.length === 0) {
+      warnings.push(`Edición temporal del día ${o.day + 1}: todas sus actividades son inválidas. Será ignorada.`);
+      continue;
     }
     _dayOverrides.push({
       day: o.day,

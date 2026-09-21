@@ -196,15 +196,74 @@ describe('validateImport', () => {
     expect(r.warnings.join(' ')).toContain('día inválido');
   });
 
-  test('override con actividad inválida → warning específico', () => {
+  test('override vacío (activities: []) → ignorado, sin filas fantasma', () => {
     const r = validateImport(JSON.stringify({
       app: 'nature-planner',
-      version: 3,
+      version: 4,
+      dayOverrides: [
+        { day: 0, activities: [] },
+        { day: 1, activities: [{ ...okAct }] }
+      ]
+    }));
+    expect(r.valid).toBe(true);
+    expect(r.summary.dayOverrides).toBe(1);
+    expect(r._dayOverrides[0].day).toBe(1);
+    expect(r.warnings.join(' ')).toContain('vacía');
+  });
+
+  test('override cuyas actividades son todas inválidas → ignorado por completo', () => {
+    const r = validateImport(JSON.stringify({
+      app: 'nature-planner',
+      version: 4,
       dayOverrides: [{ day: 0, activities: [{ ...okAct, endTime: '08:00' }] }]
     }));
+    expect(r.summary.dayOverrides).toBe(0);
+    const w = r.warnings.join(' ');
+    expect(w).toContain('actividad #1 inválida');
+    expect(w).toContain('ignorada');
+  });
+
+  test('actividad de override normalizada con la misma whitelist', () => {
+    const r = validateImport(JSON.stringify({
+      app: 'nature-planner',
+      version: 4,
+      dayOverrides: [{
+        day: 3,
+        activities: [{
+          ...okAct,
+          id: 'x'.repeat(80),
+          name: '  Override largo  ',
+          description: 'd'.repeat(5000),
+          image: 'javascript:alert(1)',
+          steps: [{ title: 'Paso válido' }, 'basura', null],
+          categoryId: 'trabajar'
+        }]
+      }]
+    }));
     expect(r.summary.dayOverrides).toBe(1);
-    expect(r._dayOverrides[0].activities).toHaveLength(0);
-    expect(r.warnings.join(' ')).toContain('actividad #1 inválida');
+    const a = r._dayOverrides[0].activities[0];
+    expect(a.id.length).toBeLessThanOrEqual(64);
+    expect(a.name).toBe('Override largo');
+    expect(a.description!.length).toBeLessThanOrEqual(2000);
+    expect(a.image).toBeUndefined();
+    expect(a.steps).toHaveLength(1);
+    expect(a.steps![0].title).toBe('Paso válido');
+    expect(a.categoryId).toBe('trabajar');
+    expect(r.warnings.join(' ')).toContain('formato no reconocido');
+  });
+
+  test('id demasiado largo se trunca a 64 chars', () => {
+    const r = validateImport(validFile({ activities: [{ ...okAct, id: 'y'.repeat(200) }] }));
+    expect(r._activities[0].id.length).toBe(64);
+  });
+
+  test('updatedAt inválido (string/negativo) → normalizado a 0', () => {
+    const r = validateImport(validFile({
+      activities: [{ ...okAct, updatedAt: 'ayer' }],
+      categories: [{ id: 'trabajar', label: 'Trabajar', color: '#1a2a44', order: 0, updatedAt: -5 }]
+    }));
+    expect(r._activities[0].updatedAt).toBe(0);
+    expect(r._categories[0].updatedAt).toBe(0);
   });
 
   test('export v2 sin dayOverrides (legado) → válido, id numérico normalizado a string', () => {
