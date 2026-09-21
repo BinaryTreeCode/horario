@@ -206,31 +206,151 @@
   let confirmRestore = $state(false);
   let confirmSavePermanent = $state(false);
 
-  // Drag and Drop
+  // ── Drag & Drop con Pointer Events (mouse + táctil) ─────────────────────
+  // El DnD nativo de HTML5 no dispara en pantallas táctiles: se reimplementa
+  // con pointer events. Mouse: arrastra al superar 5px de movimiento.
+  // Táctil: long-press (260ms) para no pelear con el scroll vertical.
+  const DRAG_THRESHOLD_PX = 5;
+  const LONG_PRESS_MS = 260;
+
+  interface PendingDrag {
+    activityId: string;
+    offsetYHours: number;   // punto de agarre dentro de la tarjeta, en horas
+    startX: number;
+    startY: number;
+    pointerId: number;
+    pointerType: string;
+    card: HTMLElement;
+    started: boolean;
+    timer: number | null;
+    lastClientY: number;
+  }
+  let pendingDrag: PendingDrag | null = null;
+  let dragOffsetHours = 0;
   let draggedActivityId = $state<string | null>(null);
-  let dragOffsetPercent = $state(0);
+  let suppressNextClick = false;
 
-  function handleDragStart(e: DragEvent, activity: Activity) {
-    draggedActivityId = activity.id!;
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
-    const clickYPercent = ((e.clientY - rect.top) / rect.height) * (parseTime(activity.endTime) - parseTime(activity.startTime));
-    dragOffsetPercent = clickYPercent;
+  function handlePointerDown(e: PointerEvent, activity: Activity) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const card = e.currentTarget as HTMLElement;
+    if (!card.closest('.activities-track')) return;
 
-    if (e.dataTransfer) {
-      e.dataTransfer.setData('text/plain', activity.id!.toString());
-      e.dataTransfer.effectAllowed = 'move';
+    const cardRect = card.getBoundingClientRect();
+    const durH = parseTime(activity.endTime) - parseTime(activity.startTime);
+
+    pendingDrag = {
+      activityId: activity.id!,
+      offsetYHours: ((e.clientY - cardRect.top) / cardRect.height) * durH,
+      startX: e.clientX,
+      startY: e.clientY,
+      pointerId: e.pointerId,
+      pointerType: e.pointerType,
+      card,
+      started: false,
+      timer: null,
+      lastClientY: e.clientY
+    };
+
+    if (e.pointerType !== 'mouse') {
+      pendingDrag.timer = window.setTimeout(() => {
+        if (pendingDrag && !pendingDrag.started) activateDrag();
+      }, LONG_PRESS_MS);
+    }
+
+    window.addEventListener('pointermove', onDragPointerMove, { passive: false });
+    window.addEventListener('pointerup', onDragPointerUp);
+    window.addEventListener('pointercancel', onDragPointerCancel);
+  }
+
+  function activateDrag() {
+    if (!pendingDrag || pendingDrag.started) return;
+    pendingDrag.started = true;
+    dragOffsetHours = pendingDrag.offsetYHours;
+    draggedActivityId = pendingDrag.activityId;
+    try { pendingDrag.card.setPointerCapture(pendingDrag.pointerId); } catch { /* noop */ }
+    pendingDrag.card.classList.add('dragging');
+    if (pendingDrag.pointerType !== 'mouse') {
+      pendingDrag.card.style.touchAction = 'none';
+      window.addEventListener('contextmenu', preventDragContextMenu, true);
+    }
+    moveGhost(pendingDrag.lastClientY);
+  }
+
+  function preventDragContextMenu(e: Event) { e.preventDefault(); }
+
+  function moveGhost(clientY: number) {
+    if (!pendingDrag) return;
+    pendingDrag.card.style.transform = `translateY(${clientY - pendingDrag.startY}px)`;
+  }
+
+  function onDragPointerMove(e: PointerEvent) {
+    if (!pendingDrag) return;
+    pendingDrag.lastClientY = e.clientY;
+
+    if (!pendingDrag.started) {
+      const dist = Math.hypot(e.clientX - pendingDrag.startX, e.clientY - pendingDrag.startY);
+      if (pendingDrag.pointerType === 'mouse') {
+        if (dist > DRAG_THRESHOLD_PX) activateDrag();
+      } else if (dist > 10 && pendingDrag.timer) {
+        // Movimiento antes del long-press = gesto de scroll: cancelar drag
+        clearTimeout(pendingDrag.timer);
+        pendingDrag.timer = null;
+      }
+      if (!pendingDrag.started) return;
+    }
+
+    if (pendingDrag.pointerType !== 'mouse') e.preventDefault();
+    moveGhost(e.clientY);
+  }
+
+  async function onDragPointerUp(e: PointerEvent) {
+    const st = pendingDrag;
+    cleanupDragListeners();
+    if (!st) return;
+    if (st.timer) clearTimeout(st.timer);
+    st.card.classList.remove('dragging');
+    st.card.style.transform = '';
+    st.card.style.touchAction = '';
+    window.removeEventListener('contextmenu', preventDragContextMenu, true);
+    pendingDrag = null;
+
+    if (st.started) {
+      draggedActivityId = st.activityId;
+      suppressNextClick = true;
+      setTimeout(() => { suppressNextClick = false; }, 150);
+      await commitDropAt(e.clientY);
     }
   }
 
-  async function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    if (draggedActivityId === null) return;
+  function onDragPointerCancel() {
+    const st = pendingDrag;
+    cleanupDragListeners();
+    if (st) {
+      if (st.timer) clearTimeout(st.timer);
+      st.card.classList.remove('dragging');
+      st.card.style.transform = '';
+      st.card.style.touchAction = '';
+    }
+    window.removeEventListener('contextmenu', preventDragContextMenu, true);
+    pendingDrag = null;
+  }
 
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const y = e.clientY - rect.top;
+  function cleanupDragListeners() {
+    window.removeEventListener('pointermove', onDragPointerMove);
+    window.removeEventListener('pointerup', onDragPointerUp);
+    window.removeEventListener('pointercancel', onDragPointerCancel);
+  }
+
+  /** Aplica el drop en la posición final (clientY en px de viewport). */
+  async function commitDropAt(clientY: number) {
+    const track = document.querySelector('.activities-track');
+    if (!track || draggedActivityId === null) return;
+
+    const rect = track.getBoundingClientRect();
+    const y = clientY - rect.top;
     const yPercent = y / rect.height;
 
-    let newStartHour = startHour + (yPercent * totalHours) - dragOffsetPercent;
+    let newStartHour = startHour + (yPercent * totalHours) - dragOffsetHours;
 
     // Snap to 15 minutes
     newStartHour = Math.round(newStartHour * 4) / 4;
@@ -461,11 +581,7 @@
       {/each}
     </div>
 
-    <div
-      class="activities-track"
-      ondragover={handleDragOver}
-      ondrop={handleDrop}
-    >
+    <div class="activities-track">
       {#each layoutActivities as activity (activity.id)}
         {@const totalSteps = activity.steps?.length || 0}
         {@const doneSteps = activity.steps?.filter(s => s.completed).length || 0}
@@ -474,11 +590,10 @@
           class:is-short={activity.durationMins <= 20}
           role="button"
           tabindex="0"
-          draggable="true"
-          aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{totalSteps ? `, ${doneSteps} de ${totalSteps} pasos` : ''}. Abrir para editar"
-          ondragstart={(e) => handleDragStart(e, activity)}
+          aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{totalSteps ? `, ${doneSteps} de ${totalSteps} pasos` : ''}. Arrastrar para mover, abrir para editar"
+          onpointerdown={(e) => handlePointerDown(e, activity)}
           oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
-          onclick={() => onEditActivity(activity.id!)}
+          onclick={() => { if (suppressNextClick) return; onEditActivity(activity.id!); }}
           onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onEditActivity(activity.id!); }}
           style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; border-left-color: {getActivityColor(activity.categoryId, categories)}"
         >
@@ -753,9 +868,21 @@
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     cursor: grab;
+    touch-action: pan-y; /* scroll vertical nativo; el drag (long-press) lo desactiva */
+    -webkit-user-select: none;
+    user-select: none; /* sin selección de texto que interfiera con el drag */
   }
 
   .daily-activity-card:active {
+    cursor: grabbing;
+  }
+
+  /* Estado de arrastre activo (pointer drag) */
+  .daily-activity-card.dragging {
+    transition: none; /* sin lag: la tarjeta sigue el dedo/cursor 1:1 */
+    opacity: 0.85;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+    z-index: 100;
     cursor: grabbing;
   }
 
