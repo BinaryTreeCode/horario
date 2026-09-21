@@ -1,7 +1,13 @@
 <script lang="ts">
-  import { Pie, Group, Chart, Svg } from 'layerchart';
   import type { Activity, Category } from '../lib/types.js';
-  import { parseTime, getActivityColor } from '../lib/stores.js';
+  import { parseTime } from '../lib/stores.js';
+
+  // Donut SVG propio (~2 KB) en lugar de layerchart (~120 KB gzip):
+  // misma estetica (innerRadius 50, porciones con separacion, overlay de horas).
+  const SIZE = 200;
+  const CENTER = SIZE / 2;
+  const R_MID = 75;    // radio medio del anillo
+  const THICK = 25;    // grosor: interior 62.5, exterior 87.5 (equivale a innerRadius 50)
 
   interface Props {
     activities: Activity[];
@@ -52,6 +58,40 @@
       .filter((s: any) => s.value > 0);
   }
 
+  // Segmentos del anillo: paths de arco (exterior + interior) proporcionales al valor.
+  function ringSegments(stats: { value: number; color: string; key: string }[]) {
+    const total = stats.reduce((acc, s) => acc + s.value, 0);
+    if (total <= 0) return [];
+    const out: { d: string; color: string; key: string }[] = [];
+    let angle = -Math.PI / 2; // empieza a las 12
+    const gap = stats.length > 1 ? 0.035 : 0; // rad de separacion entre porciones
+    const rOut = R_MID + THICK / 2;
+    const rIn = R_MID - THICK / 2;
+    for (const s of stats) {
+      const sweep = (s.value / total) * 2 * Math.PI;
+      const a0 = angle + gap / 2;
+      const a1 = angle + sweep - gap / 2;
+      if (a1 > a0) {
+        const x0 = CENTER + rOut * Math.cos(a0), y0 = CENTER + rOut * Math.sin(a0);
+        const x1 = CENTER + rOut * Math.cos(a1), y1 = CENTER + rOut * Math.sin(a1);
+        const xi1 = CENTER + rIn * Math.cos(a1), yi1 = CENTER + rIn * Math.sin(a1);
+        const xi0 = CENTER + rIn * Math.cos(a0), yi0 = CENTER + rIn * Math.sin(a0);
+        const large = a1 - a0 > Math.PI ? 1 : 0;
+        out.push({
+          d: 'M ' + x0 + ' ' + y0
+            + ' A ' + rOut + ' ' + rOut + ' 0 ' + large + ' 1 ' + x1 + ' ' + y1
+            + ' L ' + xi1 + ' ' + yi1
+            + ' A ' + rIn + ' ' + rIn + ' 0 ' + large + ' 0 ' + xi0 + ' ' + yi0
+            + ' Z',
+          color: s.color,
+          key: s.key
+        });
+      }
+      angle += sweep;
+    }
+    return out;
+  }
+
   const dayStats = $derived(getStats(activities.filter((a: Activity) => a.daysOfWeek.includes(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1))));
   const weekStats = $derived(getStats(activities));
 </script>
@@ -60,18 +100,11 @@
   <div class="stat-card glass-panel">
     <h3>Horas Hoy</h3>
     <div class="chart-wrapper">
-      <Chart
-        data={dayStats}
-        x="value"
-        c="key"
-        cRange={dayStats.map((s: any) => s.color)}
-      >
-        <Svg>
-          <Group center>
-            <Pie innerRadius={50} cornerRadius={4} />
-          </Group>
-        </Svg>
-      </Chart>
+      <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label="Distribución de horas de hoy por categoría">
+        {#each ringSegments(dayStats) as seg (seg.key)}
+          <path d={seg.d} fill={seg.color} />
+        {/each}
+      </svg>
       <div class="chart-overlay">
         <span>{dayStats.reduce((acc: number, s: any) => acc + s.value, 0).toFixed(1)}h</span>
       </div>
@@ -90,18 +123,11 @@
   <div class="stat-card glass-panel">
     <h3>Horas Semana</h3>
     <div class="chart-wrapper">
-      <Chart
-        data={weekStats}
-        x="value"
-        c="key"
-        cRange={weekStats.map((s: any) => s.color)}
-      >
-        <Svg>
-          <Group center>
-            <Pie innerRadius={50} cornerRadius={4} />
-          </Group>
-        </Svg>
-      </Chart>
+      <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label="Distribución de horas de la semana por categoría">
+        {#each ringSegments(weekStats) as seg (seg.key)}
+          <path d={seg.d} fill={seg.color} />
+        {/each}
+      </svg>
       <div class="chart-overlay">
         <span>{weekStats.reduce((acc: number, s: any) => acc + s.value, 0).toFixed(1)}h</span>
       </div>
@@ -144,6 +170,12 @@
     width: 200px;
     height: 200px;
     position: relative;
+  }
+
+  .chart-wrapper svg {
+    width: 100%;
+    height: 100%;
+    display: block;
   }
 
   .chart-overlay {
