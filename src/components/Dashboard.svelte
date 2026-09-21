@@ -300,6 +300,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 1rem 1.5rem;
+    padding-top: calc(1rem + env(safe-area-inset-top, 0px));
   }
 
   .header-left {
@@ -325,7 +326,8 @@
   .view-tabs button {
     background: transparent;
     border: none;
-    padding: 0.5rem 1rem;
+    padding: 0.6rem 1rem;
+    min-height: 44px;
     border-radius: 8px;
     display: flex;
     align-items: center;
@@ -468,9 +470,8 @@
     .week-layout {
       grid-template-columns: 1fr;
     }
-    /* Donuts primero en pantallas angostas: resumen visible sin scroll largo */
+    /* El horario es lo primario en móvil: los donuts van después, no antes */
     .stats-section {
-      order: -1;
       flex-direction: row;
       flex-wrap: wrap;
     }

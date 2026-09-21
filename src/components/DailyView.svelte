@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types.ts';
-  import { parseTime, getActivityColor, formatTime } from '../lib/stores.ts';
+  import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores.ts';
   import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon } from '@lucide/svelte';
   import { db, newId } from '../lib/db.ts';
   import ImageLightbox from './ImageLightbox.svelte';
@@ -475,6 +475,7 @@
           role="button"
           tabindex="0"
           draggable="true"
+          aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{totalSteps ? `, ${doneSteps} de ${totalSteps} pasos` : ''}. Abrir para editar"
           ondragstart={(e) => handleDragStart(e, activity)}
           oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
           onclick={() => onEditActivity(activity.id!)}
@@ -489,6 +490,7 @@
                   type="button"
                   class="activity-image-thumb"
                   title="Ver imagen de la rutina"
+                  aria-label="Ver imagen de {activity.name}"
                   onclick={(e) => { e.stopPropagation(); viewingImageActivity = activity; }}
                 >
                   <img src={activity.image} alt="" />
@@ -503,6 +505,7 @@
             <button
               class="edit-btn"
               onclick={(e) => { e.stopPropagation(); onEditActivity(activity.id!); }}
+              aria-label="Editar {activity.name}"
               title="Editar actividad y ver pasos"
             >
               <Edit3 size={13} />
@@ -622,7 +625,8 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    padding: 0.4rem 0.85rem;
+    padding: 0.6rem 1rem;
+    min-height: 44px;
     border: none;
     border-radius: 8px;
     background: transparent;
@@ -672,7 +676,8 @@
     display: flex;
     align-items: center;
     gap: 0.3rem;
-    padding: 0.3rem 0.65rem;
+    padding: 0.55rem 0.9rem;
+    min-height: 44px;
     border: none;
     border-radius: 6px;
     font-size: 0.75rem;
@@ -763,6 +768,7 @@
   }
 
   .daily-activity-card.is-short {
+    min-height: 28px;
     padding: 0.1rem 0.6rem;
     border-left-width: 4px;
     border-radius: 6px;
@@ -861,6 +867,11 @@
     color: #bbb;
     cursor: pointer;
     padding: 0.35rem;
+    min-width: 32px;
+    min-height: 32px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
     opacity: 0;
     transition: all 0.2s;
     border-radius: 6px;

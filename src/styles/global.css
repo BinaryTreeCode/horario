@@ -50,12 +50,19 @@ h1, h2, h3, h4 {
 
 .btn {
   padding: 0.5rem 1rem;
+  min-height: 44px;
   border-radius: 8px;
   border: none;
   cursor: pointer;
   background: var(--color-green-dark);
   color: white;
   transition: all 0.2s;
+}
+
+/* Foco visible para navegación por teclado en toda la app */
+:focus-visible {
+  outline: 2px solid var(--color-green-dark, #2d5a27);
+  outline-offset: 2px;
 }
 
 .btn:hover {

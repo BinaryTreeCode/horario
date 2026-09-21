@@ -551,6 +551,11 @@
     border: none;
     color: #999;
     cursor: pointer;
+    min-width: 44px;
+    min-height: 44px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
   }
 
   .settings-sections {
@@ -688,7 +693,8 @@
   }
 
   .btn-small {
-    padding: 0.25rem 0.5rem;
+    padding: 0.5rem 0.85rem;
+    min-height: 44px;
     font-size: 0.8rem;
     display: flex;
     align-items: center;
@@ -734,6 +740,11 @@
     color: #cc0000;
     cursor: pointer;
     opacity: 0.6;
+    min-width: 40px;
+    min-height: 40px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
   }
 
   .remove-cat:hover {
@@ -899,7 +910,8 @@
     flex: 1;
     border: none;
     background: transparent;
-    padding: 0.45rem 0.5rem;
+    padding: 0.6rem 0.5rem;
+    min-height: 44px;
     border-radius: 8px;
     font-size: 0.8rem;
     font-weight: 600;
