@@ -313,7 +313,11 @@
   async function doImport() {
     if (!pendingImport) return;
     try {
-      await importValidatedData(pendingImport.validation);
+      // $state envuelve pendingImport en Proxies profundos; IndexedDB usa
+      // structured clone y DataCloneError con Proxies. snapshot() clona a
+      // objetos planos antes de tocar Dexie.
+      const validation = $state.snapshot(pendingImport.validation);
+      await importValidatedData(validation);
       confirmImport = false;
 
       // Con sesión activa: push completo inmediato. Los registros importados suelen

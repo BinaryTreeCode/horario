@@ -299,10 +299,14 @@ export async function importValidatedData(result: ValidationResult): Promise<voi
     throw new Error('Los datos no fueron validados: llama a validateImport() primero.');
   }
 
-  // Asignar updatedAt a registros importados que no lo traigan (formatos antiguos)
+  // TODO registro importado recibe updatedAt = ahora:
+  // 1) Los de formatos antiguos no traían timestamp y quedarían invisibles para
+  //    el push incremental (updatedAt > lastPushAt).
+  // 2) Con sesión activa, un timestamp viejo pierde siempre el LWW contra la nube
+  //    y el siguiente pull DESHACE la importación en silencio.
   const stamp = Date.now();
   const patch = <T extends { updatedAt?: number }>(rows: T[]): T[] =>
-    rows.map(r => (typeof r.updatedAt === 'number' && r.updatedAt > 0 ? r : { ...r, updatedAt: stamp }));
+    rows.map(r => ({ ...r, updatedAt: stamp }));
 
   await db.transaction('rw', db.activities, db.categories, db.settings, db.dayOverrides, db.syncState, async () => {
     await db.activities.clear();
