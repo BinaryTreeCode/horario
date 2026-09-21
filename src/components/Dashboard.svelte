@@ -180,7 +180,7 @@
       </nav>
     </div>
     <div class="header-right">
-      <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label="Ajustar todas las actividades para cubrir el espacio superior sobrante" title="Ajustar todas las actividades para cubrir el espacio superior sobrante">
+      <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label="Ajustar Arriba" title="Ajusta todas las actividades para cubrir el espacio superior sobrante">
         <ChevronsUp size={20} /> <span class="hide-mobile">Ajustar Arriba</span>
       </button>
       <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label="Nueva Actividad">

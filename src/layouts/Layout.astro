@@ -15,9 +15,13 @@ const { title } = Astro.props;
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<meta name="generator" content={Astro.generator} />
+		<meta name="description" content="Planificador de horarios offline-first: organiza tu semana con bloques de actividad, categorías, imágenes y respaldo en la nube. Funciona en celular y computadora." />
+		<meta name="theme-color" content="#2d4a22" />
 		<link rel="preconnect" href="https://fonts.googleapis.com">
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+		<!-- Carga no bloqueante: media=print + onload evita render-blocking (Lighthouse −400ms) -->
+		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+		<noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet"></noscript>
 		<title>{title}</title>
 	</head>
 	<body>
