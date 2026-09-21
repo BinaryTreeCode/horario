@@ -46,3 +46,87 @@ Todos los comandos se ejecutan desde la raíz del proyecto:
 
 ---
 *Diseñado para una experiencia de usuario fluida y un desarrollo de alto rendimiento.*
+
+## 🗄️ Esquema relacional de la base de datos (Neon Postgres)
+<arg_value><b88a6f17>El backend de sincronización usa **PostgreSQL (Neon)** con **Drizzle ORM** — definido en `src/server/schema.ts`. Todas las tablas de datos del planificador se replican **por usuario** y siguen el mismo patrón de sync:
+
+- **`updated_at`** (ms epoch) → resolución de conflictos *Last-Writer-Wins* entre dispositivos.
+- **`deleted_at`** (tombstone) → los borrados se propagan como marcas blandas; las filas nunca se eliminan físicamente (excepto al borrar el usuario, que hace `CASCADE`).
+
+```mermaid
+erDiagram
+    users ||--o{ sessions : "tiene"
+    users ||--o{ categories : "posee"
+    users ||--o{ activities : "posee"
+    users ||--o{ user_settings : "posee"
+    users ||--o{ day_overrides : "posee"
+    categories ||--o{ activities : "agrupa (category_id, lógico)"
+
+    users {
+        uuid id PK
+        varchar email UK
+        varchar name
+        text password_hash "scrypt: salt:hash"
+        timestamp created_at
+    }
+    sessions {
+        uuid id PK
+        uuid user_id FK
+        varchar token_hash UK "sha256 del token de cookie"
+        timestamp expires_at
+        timestamp created_at
+    }
+    categories {
+        uuid user_id FK
+        varchar id "PK compuesta (user_id, id)"
+        varchar label
+        varchar color
+        integer order
+        bigint updated_at
+        bigint deleted_at
+    }
+    activities {
+        uuid user_id FK
+        varchar id "PK compuesta (user_id, id)"
+        varchar category_id "lógico → categories.id"
+        varchar name
+        text description
+        text image "data URL o Vercel Blob"
+        varchar start_time "HH:mm"
+        varchar end_time "HH:mm"
+        integer days_of_week "int[] 0–6"
+        jsonb steps
+        bigint updated_at
+        bigint deleted_at
+    }
+    user_settings {
+        uuid user_id FK
+        varchar id "PK compuesta (user_id, id)"
+        varchar key
+        jsonb value
+        bigint updated_at
+        bigint deleted_at
+    }
+    day_overrides {
+        uuid user_id FK
+        integer day "PK compuesta (user_id, day)"
+        jsonb activities
+        bigint updated_at
+        bigint deleted_at
+    }
+```
+
+### Detalles por tabla
+
+| Tabla | Clave primaria / única | Propósito |
+|---|---|---|
+| `users` | `id` (uuid, PK) · `email` (unique) | Cuentas con contraseña (scrypt). |
+| `sessions` | `id` (uuid, PK) · `token_hash` (unique) | Sesiones de 30 días; el token plano vive solo en la cookie httpOnly, en BD se guarda su hash SHA-256. Borrado en cascada con el usuario. |
+| `categories` | `(user_id, id)` unique | Categorías del planificador con color y orden. |
+| `activities` | `(user_id, id)` unique | Actividades de la plantilla semanal: horario `HH:mm`, días de la semana (`int[]`), pasos (`jsonb`) e imagen (data URL offline o URL de Vercel Blob). `category_id` es una relación **lógica** (la integridad se mantiene a nivel de aplicación, el sync reasigna huérfanas). |
+| `user_settings` | `(user_id, id)` unique | Ajustes por usuario (`key`/`value` jsonb, p. ej. `startHour`/`endHour`). |
+| `day_overrides` | `(user_id, day)` unique | Ediciones temporales de un día concreto (⚡) que reemplazan la plantilla semanal. |
+
+### Espejo local (offline-first)
+
+La app funciona **local-first**: Dexie/IndexedDB (schema v4) replica estas mismas entidades en el navegador (`activities`, `categories`, `settings`, `dayOverrides`) con los mismos campos `updatedAt`/`deletedAt`, y el motor de sync (`src/lib/sync.ts`) empuja/jala cambios incrementales contra `POST /api/sync`. Sin sesión activa, todo funciona 100% offline.
