@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types.ts';
   import { parseTime, getActivityColor, formatTime } from '../lib/stores.ts';
-  import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon } from 'lucide-svelte';
+  import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon } from '@lucide/svelte';
   import { db, newId } from '../lib/db.ts';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -546,7 +546,7 @@
     message="¿Eliminar esta actividad del día? Esta acción no se puede deshacer."
     confirmText="Eliminar"
     danger
-    on:confirm={deleteActivity}
+    onconfirm={deleteActivity}
   />
   <ConfirmDialog
     bind:open={confirmRestore}
@@ -554,14 +554,14 @@
     message="¿Restaurar la plantilla por defecto para este día? Se perderán los cambios temporales."
     confirmText="Restaurar"
     danger
-    on:confirm={doRestoreDefault}
+    onconfirm={doRestoreDefault}
   />
   <ConfirmDialog
     bind:open={confirmSavePermanent}
     title="Aplicar como plantilla semanal"
     message="¿Aplicar estos cambios temporales como la plantilla semanal permanente? Reemplazará las actividades de este día en toda la semana."
     confirmText="Aplicar"
-    on:confirm={doSavePermanent}
+    onconfirm={doSavePermanent}
   />
 
   {#if viewingImageActivity}

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { db, newId } from '../lib/db.ts';
   import type { Activity, Category, ActivityStep } from '../lib/types.ts';
-  import { X, Trash2, CheckCircle, Plus, CheckSquare, Square, ListChecks, Sparkles, Zap, Calendar, ImageIcon, Link2 } from 'lucide-svelte';
+  import { X, Trash2, CheckCircle, Plus, CheckSquare, Square, ListChecks, Sparkles, Zap, Calendar, ImageIcon, Link2 } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
 
   interface Props {
@@ -626,7 +626,7 @@
   message="¿Eliminar esta actividad? Esta acción no se puede deshacer."
   confirmText="Eliminar"
   danger
-  on:confirm={remove}
+  onconfirm={remove}
 />
 
 {#if showImagePreview && previewActivity}

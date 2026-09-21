@@ -2,7 +2,7 @@
   import type { Activity, Category, DayOverride } from '../lib/types.ts';
   import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores.ts';
   import { db } from '../lib/db.ts';
-  import { Copy, Trash2, ListChecks, ImageIcon } from 'lucide-svelte';
+  import { Copy, Trash2, ListChecks, ImageIcon } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk } from '../lib/toast';
@@ -348,7 +348,7 @@
     message="La actividad se eliminará de toda la semana (y de las ediciones temporales). Esta acción no se puede deshacer."
     confirmText="Eliminar"
     danger
-    on:confirm={deleteActivity}
+    onconfirm={deleteActivity}
   />
 
   {#if viewingImageActivity}

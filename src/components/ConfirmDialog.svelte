@@ -1,19 +1,23 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  // Runes puros: evita arrastrar el runtime legacy de Svelte al bundle (~37 KB gzip).
+  interface Props {
+    open?: boolean;
+    title?: string;
+    message?: string;
+    confirmText?: string;
+    cancelText?: string;
+    /** true → botón de confirmación rojo (acciones destructivas) */
+    danger?: boolean;
+    onconfirm?: () => void;
+    oncancel?: () => void;
+  }
 
-  export let open = false;
-  export let title = '¿Confirmar?';
-  export let message = '';
-  export let confirmText = 'Confirmar';
-  export let cancelText = 'Cancelar';
-  /** true → botón de confirmación rojo (acciones destructivas) */
-  export let danger = false;
-
-  const dispatch = createEventDispatcher<{ confirm: void; cancel: void }>();
+  let { open = $bindable(false), title = '¿Confirmar?', message = '', confirmText = 'Confirmar', cancelText = 'Cancelar', danger = false, onconfirm, oncancel }: Props = $props();
 
   function close(confirmed: boolean) {
     open = false;
-    dispatch(confirmed ? 'confirm' : 'cancel');
+    if (confirmed) onconfirm?.();
+    else oncancel?.();
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -23,23 +27,23 @@
   }
 </script>
 
-<svelte:window on:keydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} />
 
 {#if open}
   <div
     class="confirm-overlay"
     role="presentation"
-    on:click|self={() => close(false)}
+    onclick={(e) => e.target === e.currentTarget && close(false)}
   >
     <div class="confirm-box glass-panel" role="alertdialog" aria-modal="true" aria-label={title}>
       <h3>{title}</h3>
       <p>{message}</p>
       <div class="confirm-actions">
-        <button class="btn-confirm-cancel" on:click={() => close(false)}>{cancelText}</button>
+        <button class="btn-confirm-cancel" onclick={() => close(false)}>{cancelText}</button>
         <button
           class="btn-confirm-ok"
           class:danger
-          on:click={() => close(true)}
+          onclick={() => close(true)}
         >{confirmText}</button>
       </div>
     </div>

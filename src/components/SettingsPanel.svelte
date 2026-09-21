@@ -2,9 +2,9 @@
   import { db, exportData, validateImport, importValidatedData, type ValidationResult } from '../lib/db.ts';
   import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange } from '../lib/sync';
   import type { SyncStatus } from '../lib/types';
-  import { Cloud, CloudUpload, LogIn, LogOut, RefreshCw, UserPlus } from 'lucide-svelte';
+  import { Cloud, CloudUpload, LogIn, LogOut, RefreshCw, UserPlus } from '@lucide/svelte';
   import type { Category } from '../lib/types.ts';
-  import { X, Save, Plus, Trash2, Download, Upload, GripVertical } from 'lucide-svelte';
+  import { X, Save, Plus, Trash2, Download, Upload, GripVertical } from '@lucide/svelte';
   import { dndzone } from 'svelte-dnd-action';
   import { flip } from 'svelte/animate';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -485,7 +485,7 @@
   title="Restablecer categorías"
   message="¿Restablecer todas las categorías a las originales? Los cambios no se aplican hasta que pulses Guardar Todo."
   confirmText="Restablecer"
-  on:confirm={() => restoreDefaultsConfirm()}
+  onconfirm={() => restoreDefaultsConfirm()}
 />
 
 <ConfirmDialog
@@ -496,8 +496,8 @@
     : ''}
   confirmText="Importar"
   danger
-  on:confirm={doImport}
-  on:cancel={() => pendingImport = null}
+  onconfirm={doImport}
+  oncancel={() => pendingImport = null}
 />
 
 <Toasts />

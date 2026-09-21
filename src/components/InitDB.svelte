@@ -1,3 +1,4 @@
+<svelte:options runes={true} />
 <script>
   import { initDB } from "../lib/db";
   
