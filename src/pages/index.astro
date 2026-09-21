@@ -2,6 +2,10 @@
 import Layout from '../layouts/Layout.astro';
 import Dashboard from '../components/Dashboard.svelte';
 import InitDB from '../components/InitDB.svelte';
+
+// HTML estático en CDN: la página no depende de datos del servidor
+// (los datos viven en IndexedDB del cliente). Las API routes siguen en SSR.
+export const prerender = true;
 ---
 
 <Layout title="Nature Schedule Planner">

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, ListChecks, ChevronDown, ChevronUp } from 'lucide-svelte';
+  import { X, ListChecks, ChevronDown, ChevronUp } from '@lucide/svelte';
   import type { Activity } from '../lib/types.ts';
 
   interface Props {

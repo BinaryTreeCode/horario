@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { db } from '../lib/db.ts';
+    import { db } from '../lib/db.ts';
   import type { Activity } from '../lib/types.ts';
   import { 
     activitiesStore, 
@@ -13,11 +12,10 @@
   import WeeklyGrid from './WeeklyGrid.svelte';
   import DailyView from './DailyView.svelte';
   import DonutCharts from './DonutCharts.svelte';
-  import SettingsPanel from './SettingsPanel.svelte';
-  import ActivityModal from './ActivityModal.svelte';
+
   import Toasts from './Toasts.svelte';
   import { toastErr } from '../lib/toast';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, Cloud, CloudOff, RefreshCw } from 'lucide-svelte';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
   import { onSyncChange, syncNow } from '../lib/sync';
   import type { SyncStatus } from '../lib/types';
 
@@ -30,9 +28,45 @@
     return off;
   });
   let selectedDay = $state(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1); // 0 = Mon, 6 = Sun
+
+  // Precarga de modales cuando el navegador queda idle
+  $effect(() => {
+    preloadModals();
+  });
   
   let showSettings = $state(false);
   let showActivityModal = $state(false);
+
+  // Code-splitting: los modales solo bajan del bundle cuando se abren por
+  // primera vez (−40 KB del camino crítico). Tras el idle se precargan.
+  let SettingsPanelComp: typeof import('./SettingsPanel.svelte').default | null = $state(null);
+  let ActivityModalComp: typeof import('./ActivityModal.svelte').default | null = $state(null);
+
+  let loadPromiseSettings: Promise<void> | null = $state(null);
+  let loadPromiseActivity: Promise<void> | null = $state(null);
+
+  function loadSettingsPanel() {
+    loadPromiseSettings ??= (async () => {
+      SettingsPanelComp = (await import('./SettingsPanel.svelte')).default;
+    })();
+    return loadPromiseSettings;
+  }
+  function loadActivityModal() {
+    loadPromiseActivity ??= (async () => {
+      ActivityModalComp = (await import('./ActivityModal.svelte')).default;
+    })();
+    return loadPromiseActivity;
+  }
+  function openSettings() {
+    showSettings = true;
+    loadSettingsPanel();
+  }
+  function preloadModals() {
+    ('requestIdleCallback' in window ? requestIdleCallback : (cb: () => void) => setTimeout(cb, 2000))(() => {
+      loadSettingsPanel();
+      loadActivityModal();
+    });
+  }
   let editingActivityId = $state<string | null>(null);
   let modalTargetDay = $state<number | null>(null);
   let initialActivityData = $state<Activity | null>(null);
@@ -41,6 +75,7 @@
   const settingsObj = $derived($settingsStore?.length ? $settingsStore.reduce((acc: any, s: any) => ({ ...acc, [s.key]: s.value }), { startHour: 7, endHour: 23 }) : { startHour: 7, endHour: 23 });
 
   function openActivityModal(id: string | null = null, day: number | null = null, initialData: Activity | null = null) {
+    loadActivityModal();
     editingActivityId = id;
     modalTargetDay = day !== null ? day : (currentView === 'day' ? selectedDay : null);
     initialActivityData = initialData;
@@ -164,7 +199,7 @@
           {:else}<CloudOff size={16} />{/if}
         </button>
       {/if}
-      <button class="btn btn-secondary btn-icon" onclick={() => showSettings = true} aria-label="Abrir ajustes">
+      <button class="btn btn-secondary btn-icon" onclick={openSettings} aria-label="Abrir ajustes">
         <Settings size={20} />
       </button>
     </div>
@@ -216,22 +251,34 @@
 
   <!-- Modals -->
   {#if showSettings}
-    <SettingsPanel 
-      settings={settingsObj} 
-      categories={$categoriesStore || []}
-      onClose={() => showSettings = false} 
-    />
+    {#await loadPromiseSettings ?? Promise.resolve()}
+      <div class="modal-loading" role="status">Cargando ajustes…</div>
+    {:then}
+      {#if SettingsPanelComp}
+        <SettingsPanelComp
+          settings={settingsObj}
+          categories={$categoriesStore || []}
+          onClose={() => showSettings = false}
+        />
+      {/if}
+    {/await}
   {/if}
 
   {#if showActivityModal}
-    <ActivityModal 
-      id={editingActivityId}
-      targetDay={modalTargetDay}
-      initialData={initialActivityData}
-      categories={$categoriesStore || []}
-      settings={settingsObj}
-      onClose={() => { showActivityModal = false; modalTargetDay = null; initialActivityData = null; }}
-    />
+    {#await loadPromiseActivity ?? Promise.resolve()}
+      <div class="modal-loading" role="status">Cargando…</div>
+    {:then}
+      {#if ActivityModalComp}
+        <ActivityModalComp
+          id={editingActivityId}
+          targetDay={modalTargetDay}
+          initialData={initialActivityData}
+          categories={$categoriesStore || []}
+          settings={settingsObj}
+          onClose={() => { showActivityModal = false; modalTargetDay = null; initialActivityData = null; }}
+        />
+      {/if}
+    {/await}
   {/if}
 
   <Toasts />
@@ -306,6 +353,18 @@
   }
 
   /* Banner de estado de sincronización */
+  .modal-loading {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    z-index: 2000;
+    color: var(--color-green-dark, #2f6b3f);
+    font-size: 0.95rem;
+    background: rgba(240, 246, 240, 0.6);
+    backdrop-filter: blur(2px);
+  }
+
   .sync-banner {
     display: flex;
     align-items: center;
