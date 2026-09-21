@@ -130,3 +130,17 @@ erDiagram
 ### Espejo local (offline-first)
 
 La app funciona **local-first**: Dexie/IndexedDB (schema v4) replica estas mismas entidades en el navegador (`activities`, `categories`, `settings`, `dayOverrides`) con los mismos campos `updatedAt`/`deletedAt`, y el motor de sync (`src/lib/sync.ts`) empuja/jala cambios incrementales contra `POST /api/sync`. Sin sesión activa, todo funciona 100% offline.
+
+### 💾 Importación y exportación JSON
+
+**Exportar** (Ajustes → Respaldos): descarga `planificador-datos-YYYY-MM-DD.json` con actividades, categorías, ajustes y ediciones temporales vivas. Los registros eliminados (tombstones) **no se incluyen** — el export es para migrar/respaldar datos, no para replicar borrados que el sync ya propagó.
+
+**Importar**: el archivo pasa por un validador puro (`src/lib/importValidation.ts`) **antes** de tocar la base de datos:
+
+- Chequeo de `app`, `version` (soporta v2 legacy con IDs numéricos → UUID) y presencia de datos.
+- Whitelist de campos por registro: nombres truncados (255), descripciones (2000), horas `HH:MM` válidas con fin > inicio, días 0–6 deduplicados, imágenes solo `data:image/` o `https://`, colores hex, pasos con título.
+- Actividades con categoría inexistente → reasignadas a "Rutina" (con advertencia).
+- Ediciones temporales vacías o totalmente inválidas → ignoradas (no generan filas fantasma que el sync replicaría).
+- Todo problema se reporta como advertencia con el detalle; nada se descarta en silencio.
+
+Antes de reemplazar los datos se muestra un **resumen + advertencias** con confirmación explícita. Con sesión activa, tras importar se fuerza un **sync completo** para subir los registros importados a la nube (sus `updatedAt` suelen ser antiguos y no entrarían en el push incremental). Límite de tamaño: 10 MB.
