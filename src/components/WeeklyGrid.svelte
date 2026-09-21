@@ -291,6 +291,7 @@
             {@const numSlots = activity.numSlots}
             <button 
               class="activity-item" 
+              class:short={numSlots <= 1}
               draggable="true"
               ondragstart={(e) => handleDragStart(e, activity, i)}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
@@ -561,6 +562,18 @@
     white-space: normal;
     word-break: break-word;
     min-width: 0;
+  }
+
+  /* Bloques de 15 min (1 slot): una sola línea con ellipsis — 2 líneas
+     no caben en la altura del bloque y el texto se recorta. */
+  .activity-item.short .activity-title {
+    font-size: 0.68rem;
+  }
+  .activity-item.short .activity-title span {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    white-space: nowrap;
+    display: block;
   }
 
   /* Hint de scroll horizontal solo en pantallas angostas */
