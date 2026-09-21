@@ -32,7 +32,10 @@
   let modalEl: HTMLElement | undefined = $state();
 
   // Scope: 'day' writes to dayOverrides, 'week' writes to db.activities
-  let saveScope = $state<'day' | 'week'>(targetDay !== null ? 'day' : 'week');
+  let saveScope = $state<'day' | 'week'>('week');
+  $effect(() => {
+    saveScope = targetDay !== null ? 'day' : 'week';
+  });
 
   // Derived category color for preview
   const activeCategory = $derived(categories.find(c => c.id === categoryId));
@@ -47,7 +50,7 @@
   }
 
   // Duration in minutes
-  const durationMinutes = $derived(() => {
+  const durationMinutes = $derived.by(() => {
     const [sh, sm] = startTime.split(':').map(Number);
     const [eh, em] = endTime.split(':').map(Number);
     const diff = (eh * 60 + em) - (sh * 60 + sm);
@@ -562,7 +565,7 @@
         </div>
 
         <div class="duration-hint">
-          Duración total: <strong>{durationMinutes() >= 60 ? `${Math.floor(durationMinutes()/60)}h ${durationMinutes()%60}m` : `${durationMinutes()}m`}</strong>
+          Duración total: <strong>{durationMinutes >= 60 ? `${Math.floor(durationMinutes/60)}h ${durationMinutes%60}m` : `${durationMinutes}m`}</strong>
         </div>
       </div>
 

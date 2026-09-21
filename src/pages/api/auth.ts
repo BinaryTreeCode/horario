@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { eq } from 'drizzle-orm';
-import { db } from '../../server/db';
+import { db, isDbConfigured } from '../../server/db';
 import { users } from '../../server/schema';
 import { hashPassword, verifyPassword, createSession, destroySession, getSessionUser, sessionCookieOptions, SESSION_COOKIE } from '../../server/auth';
 
@@ -30,6 +30,9 @@ async function readJson(request: Request): Promise<any> {
 }
 
 export const POST: APIRoute = async ({ url, cookies, request }) => {
+  if (!isDbConfigured) {
+    return json({ error: 'La base de datos en la nube no está configurada. La aplicación funciona en modo local.' }, 503);
+  }
   const op = url.searchParams.get('op');
 
   try {

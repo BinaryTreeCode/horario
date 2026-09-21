@@ -1,24 +1,23 @@
 import { defineConfig } from 'astro/config';
 import svelte from '@astrojs/svelte';
+import vercel from '@astrojs/vercel';
 
-// Solo usamos base '/horario' al hacer build de producción (GitHub Pages)
-// En dev, se sirve en localhost:4321 para no romper los datos locales (IndexedDB/localStorage)
-const isProd = process.env.NODE_ENV === 'production';
-
-// https://astro.build/config
+// Deploy en Vercel: adapter serverless + base '/'.
+// (El antiguo base '/horario' era para GitHub Pages y se retiró al migrar a Vercel.)
 export default defineConfig({
-  site: 'https://binarytreecode.github.io',
-  base: isProd ? '/horario' : '/',
+  output: 'server',
+  adapter: vercel(),
   integrations: [svelte()],
   devToolbar: {
     enabled: false
   },
   vite: {
     build: {
-      // Optimizaciones adicionales para asegurar un build ultrarrápido
       target: 'esnext',
       cssMinify: 'lightningcss'
+    },
+    optimizeDeps: {
+      include: ['dexie', 'lucide-svelte', 'svelte-dnd-action', 'layerchart']
     }
   }
 });
-
