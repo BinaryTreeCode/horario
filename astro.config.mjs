@@ -17,7 +17,7 @@ export default defineConfig({
       cssMinify: 'lightningcss'
     },
     optimizeDeps: {
-      include: ['dexie', 'lucide-svelte', 'svelte-dnd-action', 'layerchart']
+      include: ['dexie', '@lucide/svelte', 'svelte-dnd-action']
     }
   }
 });

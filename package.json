@@ -21,10 +21,9 @@
     "astro": "^6.0.6",
     "dexie": "^4.3.0",
     "drizzle-orm": "^0.45.2",
-    "layerchart": "^1.0.13",
-    "lucide-svelte": "^0.577.0",
     "svelte": "^5.54.0",
-    "svelte-dnd-action": "^0.9.69"
+    "svelte-dnd-action": "^0.9.69",
+    "@lucide/svelte": "latest"
   },
   "devDependencies": {
     "@astrojs/vercel": "^10",
