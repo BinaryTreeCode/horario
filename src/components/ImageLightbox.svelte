@@ -128,7 +128,7 @@
   .lightbox-topbar h3 {
     margin: 0;
     font-size: 1.1rem;
-    font-family: 'Outfit', sans-serif;
+    font-family: var(--font-heading);
     color: #ffffff;
     text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
     white-space: nowrap;

@@ -195,6 +195,8 @@
     gap: 0.5rem;
     padding-top: 1rem;
     border-top: 1px solid rgba(0,0,0,0.05);
+    /* Reserva 2 filas: los datos llegan async y sin esto la 2da tarjeta salta (CLS) */
+    min-height: 3.4rem;
   }
 
   .legend-item {

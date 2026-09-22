@@ -1,6 +1,6 @@
 :root {
-  --font-heading: 'Outfit', -apple-system, system-ui, sans-serif;
-  --font-body: 'Inter', -apple-system, system-ui, sans-serif;
+  --font-heading: 'Outfit-var', 'Outfit-fallback', 'Outfit', -apple-system, system-ui, sans-serif;
+  --font-body: 'Inter-var', 'Inter-fallback', 'Inter', -apple-system, system-ui, sans-serif;
 
   /* Forest & Furry Palette */
   --color-green-dark: #2d5a27;
