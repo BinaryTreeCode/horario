@@ -42,36 +42,50 @@
     rowStart: number;
     rowEnd: number;
     numSlots: number;
-    colStart: number;
-    colSpan: number;
+    top: string;
+    height: string;
+    left: string;
+    width: string;
   }
 
-  // Filter, calculate precise row slots and resolve overlaps per day
-  function getDayActivitiesWithLayout(dayIndex: number) {
+  // Filter, calculate precise row slots and resolve overlaps per day.
+  // Layout absoluto (top/height en %) en vez de grid-row: permite animar la
+  // cascada con transition CSS (grid-row no es animable). Los tracks son los
+  // mismos clusters de solape de antes.
+  function getDayActivitiesWithLayout(dayIndex: number, preview?: Map<string, { start: number; end: number }>, excludeId?: string | null) {
     const dayActs = activities
       .filter((a: Activity) => a.daysOfWeek.includes(dayIndex))
       .map(a => {
-        const rowStart = getRowPosition(a.startTime);
-        const rowEnd = Math.max(rowStart + 1, getRowPosition(a.endTime));
+        const p = preview?.get(a.id!);
         return {
           ...a,
-          rowStart,
-          rowEnd,
-          numSlots: rowEnd - rowStart,
-          _start: parseTime(a.startTime),
-          _end: parseTime(a.endTime)
+          _start: p ? p.start : parseTime(a.startTime),
+          _end: p ? p.end : parseTime(a.endTime)
         };
       })
       .sort((a, b) => a._start - b._start || (b._end - b._start) - (a._end - a._start));
 
     if (dayActs.length === 0) return { items: [] as LayoutActivity[], maxCols: 1 };
 
+    // En pleno drag la tarjeta arrastrada NO participa en clusters/tracks:
+    // es un fantasma (sigue al cursor); excluirla evita que una vecina que
+    // ocupa su hueco la parta en columnas angostas.
+    const layoutable = excludeId ? dayActs.filter(a => a.id !== excludeId) : dayActs;
+    if (layoutable.length === 0) {
+      // Solo el fantasma: se dibuja a ancho completo en su slot de BD.
+      const d = dayActs.find(a => a.id === excludeId)!;
+      return {
+        items: [ghostItem(d)],
+        maxCols: 1
+      };
+    }
+
     // Group into clusters of overlapping activities
-    const clusters: (typeof dayActs)[] = [];
-    let currentCluster: typeof dayActs = [];
+    const clusters: (typeof layoutable)[] = [];
+    let currentCluster: typeof layoutable = [];
     let clusterEnd = -1;
 
-    for (const act of dayActs) {
+    for (const act of layoutable) {
       if (currentCluster.length === 0 || act._start < clusterEnd - 0.0001) {
         currentCluster.push(act);
         clusterEnd = Math.max(clusterEnd, act._end);
@@ -86,7 +100,7 @@
     }
 
     let overallMaxCols = 1;
-    const preliminaryItems: { act: typeof dayActs[0]; track: number; clusterCols: number }[] = [];
+    const preliminaryItems: { act: typeof layoutable[0]; track: number; clusterCols: number }[] = [];
 
     for (const cluster of clusters) {
       const tracks: number[] = [];
@@ -114,19 +128,115 @@
       }
     }
 
-    const resultItems: LayoutActivity[] = preliminaryItems.map(item => ({
-      ...item.act,
-      colStart: item.track + 1,
-      colSpan: item.clusterCols === 1 ? overallMaxCols : 1
-    }));
+    const resultItems: LayoutActivity[] = preliminaryItems.map(item => {
+      const s = item.act._start;
+      const e = item.act._end;
+      const topPct = ((s - startHour) / totalHours) * 100;
+      const heightPct = ((e - s) / totalHours) * 100;
+      const widthPct = 100 / overallMaxCols;
+      const leftPct = item.track * widthPct;
+      return {
+        ...item.act,
+        rowStart: getRowPosition(item.act.startTime),
+        rowEnd: Math.max(getRowPosition(item.act.startTime) + 1, getRowPosition(item.act.endTime)),
+        numSlots: Math.max(1, Math.round((e - s) * slotsPerHour)),
+        top: `${topPct}%`,
+        height: `calc(${heightPct}% - 3px)`,
+        left: `${overallMaxCols > 1 ? leftPct : 0}%`,
+        width: overallMaxCols > 1 ? `calc(${widthPct}% - 3px)` : '100%'
+      };
+    });
+
+    // El fantasma se reinserta a ancho completo, en su slot de BD (el cursor lo transporta).
+    if (excludeId) {
+      const d = dayActs.find(a => a.id === excludeId);
+      if (d) resultItems.push(ghostItem(d));
+    }
 
     return { items: resultItems, maxCols: overallMaxCols };
+  }
+
+  function ghostItem(d: any): LayoutActivity {
+    const s = parseTime(d.startTime);
+    const e = parseTime(d.endTime);
+    const topPct = ((s - startHour) / totalHours) * 100;
+    const heightPct = ((e - s) / totalHours) * 100;
+    return {
+      ...d,
+      rowStart: getRowPosition(d.startTime),
+      rowEnd: Math.max(getRowPosition(d.startTime) + 1, getRowPosition(d.endTime)),
+      numSlots: Math.max(1, Math.round((e - s) * slotsPerHour)),
+      top: `${topPct}%`,
+      height: `calc(${heightPct}% - 3px)`,
+      left: '0%',
+      width: '100%'
+    };
   }
 
   // Drag and Drop handlers
   let draggedActivityId = $state<string | null>(null);
   let dragSourceDay = $state<number | null>(null);
   let dragOffset = $state(0);
+
+  /**
+   * Vista previa del drop (igual que la vista Día): id → {start, end} en
+   * horas, calculada en dragover SIN tocar la BD. Las actividades del día
+   * destino se deslizan en vivo vía transition CSS hacia su posición
+   * predicha. null = sin drag activo.
+   */
+  let dropPreview = $state<{ day: number; slots: Map<string, { start: number; end: number }> } | null>(null);
+
+  /**
+   * Resolución de colisiones (cascada push-down) para un slot destino dentro
+   * de un día. Misma matemática que aplicará handleDrop → lo que se ve es lo
+   * que se guarda. NO toca la BD.
+   */
+  function computeWeekLayoutForDrop(dayIndex: number, actId: string, newStartHour: number): Map<string, { start: number; end: number }> {
+    const result = new Map<string, { start: number; end: number }>();
+    const activity = activities.find(a => a.id === actId);
+    if (!activity) return result;
+
+    const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
+    newStartHour = Math.max(startHour, Math.min(newStartHour, endHour - duration));
+    let newEndHour = newStartHour + duration;
+
+    const siblings = activities
+      .filter(a => a.daysOfWeek.includes(dayIndex) && a.id !== actId)
+      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }))
+      .sort((a, b) => a.start - b.start);
+
+    const dragged = { id: actId, start: newStartHour, end: newEndHour };
+    const all = [...siblings, dragged].sort((a, b) => a.start - b.start);
+
+    for (let i = 1; i < all.length; i++) {
+      const prev = all[i - 1];
+      const cur = all[i];
+      if (cur.start < prev.end) {
+        const shift = prev.end - cur.start;
+        cur.start += shift;
+        cur.end += shift;
+      }
+    }
+    for (let i = all.length - 1; i >= 0; i--) {
+      const cur = all[i];
+      const dur = cur.end - cur.start;
+      if (cur.end > endHour) {
+        cur.end = endHour;
+        cur.start = endHour - dur;
+      }
+      if (i > 0) {
+        const prev = all[i - 1];
+        if (prev.end > cur.start) {
+          const origAct = activities.find(a => a.id === prev.id);
+          const prevDur = origAct ? parseTime(origAct.endTime) - parseTime(origAct.startTime) : prev.end - prev.start;
+          prev.end = cur.start;
+          prev.start = cur.start - prevDur;
+        }
+      }
+    }
+    for (const slot of all) result.set(slot.id, { start: slot.start, end: slot.end });
+    return result;
+  }
 
   function handleDragStart(e: DragEvent, activity: Activity, dayIndex: number) {
     draggedActivityId = activity.id!;
@@ -147,20 +257,26 @@
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const y = e.clientY - rect.top;
     let slotIndex = Math.floor(y / slotHeightPx);
-    
+
     // Adjust by drag offset so it drops where you grabbed it
     slotIndex = Math.max(0, slotIndex - Math.floor(dragOffset));
 
     const activity = activities.find(a => a.id === draggedActivityId);
-    
+
     if (activity) {
       const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
       const durationSlots = Math.max(1, Math.round(duration * slotsPerHour));
       slotIndex = Math.min(slotIndex, Math.max(0, totalSlots - durationSlots));
 
       const newStartHour = startHour + (slotIndex / slotsPerHour);
-      const newEndHour = newStartHour + duration;
-      
+
+      // La cascada que se persiste es la del preview vigente si apunta a este
+      // día (es exactamente lo que el usuario vio); si no (drop sin dragover
+      // previo en este día), se calcula fresca.
+      const cascada = dropPreview?.day === dayIndex && dropPreview.slots.has(draggedActivityId)
+        ? dropPreview.slots
+        : computeWeekLayoutForDrop(dayIndex, draggedActivityId, newStartHour);
+
       let newDays = [...activity.daysOfWeek];
       const idx = newDays.indexOf(dragSourceDay);
       if (idx !== -1) {
@@ -170,23 +286,64 @@
       }
       newDays = [...new Set(newDays)].sort((a, b) => a - b);
 
-      await db.activities.update(draggedActivityId, {
-        startTime: formatTime(newStartHour),
-        endTime: formatTime(newEndHour),
-        daysOfWeek: newDays,
-        updatedAt: Date.now()
-      });
+      const updates: Promise<unknown>[] = [];
+      for (const [id, slot] of cascada) {
+        if (id === draggedActivityId) {
+          updates.push(db.activities.update(id, {
+            startTime: formatTime(slot.start),
+            endTime: formatTime(slot.end),
+            daysOfWeek: newDays,
+            updatedAt: Date.now()
+          }));
+        } else {
+          // Solo escribir hermanos cuya hora realmente cambió
+          const orig = activities.find(a => a.id === id);
+          if (orig && (formatTime(slot.start) !== orig.startTime || formatTime(slot.end) !== orig.endTime)) {
+            updates.push(db.activities.update(id, {
+              startTime: formatTime(slot.start),
+              endTime: formatTime(slot.end),
+              updatedAt: Date.now()
+            }));
+          }
+        }
+      }
+      await Promise.all(updates);
     }
-    
+
+    dropPreview = null;
+    lastDragOverSlot = NaN;
     draggedActivityId = null;
     dragSourceDay = null;
   }
 
-  function handleDragOver(e: DragEvent) {
+  let lastDragOverSlot = NaN;
+  function handleDragOver(e: DragEvent, dayIndex: number) {
     e.preventDefault();
     if (e.dataTransfer) {
       e.dataTransfer.dropEffect = 'move';
     }
+    if (draggedActivityId === null) return;
+    // Preview en vivo: recalcula solo cuando el cursor cambia de slot de 15 min
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    let slotIndex = Math.max(0, Math.floor((e.clientY - rect.top) / slotHeightPx) - Math.floor(dragOffset));
+    if (slotIndex === lastDragOverSlot) return;
+    lastDragOverSlot = slotIndex;
+    const activity = activities.find(a => a.id === draggedActivityId);
+    if (!activity) return;
+    const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
+    const durationSlots = Math.max(1, Math.round(duration * slotsPerHour));
+    slotIndex = Math.min(slotIndex, Math.max(0, totalSlots - durationSlots));
+    const newStartHour = startHour + (slotIndex / slotsPerHour);
+    dropPreview = { day: dayIndex, slots: computeWeekLayoutForDrop(dayIndex, draggedActivityId, newStartHour) };
+  }
+
+  function handleDragLeaveDay(dayIndex: number) {
+    if (dropPreview?.day === dayIndex) dropPreview = null;
+  }
+
+  function clearDragPreview() {
+    dropPreview = null;
+    lastDragOverSlot = NaN;
   }
 
   // Context Menu logic
@@ -283,7 +440,7 @@
   <div class="days-columns">
     <div class="scroll-hint" aria-hidden="true">Deslizá para ver todos los días →</div>
     {#each days as day, i}
-      {@const dayData = getDayActivitiesWithLayout(i)}
+      {@const dayData = getDayActivitiesWithLayout(i, dropPreview?.day === i ? dropPreview.slots : undefined, draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i) ? draggedActivityId : null)}
       <div class="day-column">
         <button class="day-header" onclick={() => onSelectDay(i)} aria-label="Ver {day} en vista de día">
           <span class="day-name">{day}</span>
@@ -292,22 +449,22 @@
           {/if}
         </button>
         <div 
-          class="slots-grid" 
-          style="grid-template-columns: repeat({dayData.maxCols}, minmax(0, 1fr));"
-          ondragover={handleDragOver}
+          class="slots-grid"
+          ondragover={(e) => handleDragOver(e, i)}
+          ondragleave={() => handleDragLeaveDay(i)}
           ondrop={(e) => handleDrop(e, i)}
         >
           {#each dayData.items as activity (activity.id)}
-            {@const rowStart = activity.rowStart}
-            {@const rowEnd = activity.rowEnd}
             {@const numSlots = activity.numSlots}
             <button 
               class="activity-item" 
               class:short={numSlots <= 1}
+              class:drag-ghost={draggedActivityId === activity.id}
               draggable="true"
               ondragstart={(e) => handleDragStart(e, activity, i)}
+              ondragend={clearDragPreview}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
-              style="grid-row: {rowStart} / {rowEnd}; grid-column: {activity.colStart} / span {activity.colSpan}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
+              style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
               onclick={() => onEditActivity(activity.id!)}
               aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{activity.steps?.length ? `, ${activity.steps.length} pasos` : ''}"
               title="{activity.name} • {format12h(activity.startTime)} - {format12h(activity.endTime)}"
@@ -481,10 +638,10 @@
 
   .slots-grid {
     flex: 1;
-    display: grid;
-    grid-template-rows: repeat(var(--total-slots), var(--slot-height));
     position: relative;
     overflow: hidden;
+    /* La altura la fija la grilla de fondo vía --total-slots; los hijos son
+       absolutos (top/height en %) para poder animar la cascada. */
     /* Repeating guide lines: :00 solid line, :30 subtle line, :15 and :45 faint lines */
     background-size: 100% calc(var(--slot-height) * 4);
     background-image: linear-gradient(
@@ -508,7 +665,14 @@
     border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   }
 
+  .slots-grid::before {
+    content: '';
+    display: block;
+    height: calc(var(--total-slots) * var(--slot-height));
+  }
+
   .activity-item {
+    position: absolute;
     background: var(--bg-color);
     color: white;
     margin: 1px;
@@ -520,13 +684,22 @@
     box-shadow: 0 1px 3px rgba(0,0,0,0.12);
     overflow: hidden;
     opacity: 0.93;
-    transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+    /* Cascada animada (igual que la vista Día): top/height transicionan. */
+    transition: top 0.18s cubic-bezier(0.2, 0, 0, 1), height 0.18s cubic-bezier(0.2, 0, 0, 1), transform 0.15s, box-shadow 0.15s, opacity 0.15s;
     min-width: 0;
     min-height: 24px;
     display: flex;
     flex-direction: column;
     justify-content: center;
     box-sizing: border-box;
+  }
+
+  /* El fantasma arrastrado: sin transición de top (el HTML5 DnD no mueve la
+     tarjeta, solo la imagen del cursor) pero elevado y semi-transparente. */
+  .activity-item.drag-ghost {
+    opacity: 0.55;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+    z-index: 40;
   }
   .activity-item:hover,
   .activity-item:focus-visible {
