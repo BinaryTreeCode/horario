@@ -93,11 +93,19 @@
 
     if (acts.length === 0) return [] as DailyLayoutItem[];
 
-    const clusters: (typeof acts)[] = [];
+    // En pleno drag la tarjeta arrastrada NO participa en clusters/tracks:
+    // es un fantasma (sigue al cursor vía transform). Si contara como
+    // posicionada, una vecina que se deslice a su hueco original la solaparía
+    // y el algoritmo partiría el día en 2 columnas (ancho/posición cambiados).
+    const dragId = draggedActivityId;
+    const activeDrag = dragId !== null && !anchor;
+    const layoutable = activeDrag ? acts.filter(a => a.id !== dragId) : acts;
+
+    const clusters: (typeof layoutable)[] = [];
     let currentCluster: typeof acts = [];
     let clusterEnd = -1;
 
-    for (const act of acts) {
+    for (const act of layoutable) {
       if (currentCluster.length === 0 || act._start < clusterEnd - 0.0001) {
         currentCluster.push(act);
         clusterEnd = Math.max(clusterEnd, act._end);
@@ -148,6 +156,24 @@
           left: `${leftPct}%`,
           width: numTracks > 1 ? `calc(${widthPct}% - 4px)` : '100%',
           durationMins
+        });
+      }
+    }
+
+    // El fantasma se dibuja a ancho completo en su slot original (el cursor
+    // lo transporta); al soltar, topOverride lo ancla a su slot final.
+    if (activeDrag) {
+      const d = acts.find(a => a.id === dragId);
+      if (d) {
+        const top = ((d._start - startHour) / totalHours) * 100;
+        const height = ((d._end - d._start) / totalHours) * 100;
+        result.push({
+          ...d,
+          top: `${top}%`,
+          height: `calc(${height}% - 3px)`,
+          left: '0%',
+          width: '100%',
+          durationMins: Math.round((d._end - d._start) * 60)
         });
       }
     }
@@ -437,7 +463,6 @@
       // Anclamos la tarjeta arrastrada a SU slot final: se asienta con la
       // transición CSS desde donde estaba el fantasma, sin teletransporte.
       const mine = dropPreview.get(st.activityId);
-      dropPreview = mine ? new Map([[st.activityId, mine]]) : new Map();
       draggedActivityId = st.activityId;
       topOverride = mine ? { id: st.activityId, start: mine.start, end: mine.end } : null;
       try {
@@ -984,7 +1009,7 @@
     border-left: 5px solid;
     padding: 0.35rem 0.85rem;
     box-sizing: border-box;
-    transition: transform 0.2s, box-shadow 0.2s, background 0.2s, top 0.25s ease, height 0.25s ease;
+    transition: top 0.18s cubic-bezier(0.2, 0, 0, 1), height 0.18s cubic-bezier(0.2, 0, 0, 1), transform 0.2s, box-shadow 0.2s, background 0.2s;
     overflow: hidden;
     display: flex;
     flex-direction: column;
