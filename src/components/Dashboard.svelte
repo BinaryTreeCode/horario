@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { db } from '../lib/db.ts';
-  import type { Activity } from '../lib/types.ts';
+    import { db } from '../lib/db';
+  import type { Activity } from '../lib/types';
   import { 
     activitiesStore, 
     categoriesStore, 
@@ -8,7 +8,7 @@
     dayOverridesStore,
     parseTime,
     formatTime
-  } from '../lib/stores.ts';
+  } from '../lib/stores';
   import WeeklyGrid from './WeeklyGrid.svelte';
   import DailyView from './DailyView.svelte';
   import DonutCharts from './DonutCharts.svelte';
@@ -27,6 +27,7 @@
     const off = onSyncChange((s) => { syncStatus = s; });
     return off;
   });
+
   let selectedDay = $state(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1); // 0 = Mon, 6 = Sun
 
   // Precarga de modales cuando el navegador queda idle

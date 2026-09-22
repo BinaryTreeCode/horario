@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { Activity, Category, AppSettings, DayOverride, SyncState } from './types';
 import { validateImport, EXPORT_FORMAT_VERSION, type ValidationResult } from './importValidation';
+import { notifyDataChange } from './dataBus';
 
 export { EXPORT_FORMAT_VERSION, validateImport };
 export type { ValidationResult };
@@ -87,10 +88,70 @@ export class ScheduleDB extends Dexie {
       // ── syncState inicial ──
       await tx.table('syncState').bulkPut([{ id: '1' }]);
     });
+
+    // Si otra pestaña (o un redeploy con bump de esquema) fuerza un upgrade,
+    // esta conexión queda degradada y los writes pueden perder notificaciones.
+    // El patrón recomendado por Dexie: recargar la página para tomar el esquema
+    // nuevo. Con las stores propias la recarga además re-sincroniza la UI.
+    this.on('versionchange', () => {
+      if (typeof location !== 'undefined') location.reload();
+      return false;
+    });
+
+    // v41: bump “no-op” por encima de la versión física que quedaron algunas BD
+    // locales de desarrollo (un experimento ad-hoc creó la BD en v40 sin que el
+    // código la declarara). Declarar 41 con el MISMO esquema fuerza la ruta
+    // normal de apertura/upgrade (40→41 = sin cambios) y es no-op para BD
+    // limpias (producción está en v4→v41).
+    this.version(41).stores({
+      activities: 'id, categoryId, *daysOfWeek, updatedAt, deletedAt',
+      categories: 'id, order, updatedAt, deletedAt',
+      settings: 'id, key, updatedAt, deletedAt',
+      dayOverrides: 'day, updatedAt, deletedAt',
+      syncState: 'id'
+    });
   }
 }
 
 export const db = new ScheduleDB();
+
+// Debug: instancias reales de la app inspeccionables desde consola (solo dev)
+if (import.meta.env.DEV) {
+  (globalThis as any).__npDb = db;
+}
+
+// ── Bus de datos: notificación de mutaciones confirmadas ────────────────────
+// Las stores reactivas (stores.ts) reemplazan a liveQuery, que en Dexie
+// 4.3/4.4 no notifica updates de filas pre-existentes (dexie/Dexie.js#2309) y
+// congelaba la UI tras el drag & drop. Este middleware dbcore enruta cada
+// mutación de las tablas de datos hacia dataBus cuando se CONFIRMA: la store
+// re-lee la tabla completa y emite el valor fresco. Cubre put/bulkPut,
+// delete/bulkDelete y modify/clear (mismo objeto de mutación).
+const DATA_TABLES = new Set(['activities', 'categories', 'settings', 'dayOverrides']);
+
+(db as any).use({
+  stack: 'dbcore',
+  name: 'data-bus',
+  level: 0,
+  create: (downlevel: any) => ({
+    ...downlevel,
+    table: (tableName: string) => {
+      const core = downlevel.table(tableName);
+      if (!DATA_TABLES.has(tableName)) return core;
+      return {
+        ...core,
+        mutate: (req: any) => {
+          const resultado = core.mutate(req);
+          // Encolamos ya y enjuagamos tras la confirmación: el setTimeout del
+          // bus garantiza que la re-lectura vea el estado post-commit (nunca
+          // estados intermedios de una transacción).
+          notifyDataChange(tableName);
+          return resultado;
+        }
+      };
+    }
+  })
+});
 
 export const INITIAL_CATEGORIES: Category[] = [
   { id: 'rutina', label: 'Rutina', color: '#4a7c44', order: 0, updatedAt: 0 },
