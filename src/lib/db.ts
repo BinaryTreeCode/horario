@@ -142,10 +142,15 @@ const DATA_TABLES = new Set(['activities', 'categories', 'settings', 'dayOverrid
         ...core,
         mutate: (req: any) => {
           const resultado = core.mutate(req);
-          // Encolamos ya y enjuagamos tras la confirmación: el setTimeout del
-          // bus garantiza que la re-lectura vea el estado post-commit (nunca
-          // estados intermedios de una transacción).
-          notifyDataChange(tableName);
+          // Notificamos cuando la mutación CONFIRMA (resuelve su promesa):
+          // garantiza por construcción que la re-lectura vea el estado
+          // post-commit, sin depender del timing del setTimeout del bus. Si la
+          // mutación falla (transacción abortada), no notifica.
+          resultado
+            .then(() => notifyDataChange(tableName))
+            .catch(() => {
+              /* mutación fallida: sin notificación */
+            });
           return resultado;
         }
       };
@@ -238,9 +243,13 @@ export function backupToLocalStorage() {
         err?.code === 1014;
       if (isQuotaError && !quotaWarned) {
         quotaWarned = true;
-        alert(
-          '⚠️ No se pudo actualizar el respaldo automático: se agotó el espacio de localStorage.\n\n' +
-          'Tus datos siguen intactos en la base principal. Usa "Exportar JSON" (Ajustes) para un respaldo seguro, o inicia sesión para respaldar en la nube.'
+        // Toast de error — persistente hasta que el usuario lo cierre (regla
+        // dura de AGENTS.md: nunca alert() nativo). Import diferido para evitar
+        // dependencia circular toast ↔ db.
+        import('./toast').then(({ toastErr }) =>
+          toastErr(
+            '⚠️ Respaldo automático pausado: localStorage lleno. Tus datos siguen intactos en la base principal. Usa "Exportar JSON" (Ajustes) o inicia sesión para respaldar en la nube.'
+          )
         );
       }
     }
