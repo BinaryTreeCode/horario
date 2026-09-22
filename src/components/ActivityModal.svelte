@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { db, newId } from '../lib/db.ts';
-  import type { Activity, Category, ActivityStep } from '../lib/types.ts';
+  import { db, newId } from '../lib/db';
+  import type { Activity, Category, ActivityStep } from '../lib/types';
   import { X, Trash2, CheckCircle, Plus, CheckSquare, Square, ListChecks, Sparkles, Zap, Calendar, ImageIcon, Link2 } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
 

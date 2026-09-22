@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { db, exportData, validateImport, importValidatedData, type ValidationResult } from '../lib/db.ts';
+  import { db, exportData, validateImport, importValidatedData, type ValidationResult } from '../lib/db';
   import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange } from '../lib/sync';
   import type { SyncStatus } from '../lib/types';
   import { Cloud, CloudUpload, LogIn, LogOut, RefreshCw, UserPlus } from '@lucide/svelte';
-  import type { Category } from '../lib/types.ts';
+  import type { Category } from '../lib/types';
   import { X, Save, Plus, Trash2, Download, Upload, GripVertical } from '@lucide/svelte';
   import { dndzone } from 'svelte-dnd-action';
   import { flip } from 'svelte/animate';
@@ -237,7 +237,7 @@
   }
 
   async function restoreDefaultsConfirm() {
-    const { INITIAL_CATEGORIES } = await import('../lib/db.ts');
+    const { INITIAL_CATEGORIES } = await import('../lib/db');
     localCategories = [...INITIAL_CATEGORIES];
     toastOk('Categorías restablecidas — pulsa Guardar Todo para aplicar');
   }

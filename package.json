@@ -16,14 +16,14 @@
   },
   "dependencies": {
     "@astrojs/svelte": "^8.0.2",
+    "@lucide/svelte": "latest",
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/blob": "^2.8.0",
     "astro": "^6.0.6",
-    "dexie": "^4.3.0",
+    "dexie": "4.4.6",
     "drizzle-orm": "^0.45.2",
     "svelte": "^5.54.0",
-    "svelte-dnd-action": "^0.9.69",
-    "@lucide/svelte": "latest"
+    "svelte-dnd-action": "^0.9.69"
   },
   "devDependencies": {
     "@astrojs/vercel": "^10",
