@@ -68,11 +68,28 @@
   }
 
   const layoutActivities = $derived((() => {
-    const acts = dayActivities.map(a => ({
-      ...a,
-      _start: parseTime(a.startTime),
-      _end: parseTime(a.endTime)
-    })).sort((a, b) => a._start - b._start || (b._end - b._start) - (a._end - a._start));
+    // Durante un drag, las horas efectivas de las VECINAS vienen del preview
+    // (se deslizan hacia su posición predicha vía transition CSS); la tarjeta
+    // arrastrada no: mantiene su top original y sigue al cursor solo con el
+    // transform del fantasma (si el preview también la moviera, top + transform
+    // se sumarían y saldría disparada del cursor).
+    const preview = dropPreview;
+    const anchor = topOverride;
+    const acts = dayActivities.map(a => {
+      // topOverride (tarjeta recién soltada) > preview (vecinas durante drag)
+      // > BD. La tarjeta en pleno drag no recibe ninguno: sigue al cursor vía
+      // transform del fantasma; si también moviéramos su top, top + transform
+      // se sumarían y saldría disparada del cursor.
+      if (anchor && a.id === anchor.id) {
+        return { ...a, _start: anchor.start, _end: anchor.end };
+      }
+      const p = a.id === draggedActivityId ? undefined : preview?.get(a.id!);
+      return {
+        ...a,
+        _start: p ? p.start : parseTime(a.startTime),
+        _end: p ? p.end : parseTime(a.endTime)
+      };
+    }).sort((a, b) => a._start - b._start || (b._end - b._start) - (a._end - a._start));
 
     if (acts.length === 0) return [] as DailyLayoutItem[];
 
@@ -231,6 +248,21 @@
   let draggedActivityId = $state<string | null>(null);
   let suppressNextClick = false;
 
+  /**
+   * Vista previa del layout durante el drag: id → {start, end} en horas.
+   * No toca la BD — solo alimenta a layoutActivities para que las tarjetas
+   * vecinas se deslicen (transition CSS) hacia su posición predicha mientras
+   * se arrastra. null = sin drag activo.
+   */
+  let dropPreview = $state<Map<string, { start: number; end: number }> | null>(null);
+
+  /**
+   * Ancla temporal de la tarjeta recién soltada: mientras la store re-emite,
+   * su layout viene de aquí (slot final) — así la transición CSS la lleva
+   * desde la posición del fantasma hasta su slot, sin teletransporte.
+   */
+  let topOverride = $state<{ id: string; start: number; end: number } | null>(null);
+
   function handlePointerDown(e: PointerEvent, activity: Activity) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const card = e.currentTarget as HTMLElement;
@@ -302,6 +334,87 @@
 
     if (pendingDrag.pointerType !== 'mouse') e.preventDefault();
     moveGhost(e.clientY);
+    updateDropPreview(e.clientY);
+  }
+
+  /**
+   * Calcula el layout predicho para la posición actual del cursor y lo
+   * publica en dropPreview: las tarjetas vecinas empujadas se deslizan en
+   * vivo vía su transition CSS de top/height. Síncrono a propósito: el cálculo
+   * es trivial (ordenar ≤20 items) y rAF no corre en pestañas ocultas.
+   */
+  let lastPreviewY = NaN;
+  function updateDropPreview(clientY: number) {
+    if (clientY === lastPreviewY) return;
+    if (!pendingDrag?.started) return;
+    lastPreviewY = clientY;
+    dropPreview = computeLayoutForDrop(clientY, draggedActivityId);
+  }
+
+  /**
+   * Resolución de colisiones (cascada push-down) para un clientY dado.
+   * Devuelve el mapa id → {start, end} SIN tocar la BD. Es la misma matemática
+   * que aplica commitDropAt al soltar, así el preview es exactamente lo que
+   * termina pasando.
+   */
+  function computeLayoutForDrop(clientY: number, draggedId: string | null): Map<string, { start: number; end: number }> {
+    const result = new Map<string, { start: number; end: number }>();
+    const track = document.querySelector('.activities-track');
+    if (!track || draggedId === null) return result;
+
+    const rect = track.getBoundingClientRect();
+    const yPercent = (clientY - rect.top) / rect.height;
+
+    let newStartHour = startHour + (yPercent * totalHours) - dragOffsetHours;
+    newStartHour = Math.round(newStartHour * 4) / 4; // snap 15 min
+
+    const sourceActs = dayActivities;
+    const activity = sourceActs.find(a => a.id === draggedId);
+    if (!activity) return result;
+
+    const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
+    newStartHour = Math.max(startHour, Math.min(newStartHour, endHour - duration));
+    let newEndHour = newStartHour + duration;
+
+    type SlotMap = { id: string; start: number; end: number };
+    const siblings: SlotMap[] = sourceActs
+      .filter(a => a.id !== draggedActivityId)
+      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }))
+      .sort((a, b) => a.start - b.start);
+
+    const dragged: SlotMap = { id: draggedId, start: newStartHour, end: newEndHour };
+    const all: SlotMap[] = [...siblings, dragged].sort((a, b) => a.start - b.start);
+
+    for (let i = 1; i < all.length; i++) {
+      const prev = all[i - 1];
+      const cur = all[i];
+      if (cur.start < prev.end) {
+        const shift = prev.end - cur.start;
+        cur.start += shift;
+        cur.end += shift;
+      }
+    }
+
+    for (let i = all.length - 1; i >= 0; i--) {
+      const cur = all[i];
+      const dur = cur.end - cur.start;
+      if (cur.end > endHour) {
+        cur.end = endHour;
+        cur.start = endHour - dur;
+      }
+      if (i > 0) {
+        const prev = all[i - 1];
+        if (prev.end > cur.start) {
+          const origAct = sourceActs.find(a => a.id === prev.id);
+          const prevDur = origAct ? parseTime(origAct.endTime) - parseTime(origAct.startTime) : prev.end - prev.start;
+          prev.end = cur.start;
+          prev.start = cur.start - prevDur;
+        }
+      }
+    }
+
+    for (const slot of all) result.set(slot.id, { start: slot.start, end: slot.end });
+    return result;
   }
 
   async function onDragPointerUp(e: PointerEvent) {
@@ -316,10 +429,33 @@
     pendingDrag = null;
 
     if (st.started) {
-      draggedActivityId = st.activityId;
       suppressNextClick = true;
       setTimeout(() => { suppressNextClick = false; }, 150);
-      await commitDropAt(e.clientY);
+      // El preview muere ANTES de limpiar draggedActivityId: las vecinas
+      // conservan el layout final (la store aún no re-emitio), así no saltan.
+      dropPreview = computeLayoutForDrop(e.clientY, st.activityId);
+      // Anclamos la tarjeta arrastrada a SU slot final: se asienta con la
+      // transición CSS desde donde estaba el fantasma, sin teletransporte.
+      const mine = dropPreview.get(st.activityId);
+      dropPreview = mine ? new Map([[st.activityId, mine]]) : new Map();
+      draggedActivityId = st.activityId;
+      topOverride = mine ? { id: st.activityId, start: mine.start, end: mine.end } : null;
+      try {
+        await commitDropAt(e.clientY);
+      } finally {
+        // Si la store re-emitio el mismo layout, soltar el ancla es
+        // inobservable; si el commit falló, esto devuelve la UI a la BD.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            dropPreview = null;
+            topOverride = null;
+            lastPreviewY = NaN;
+          });
+        });
+      }
+    } else {
+      dropPreview = null;
+      lastPreviewY = NaN;
     }
   }
 
@@ -333,6 +469,9 @@
       st.card.style.touchAction = '';
     }
     window.removeEventListener('contextmenu', preventDragContextMenu, true);
+    dropPreview = null;
+    topOverride = null;
+    lastPreviewY = NaN;
     pendingDrag = null;
   }
 
@@ -347,62 +486,11 @@
     const track = document.querySelector('.activities-track');
     if (!track || draggedActivityId === null) return;
 
-    const rect = track.getBoundingClientRect();
-    const y = clientY - rect.top;
-    const yPercent = y / rect.height;
-
-    let newStartHour = startHour + (yPercent * totalHours) - dragOffsetHours;
-
-    // Snap to 15 minutes
-    newStartHour = Math.round(newStartHour * 4) / 4;
-
-    const sourceActs = dayActivities;
-    const activity = sourceActs.find(a => a.id === draggedActivityId);
-    if (!activity) { draggedActivityId = null; return; }
-
-    const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
-
-    // Clamp within day bounds
-    newStartHour = Math.max(startHour, Math.min(newStartHour, endHour - duration));
-    let newEndHour = newStartHour + duration;
-
-    // ── Collision resolution (cascade push-down) ──────────────────────────
-    type SlotMap = { id: number; start: number; end: number };
-    const siblings: SlotMap[] = sourceActs
-      .filter(a => a.id !== draggedActivityId)
-      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }))
-      .sort((a, b) => a.start - b.start);
-
-    const dragged: SlotMap = { id: draggedActivityId, start: newStartHour, end: newEndHour };
-    const all: SlotMap[] = [...siblings, dragged].sort((a, b) => a.start - b.start);
-
-    for (let i = 1; i < all.length; i++) {
-      const prev = all[i - 1];
-      const cur  = all[i];
-      if (cur.start < prev.end) {
-        const shift = prev.end - cur.start;
-        cur.start += shift;
-        cur.end   += shift;
-      }
-    }
-
-    for (let i = all.length - 1; i >= 0; i--) {
-      const cur = all[i];
-      const dur = cur.end - cur.start;
-      if (cur.end > endHour) {
-        cur.end   = endHour;
-        cur.start = endHour - dur;
-      }
-      if (i > 0) {
-        const prev = all[i - 1];
-        if (prev.end > cur.start) {
-          const origAct = sourceActs.find(a => a.id === prev.id);
-          const prevDur = origAct ? parseTime(origAct.endTime) - parseTime(origAct.startTime) : prev.end - prev.start;
-          prev.end   = cur.start;
-          prev.start = cur.start - prevDur;
-        }
-      }
-    }
+    // Misma matemática que el preview en vivo: lo que se vio mientras se
+    // arrastraba es exactamente lo que se guarda.
+    const resolved = computeLayoutForDrop(clientY, draggedActivityId);
+    if (resolved.size === 0) return;
+    const all = [...resolved.entries()].map(([id, slot]) => ({ id, start: slot.start, end: slot.end }));
 
     if (isTemporaryMode) {
       // Save to dayOverrides
@@ -917,11 +1005,15 @@
 
   /* Estado de arrastre activo (pointer drag) */
   .daily-activity-card.dragging {
-    transition: none; /* sin lag: la tarjeta sigue el dedo/cursor 1:1 */
+    /* Sin lag: la tarjeta sigue el dedo/cursor 1:1 (se mueve por transform,
+       no por top — su top/height animan hacia el slot predicho como las
+       demás, pero las tapa el fantasma que sigue al cursor). */
+    transition: opacity 0.15s, box-shadow 0.15s;
     opacity: 0.85;
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
     z-index: 100;
     cursor: grabbing;
+    will-change: transform;
   }
 
   .daily-activity-card:hover {
