@@ -1,11 +1,12 @@
 <script lang="ts">
-  import type { Activity, Category, DayOverride } from '../lib/types.ts';
-  import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores.ts';
-  import { db } from '../lib/db.ts';
+  import type { Activity, Category, DayOverride } from '../lib/types';
+  import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
+  import { db } from '../lib/db';
+  import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import { Copy, Trash2, ListChecks, ImageIcon } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { toastOk } from '../lib/toast';
+  import { toastOk, toastErr } from '../lib/toast';
 
   interface Props {
     activities: Activity[];
@@ -214,15 +215,26 @@
   }
 
   async function duplicateActivity() {
-    if (contextMenu.activityId) {
-      const original = await db.activities.get(contextMenu.activityId);
-      if (original) {
-        const { id: _, ...clone } = original;
-        clone.name = `${clone.name} (copia)`;
-        await db.activities.add(clone); // auto-increment: id único garantizado
-      }
-    }
+    const sourceId = contextMenu.activityId;
     closeContextMenu();
+    if (!sourceId) return;
+
+    const source = activities.find(a => a.id === sourceId);
+    if (!source) return;
+
+    // Duplicar en los mismos días de la semana que la original
+    const days = source.daysOfWeek?.length ? source.daysOfWeek : [0];
+    const clone = await duplicateActivityOp(sourceId, {
+      startHour,
+      endHour,
+      days
+    });
+
+    if (clone) {
+      toastOk(`${clone.name} → ${format12h(clone.startTime)}`);
+    } else {
+      toastErr('No hay hueco libre ese día para duplicar');
+    }
   }
 
   let confirmDelete = $state(false);

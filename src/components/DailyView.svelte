@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import type { Activity, Category, DayOverride } from '../lib/types.ts';
-  import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores.ts';
+  import type { Activity, Category, DayOverride } from '../lib/types';
+  import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
   import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon } from '@lucide/svelte';
-  import { db, newId } from '../lib/db.ts';
+  import { db, newId } from '../lib/db';
+  import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
@@ -473,29 +474,66 @@
   }
 
   async function duplicateActivity() {
-    if (!contextMenu.activityId) { closeContextMenu(); return; }
+    const sourceId = contextMenu.activityId;
+    closeContextMenu();
+    if (!sourceId) return;
+
+    const source = dayActivities.find(a => a.id === sourceId);
+    if (!source) return;
 
     if (isTemporaryMode) {
+      // ── Modo temporal: clonar dentro del override del día, en el primer hueco ──
       const overrideActs = await ensureOverride();
-      const original = overrideActs.find(a => a.id === contextMenu.activityId);
-      if (original) {
-        const clone = { ...original, id: newId(), name: `${original.name} (copia)` };
-        overrideActs.push(clone);
-        await db.dayOverrides.put({
-          day,
-          activities: overrideActs,
-          updatedAt: Date.now()
-        });
+      const durationH = Math.max(0.25, parseTime(source.endTime) - parseTime(source.startTime));
+      const busy = overrideActs.map(a => ({
+        start: parseTime(a.startTime),
+        end: parseTime(a.endTime)
+      }));
+
+      // Buscar hueco alineado a 15 min dentro del rango del día
+      let placed: number | null = null;
+      for (let t = startHour; t + durationH <= endHour + 1e-9; t += 0.25) {
+        const s = Math.round(t * 4) / 4;
+        const e = s + durationH;
+        if (e > endHour + 1e-9) break;
+        if (!busy.some(b => s < b.end && b.start < e)) { placed = s; break; }
       }
+
+      if (placed === null) {
+        toastErr('No hay hueco libre en el día para duplicar');
+        return;
+      }
+
+      const { id: _o, updatedAt: _u, ...rest } = source;
+      const clone: Activity = {
+        ...(rest as Activity),
+        id: newId(),
+        name: `${source.name} (copia)`,
+        startTime: formatTime(placed),
+        endTime: formatTime(placed + durationH),
+        updatedAt: Date.now()
+      };
+      overrideActs.push(clone);
+      await db.dayOverrides.put({
+        day,
+        activities: $state.snapshot(overrideActs),
+        updatedAt: Date.now()
+      });
+      toastOk(`${clone.name} → ${format12h(clone.startTime)}`);
     } else {
-      const original = await db.activities.get(contextMenu.activityId);
-      if (original) {
-        const { id: _, ...clone } = original;
-        clone.name = `${clone.name} (copia)`;
-        await db.activities.add(clone);
+      // ── Modo Plantilla: duplicar como actividad maestra en el mismo día ──
+      const days = source.daysOfWeek?.length ? source.daysOfWeek : [day];
+      const clone = await duplicateActivityOp(sourceId, {
+        startHour,
+        endHour,
+        days
+      });
+      if (clone) {
+        toastOk(`${clone.name} → ${format12h(clone.startTime)}`);
+      } else {
+        toastErr('No hay hueco libre ese día para duplicar');
       }
     }
-    closeContextMenu();
   }
 
   function askDeleteActivity() {
