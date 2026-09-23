@@ -307,19 +307,26 @@
       if (targetDay !== null && saveScope === 'day') {
         // Save to dayOverrides (temporary, day-only)
         const existing = await db.dayOverrides.get(targetDay);
+        const overrideExisted = !!existing?.activities;
         let overrideActs: Activity[] = existing?.activities
           ? existing.activities.map(a => ({ ...a }))
           : [];
 
+        // Siembra desde la plantilla master del día: sin esto, la primera
+        // edición ⚡ crearía un override con UNA sola actividad y vaciaría
+        // el resto del día en la vista Día.
+        if (!overrideExisted) {
+          overrideActs = (await db.activities.toArray())
+            .filter(a => !a.deletedAt && a.daysOfWeek.includes(targetDay))
+            .map(a => ({ ...a }));
+        }
+
         if (id !== null) {
-          // Update existing activity in override
           const idx = overrideActs.findIndex(a => a.id === id);
+          activity.id = id;
           if (idx >= 0) {
-            activity.id = id;
             overrideActs[idx] = activity;
           } else {
-            // Activity doesn't exist in override yet — add it
-            activity.id = id;
             overrideActs.push(activity);
           }
         } else {
@@ -354,16 +361,20 @@
   async function remove() {
     if (id !== null) {
       if (targetDay !== null && saveScope === 'day') {
-        // Remove from dayOverrides
+        // Remove from dayOverrides. Si el override aún no existe, se siembra
+        // desde master SIN la actividad (eliminar "solo este día" no puede
+        // crear un override vacío que borre el resto del día).
         const existing = await db.dayOverrides.get(targetDay);
-        if (existing?.activities) {
-          const filtered = existing.activities.filter(a => a.id !== id);
-          await db.dayOverrides.put({
-            day: targetDay,
-            activities: filtered,
-            updatedAt: Date.now()
-          });
-        }
+        const acts: Activity[] = existing?.activities
+          ? existing.activities.filter(a => a.id !== id)
+          : (await db.activities.toArray())
+              .filter(a => !a.deletedAt && a.daysOfWeek.includes(targetDay) && a.id !== id)
+              .map(a => ({ ...a }));
+        await db.dayOverrides.put({
+          day: targetDay,
+          activities: acts,
+          updatedAt: Date.now()
+        });
       } else {
         // Borrado suave (tombstone) para que el sync lo propague a otros dispositivos
         await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });

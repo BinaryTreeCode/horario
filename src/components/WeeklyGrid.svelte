@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Activity, Category, DayOverride } from '../lib/types';
   import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
+  import { propagateWeekly } from '../lib/cascade';
   import { db } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import { Copy, Trash2, ListChecks, ImageIcon } from '@lucide/svelte';
@@ -15,7 +16,7 @@
     settings: { startHour: number; endHour: number };
     dayOverrides?: DayOverride[];
     onSelectDay: (day: number) => void;
-    onEditActivity: (id: number) => void;
+    onEditActivity: (id: string | null) => void;
   }
 
   let { activities, categories, settings, dayOverrides = [], onSelectDay, onEditActivity }: Props = $props();
@@ -223,55 +224,30 @@
   let dropPreview = $state<{ day: number; slots: Map<string, { start: number; end: number }> } | null>(null);
 
   /**
-   * Resolución de colisiones (cascada push-down) para un slot destino dentro
-   * de un día. Misma matemática que aplicará handleDrop → lo que se ve es lo
-   * que se guarda. NO toca la BD.
+   * Preview del drop en un día: usa la cascada multi-día (src/lib/cascade.ts).
+   * Lo que se ve es lo que se guarda — el preview de la columna destino es
+   * exactamente el mapa que persistirá handleDrop.
    */
   function computeWeekLayoutForDrop(dayIndex: number, actId: string, newStartHour: number): Map<string, { start: number; end: number }> {
-    const result = new Map<string, { start: number; end: number }>();
+    const res = propagateWeekly(activities, actId, newStartHour, endHour, { parse: parseTime, format: formatTime }, [dayIndex]);
+    return res.byDay.get(dayIndex) ?? new Map();
+  }
+
+  /**
+   * Cascada completa para el commit: TODOS los días de la actividad (incluido
+   * el destino si el drag cruza columnas). La arrastrada queda ANCLADA al slot
+   * que el usuario vio (pin) y la propagación corre hasta estabilizar, para
+   * que ningún día herede solapes no resueltos — la causa de la corrupción.
+   * Devuelve los horarios GLOBALES finales (una fila = un horario).
+   */
+  function computeFullCascade(actId: string, targetDay: number, anchorStart: number): Map<string, { start: number; end: number }> {
     const activity = activities.find(a => a.id === actId);
-    if (!activity) return result;
-
-    const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
-    newStartHour = Math.max(startHour, Math.min(newStartHour, endHour - duration));
-    let newEndHour = newStartHour + duration;
-
-    const siblings = activities
-      .filter(a => a.daysOfWeek.includes(dayIndex) && a.id !== actId)
-      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }))
-      .sort((a, b) => a.start - b.start);
-
-    const dragged = { id: actId, start: newStartHour, end: newEndHour };
-    const all = [...siblings, dragged].sort((a, b) => a.start - b.start);
-
-    for (let i = 1; i < all.length; i++) {
-      const prev = all[i - 1];
-      const cur = all[i];
-      if (cur.start < prev.end) {
-        const shift = prev.end - cur.start;
-        cur.start += shift;
-        cur.end += shift;
-      }
-    }
-    for (let i = all.length - 1; i >= 0; i--) {
-      const cur = all[i];
-      const dur = cur.end - cur.start;
-      if (cur.end > endHour) {
-        cur.end = endHour;
-        cur.start = endHour - dur;
-      }
-      if (i > 0) {
-        const prev = all[i - 1];
-        if (prev.end > cur.start) {
-          const origAct = activities.find(a => a.id === prev.id);
-          const prevDur = origAct ? parseTime(origAct.endTime) - parseTime(origAct.startTime) : prev.end - prev.start;
-          prev.end = cur.start;
-          prev.start = cur.start - prevDur;
-        }
-      }
-    }
-    for (const slot of all) result.set(slot.id, { start: slot.start, end: slot.end });
-    return result;
+    if (!activity) return new Map();
+    const origDays = activity.daysOfWeek;
+    const finalDays = dragSourceDay !== null && origDays.includes(dragSourceDay)
+      ? [...origDays.filter(d => d !== dragSourceDay), targetDay]
+      : [...origDays];
+    return propagateWeekly(activities, actId, anchorStart, endHour, { parse: parseTime, format: formatTime }, [...new Set(finalDays)]).times;
   }
 
   function handleDragStart(e: DragEvent, activity: Activity, dayIndex: number) {
@@ -306,12 +282,11 @@
 
       const newStartHour = startHour + (slotIndex / slotsPerHour);
 
-      // La cascada que se persiste es la del preview vigente si apunta a este
-      // día (es exactamente lo que el usuario vio); si no (drop sin dragover
-      // previo en este día), se calcula fresca.
-      const cascada = dropPreview?.day === dayIndex && dropPreview.slots.has(draggedActivityId)
-        ? dropPreview.slots
-        : computeWeekLayoutForDrop(dayIndex, draggedActivityId, newStartHour);
+      // Persistir la cascada de TODOS los días (punto fijo entre días) con el
+      // slot del preview como ancla: lo que se vio es lo que se guarda.
+      const previewMine = dropPreview?.day === dayIndex ? dropPreview.slots.get(draggedActivityId) : undefined;
+      const anchorStart = previewMine ? previewMine.start : newStartHour;
+      const cascada = computeFullCascade(draggedActivityId, dayIndex, anchorStart);
 
       let newDays = [...activity.daysOfWeek];
       const idx = newDays.indexOf(dragSourceDay);
@@ -322,8 +297,12 @@
       }
       newDays = [...new Set(newDays)].sort((a, b) => a - b);
 
+      // Horarios GLOBALES finales (una fila = un horario): el mapa `times`
+      // de la propagación, no mapas por día (una misma fila no puede quedar
+      // con dos horarios según qué día se procese último).
       const updates: Promise<unknown>[] = [];
       for (const [id, slot] of cascada) {
+        const orig = activities.find(a => a.id === id);
         if (id === draggedActivityId) {
           updates.push(db.activities.update(id, {
             startTime: formatTime(slot.start),
@@ -331,16 +310,12 @@
             daysOfWeek: newDays,
             updatedAt: Date.now()
           }));
-        } else {
-          // Solo escribir hermanos cuya hora realmente cambió
-          const orig = activities.find(a => a.id === id);
-          if (orig && (formatTime(slot.start) !== orig.startTime || formatTime(slot.end) !== orig.endTime)) {
-            updates.push(db.activities.update(id, {
-              startTime: formatTime(slot.start),
-              endTime: formatTime(slot.end),
-              updatedAt: Date.now()
-            }));
-          }
+        } else if (orig && (formatTime(slot.start) !== orig.startTime || formatTime(slot.end) !== orig.endTime)) {
+          updates.push(db.activities.update(id, {
+            startTime: formatTime(slot.start),
+            endTime: formatTime(slot.end),
+            updatedAt: Date.now()
+          }));
         }
       }
       await Promise.all(updates);
@@ -380,6 +355,80 @@
   function clearDragPreview() {
     dropPreview = null;
     lastDragOverSlot = NaN;
+  }
+
+  // ── Resize (estirar borde inferior) en la grilla semanal ─────────────
+  // Semántica acordada: la duración cambia en TODOS los días de la actividad
+  // (global, como el drag). Preview en la columna actual; el commit resuelve
+  // la cascada en cada día afectado.
+  let resizing = $state<{ id: string; day: number; origStart: number; origEnd: number; startY: number } | null>(null);
+
+  function startResize(e: PointerEvent, activity: Activity, dayIndex: number) {
+    e.stopPropagation(); // no disparar long-press/click/drag nativo del ítem
+    e.preventDefault();
+    resizing = {
+      id: activity.id!,
+      day: dayIndex,
+      origStart: parseTime(activity.startTime),
+      origEnd: parseTime(activity.endTime),
+      startY: e.clientY
+    };
+    window.addEventListener('pointermove', onResizeMove, { passive: false });
+    window.addEventListener('pointerup', onResizeUp);
+    window.addEventListener('pointercancel', onResizeCancel);
+  }
+
+  function computeResizePreview(clientY: number): Map<string, { start: number; end: number }> | null {
+    if (!resizing) return null;
+    const col = document.querySelectorAll('.day-column .slots-grid')[resizing.day];
+    if (!col) return null;
+    const rect = col.getBoundingClientRect();
+    const deltaSlots = (clientY - resizing.startY) / slotHeightPx;
+    let newEnd = Math.round((resizing.origEnd + deltaSlots / slotsPerHour) * 4) / 4;
+    newEnd = Math.max(resizing.origStart + 0.25, Math.min(newEnd, endHour));
+    const res = propagateWeekly(activities, resizing.id, resizing.origStart, endHour, { parse: parseTime, format: formatTime }, activities.find(a => a.id === resizing.id)?.daysOfWeek ?? [], newEnd - resizing.origStart);
+    return res.byDay.get(resizing.day) ?? null;
+  }
+
+  function onResizeMove(e: PointerEvent) {
+    if (!resizing) return;
+    e.preventDefault();
+    const slots = computeResizePreview(e.clientY);
+    if (slots) dropPreview = { day: resizing.day, slots };
+  }
+
+  async function onResizeUp(e: PointerEvent) {
+    const st = resizing;
+    cleanupResizeListeners();
+    resizing = null;
+    if (!st) return;
+    const slots = computeResizePreview(e.clientY);
+    if (!slots) { dropPreview = null; return; }
+    // Commit global: la nueva duración se resuelve en TODOS los días y se
+    // escribe el horario global final (una fila = un horario).
+    const times = propagateWeekly(activities, st.id, st.origStart, endHour, { parse: parseTime, format: formatTime }, activities.find(a => a.id === st.id)?.daysOfWeek ?? [], (slots.get(st.id)?.end ?? st.origEnd) - st.origStart).times;
+    const updates: Promise<unknown>[] = [];
+    for (const [id, slot] of times) {
+      const orig = activities.find(a => a.id === id);
+      if (orig && (formatTime(slot.start) !== orig.startTime || formatTime(slot.end) !== orig.endTime)) {
+        updates.push(db.activities.update(id, { startTime: formatTime(slot.start), endTime: formatTime(slot.end), updatedAt: Date.now() }));
+      }
+    }
+    await Promise.all(updates);
+    dropPreview = null;
+    lastDragOverSlot = NaN;
+  }
+
+  function onResizeCancel() {
+    cleanupResizeListeners();
+    resizing = null;
+    dropPreview = null;
+  }
+
+  function cleanupResizeListeners() {
+    window.removeEventListener('pointermove', onResizeMove);
+    window.removeEventListener('pointerup', onResizeUp);
+    window.removeEventListener('pointercancel', onResizeCancel);
   }
 
   // Context Menu logic
@@ -530,6 +579,12 @@
                   </span>
                 {/if}
               </div>
+              <div
+                class="resize-handle"
+                title="Estirar para cambiar la duración (todos los días)"
+                aria-hidden="true"
+                onpointerdown={(e) => startResize(e, activity, i)}
+              ></div>
             </button>
           {/each}
         </div>
@@ -752,6 +807,33 @@
 
   .activity-item:active {
     cursor: grabbing;
+  }
+
+  /* Handle de redimensionado (estirar borde inferior) */
+  .resize-handle {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 14px;
+    cursor: ns-resize;
+    touch-action: none;
+  }
+  .resize-handle::after {
+    content: '';
+    position: absolute;
+    left: 20%;
+    right: 20%;
+    bottom: 2px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.5);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .activity-item:hover .resize-handle::after,
+  .activity-item:focus-visible .resize-handle::after {
+    opacity: 1;
   }
 
   .activity-item:hover {

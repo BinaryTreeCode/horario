@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types';
   import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
+  import { resolveDayCascade } from '../lib/cascade';
   import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon } from '@lucide/svelte';
   import { db, newId } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
@@ -15,7 +16,7 @@
     categories: Category[];
     settings: { startHour: number; endHour: number };
     dayOverrides?: DayOverride[];
-    onEditActivity: (id: number, initialData?: Activity) => void;
+    onEditActivity: (id: string | null, initialData?: Activity) => void;
   }
 
   let { day, activities, categories, settings, dayOverrides = [], onEditActivity }: Props = $props();
@@ -41,7 +42,7 @@
     const fmt = (v: number) => v.toString().padStart(2, '0');
     // Fin = inicio + 60 min, normalizado (no clavado en :59)
     const endTotal = h * 60 + m + 60;
-    onEditActivity(null as unknown as number, {
+    onEditActivity(null, {
       id: '',
       categoryId: categories[0]?.id ?? 'rutina',
       name: '',
@@ -414,9 +415,8 @@
 
   /**
    * Resolución de colisiones (cascada push-down) para un clientY dado.
-   * Devuelve el mapa id → {start, end} SIN tocar la BD. Es la misma matemática
-   * que aplica commitDropAt al soltar, así el preview es exactamente lo que
-   * termina pasando.
+   * Delega en src/lib/cascade.ts (dueño único de la matemática, compartida
+   * con la vista Semana). Devuelve el mapa id → {start, end} SIN tocar la BD.
    */
   function computeLayoutForDrop(clientY: number, draggedId: string | null): Map<string, { start: number; end: number }> {
     const result = new Map<string, { start: number; end: number }>();
@@ -429,52 +429,18 @@
     let newStartHour = startHour + (yPercent * totalHours) - dragOffsetHours;
     newStartHour = Math.round(newStartHour * 4) / 4; // snap 15 min
 
-    const sourceActs = dayActivities;
-    const activity = sourceActs.find(a => a.id === draggedId);
+    const activity = dayActivities.find(a => a.id === draggedId);
     if (!activity) return result;
 
     const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
     newStartHour = Math.max(startHour, Math.min(newStartHour, endHour - duration));
-    let newEndHour = newStartHour + duration;
 
-    type SlotMap = { id: string; start: number; end: number };
-    const siblings: SlotMap[] = sourceActs
-      .filter(a => a.id !== draggedActivityId)
-      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }))
-      .sort((a, b) => a.start - b.start);
-
-    const dragged: SlotMap = { id: draggedId, start: newStartHour, end: newEndHour };
-    const all: SlotMap[] = [...siblings, dragged].sort((a, b) => a.start - b.start);
-
-    for (let i = 1; i < all.length; i++) {
-      const prev = all[i - 1];
-      const cur = all[i];
-      if (cur.start < prev.end) {
-        const shift = prev.end - cur.start;
-        cur.start += shift;
-        cur.end += shift;
-      }
-    }
-
-    for (let i = all.length - 1; i >= 0; i--) {
-      const cur = all[i];
-      const dur = cur.end - cur.start;
-      if (cur.end > endHour) {
-        cur.end = endHour;
-        cur.start = endHour - dur;
-      }
-      if (i > 0) {
-        const prev = all[i - 1];
-        if (prev.end > cur.start) {
-          const origAct = sourceActs.find(a => a.id === prev.id);
-          const prevDur = origAct ? parseTime(origAct.endTime) - parseTime(origAct.startTime) : prev.end - prev.start;
-          prev.end = cur.start;
-          prev.start = cur.start - prevDur;
-        }
-      }
-    }
-
-    for (const slot of all) result.set(slot.id, { start: slot.start, end: slot.end });
+    // Cascada solo sobre el día visible (compartida con la Semana)
+    const slots: { id: string; start: number; end: number }[] = dayActivities
+      .filter(a => a.id !== draggedId)
+      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
+    const resolved = resolveDayCascade([...slots, { id: draggedId, start: newStartHour, end: newStartHour + duration }], endHour);
+    for (const slot of resolved) result.set(slot.id, { start: slot.start, end: slot.end });
     return result;
   }
 
@@ -541,6 +507,83 @@
     window.removeEventListener('pointercancel', onDragPointerCancel);
   }
 
+  // ── Resize (estirar borde inferior) ──────────────────────────────────
+  // Ancla del gesto de estirado: origen/fin originales + punto de agarre.
+  // El preview reutiliza topOverride (slot propio) + dropPreview (vecinas),
+  // así la tarjeta crece animada y las demás se deslizan igual que en el drag.
+  let resizing = $state<{ id: string; origStart: number; origEnd: number; startY: number; pointerId: number } | null>(null);
+
+  function startResize(e: PointerEvent, activity: Activity) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.stopPropagation(); // no iniciar drag de la tarjeta ni su click
+    resizing = {
+      id: activity.id!,
+      origStart: parseTime(activity.startTime),
+      origEnd: parseTime(activity.endTime),
+      startY: e.clientY,
+      pointerId: e.pointerId
+    };
+    // Excluye la tarjeta del clustering mientras estira (ancho completo)
+    draggedActivityId = activity.id!;
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
+    window.addEventListener('pointermove', onResizeMove, { passive: false });
+    window.addEventListener('pointerup', onResizeUp);
+    window.addEventListener('pointercancel', onResizeCancel);
+  }
+
+  /** Slots del día tras estirar hasta clientY (cascada compartida, snap 15min). */
+  function computeResizePreview(clientY: number): { id: string; start: number; end: number }[] | null {
+    const track = document.querySelector('.activities-track');
+    if (!track || !resizing) return null;
+    const rect = track.getBoundingClientRect();
+    const deltaH = ((clientY - resizing.startY) / rect.height) * totalHours;
+    let newEnd = Math.round((resizing.origEnd + deltaH) * 4) / 4;
+    newEnd = Math.max(resizing.origStart + 0.25, Math.min(newEnd, endHour)); // mín 15min
+    const slots = dayActivities
+      .filter(a => a.id !== resizing!.id)
+      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
+    return resolveDayCascade([...slots, { id: resizing.id, start: resizing.origStart, end: newEnd }], endHour);
+  }
+
+  function onResizeMove(e: PointerEvent) {
+    if (!resizing) return;
+    e.preventDefault();
+    const resolved = computeResizePreview(e.clientY);
+    if (!resolved) return;
+    const mine = resolved.find(s => s.id === resizing!.id)!;
+    topOverride = { id: resizing.id, start: mine.start, end: mine.end };
+    dropPreview = new Map(resolved.map(s => [s.id, { start: s.start, end: s.end }]));
+  }
+
+  async function onResizeUp(e: PointerEvent) {
+    const st = resizing;
+    cleanupResizeListeners();
+    resizing = null;
+    draggedActivityId = null;
+    if (!st) return;
+    const resolved = computeResizePreview(e.clientY);
+    if (resolved) {
+      suppressNextClick = true;
+      setTimeout(() => { suppressNextClick = false; }, 150);
+      await commitResolved(new Map(resolved.map(s => [s.id, { start: s.start, end: s.end }])));
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => { dropPreview = null; topOverride = null; }));
+  }
+
+  function onResizeCancel() {
+    cleanupResizeListeners();
+    resizing = null;
+    draggedActivityId = null;
+    dropPreview = null;
+    topOverride = null;
+  }
+
+  function cleanupResizeListeners() {
+    window.removeEventListener('pointermove', onResizeMove);
+    window.removeEventListener('pointerup', onResizeUp);
+    window.removeEventListener('pointercancel', onResizeCancel);
+  }
+
   /** Aplica el drop en la posición final (clientY en px de viewport). */
   async function commitDropAt(clientY: number) {
     const track = document.querySelector('.activities-track');
@@ -550,42 +593,29 @@
     // arrastraba es exactamente lo que se guarda.
     const resolved = computeLayoutForDrop(clientY, draggedActivityId);
     if (resolved.size === 0) return;
-    const all = [...resolved.entries()].map(([id, slot]) => ({ id, start: slot.start, end: slot.end }));
 
-    if (isTemporaryMode) {
-      // Save to dayOverrides
-      const overrideActs = await ensureOverride();
-      for (const slot of all) {
-        const act = overrideActs.find(a => a.id === slot.id);
-        if (act) {
-          act.startTime = formatTime(slot.start);
-          act.endTime = formatTime(slot.end);
-        }
-      }
-      await db.dayOverrides.put({
-        day,
-        activities: overrideActs,
-        updatedAt: Date.now()
-      });
-    } else {
-      // Save to master db.activities
-      const updates = all.filter(slot => {
-        const orig = activities.find(a => a.id === slot.id);
-        if (!orig) return false;
-        return formatTime(slot.start) !== orig.startTime || formatTime(slot.end) !== orig.endTime;
-      });
-      await Promise.all(
-        updates.map(slot =>
-          db.activities.update(slot.id, {
-            startTime: formatTime(slot.start),
-            endTime:   formatTime(slot.end),
-            updatedAt: Date.now()
-          })
-        )
-      );
-    }
-
+    // Metodología acordada: en la vista Día, el drag SIEMPRE es una edición
+    // temporal del día (override ⚡) — nunca reescribe la plantilla master.
+    // "Guardar como plantilla" es la acción explícita que la promueve.
+    await commitResolved(resolved);
     draggedActivityId = null;
+  }
+
+  /** Escribe un layout resuelto (id → slot) al override del día visible. */
+  async function commitResolved(resolved: Map<string, { start: number; end: number }>) {
+    const overrideActs = await ensureOverride();
+    for (const [id, slot] of resolved) {
+      const act = overrideActs.find(a => a.id === id);
+      if (act) {
+        act.startTime = formatTime(slot.start);
+        act.endTime = formatTime(slot.end);
+      }
+    }
+    await db.dayOverrides.put({
+      day,
+      activities: $state.snapshot(overrideActs),
+      updatedAt: Date.now()
+    });
   }
 
   function handleDragOver(e: DragEvent) {
@@ -785,8 +815,8 @@
           aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{totalSteps ? `, ${doneSteps} de ${totalSteps} pasos` : ''}. Arrastrar para mover, abrir para editar"
           onpointerdown={(e) => handlePointerDown(e, activity)}
           oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
-          onclick={() => { if (suppressNextClick) return; onEditActivity(activity.id!); }}
-          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onEditActivity(activity.id!); }}
+          onclick={() => { if (suppressNextClick) return; onEditActivity(activity.id!, activity); }}
+          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onEditActivity(activity.id!, activity); }}
           style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; border-left-color: {getActivityColor(activity.categoryId, categories)}"
         >
           <div class="activity-content" class:compact={activity.durationMins <= 20}>
@@ -811,13 +841,19 @@
             </div>
             <button
               class="edit-btn"
-              onclick={(e) => { e.stopPropagation(); onEditActivity(activity.id!); }}
+              onclick={(e) => { e.stopPropagation(); onEditActivity(activity.id!, activity); }}
               aria-label="Editar {activity.name}"
               title="Editar actividad y ver pasos"
             >
               <Edit3 size={13} />
             </button>
           </div>
+          <div
+            class="resize-handle"
+            title="Estirar para cambiar la duración"
+            aria-hidden="true"
+            onpointerdown={(e) => startResize(e, activity)}
+          ></div>
         </div>
       {/each}
 
@@ -1090,6 +1126,34 @@
 
   .daily-activity-card:active {
     cursor: grabbing;
+  }
+
+  /* Handle de redimensionado (estirar borde inferior): zona táctil generosa,
+     invisible hasta hover en desktop; en táctil siempre leve indicación */
+  .resize-handle {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 22px;
+    min-height: 22px;
+    cursor: ns-resize;
+    touch-action: none; /* el gesto es del resize, no del scroll */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .resize-handle::after {
+    content: '';
+    width: 28px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .daily-activity-card:hover .resize-handle::after {
+    opacity: 1;
   }
 
   /* Estado de arrastre activo (pointer drag) */
