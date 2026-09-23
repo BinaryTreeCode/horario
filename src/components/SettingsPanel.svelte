@@ -9,6 +9,7 @@
   import { flip } from 'svelte/animate';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
+  import { clearUndo } from '../lib/undo';
   import Toasts from './Toasts.svelte';
 
   interface Props {
@@ -329,6 +330,7 @@
       const validation = $state.snapshot(pendingImport.validation);
       await importValidatedData(validation);
       confirmImport = false;
+      clearUndo(); // los snapshots de undo referencian filas que el import reemplazó
 
       // Con sesión activa: push completo inmediato. Los registros importados suelen
       // traer updatedAt antiguos (o 0) y no entrarían en el push incremental.

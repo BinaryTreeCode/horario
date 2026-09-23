@@ -14,12 +14,42 @@
   import DonutCharts from './DonutCharts.svelte';
 
   import Toasts from './Toasts.svelte';
-  import { toastErr } from '../lib/toast';
+  import { toastOk, toastErr } from '../lib/toast';
+  import { undoStack } from '../lib/undo';
   import { Settings, Calendar, Clock, Plus, ChevronsUp, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
   import { onSyncChange, syncNow } from '../lib/sync';
   import type { SyncStatus } from '../lib/types';
 
   let currentView = $state('week'); // 'week' | 'day'
+
+  // ── Deshacer global (Ctrl+Z / ⌘Z) ───────────────────────────────────
+  let stackCount = 0;
+  undoStack.subscribe(s => { stackCount = s.length; });
+
+  function isTextEntryTarget(t: EventTarget | null): boolean {
+    const el = t as HTMLElement | null;
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+  }
+
+  function onUndoKeydown(e: KeyboardEvent) {
+    if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
+    // Guards: el modal de actividad ya tiene Ctrl+Z nativo en sus inputs, y
+    // deshacer BD por debajo del form abierto sería confuso.
+    if (showActivityModal || showSettings || isTextEntryTarget(e.target)) return;
+    if (stackCount === 0) return;
+    e.preventDefault();
+    // pop del op + ejecución en chunk diferido (undoRun no va al bundle inicial)
+    import('../lib/undoRun').then(({ popAndUndo }) => popAndUndo())
+      .then(label => { if (label) toastOk(`Deshecho: ${label}`); })
+      .catch(err => toastErr('No se pudo deshacer: ' + (err?.message || err)));
+  }
+
+  $effect(() => {
+    window.addEventListener('keydown', onUndoKeydown);
+    return () => window.removeEventListener('keydown', onUndoKeydown);
+  });
 
   // Estado de sincronización para el badge del header
   let syncStatus = $state<SyncStatus>('local');

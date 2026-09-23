@@ -284,6 +284,7 @@
 
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
+  import { pushUndo, cloneAct } from '../lib/undo';
 
   async function save() {
     try {
@@ -343,10 +344,14 @@
       } else {
         // Save to master db.activities (permanent)
         if (id !== null) {
+          const before = await db.activities.get(id);
           activity.id = id;
           await db.activities.put(activity);
+          if (before) pushUndo({ label: `Editar ${activity.name}`, rows: [{ before, after: cloneAct(activity) }] });
         } else {
+          activity.id = newId();
           await db.activities.add(activity);
+          pushUndo({ label: `Crear ${activity.name}`, rows: [{ before: null, after: cloneAct(activity) }] });
         }
       }
 

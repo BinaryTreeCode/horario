@@ -8,6 +8,7 @@
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
+  import { pushUndo, cloneAct } from '../lib/undo';
   import { portal } from '../lib/portal';
 
   interface Props {
@@ -288,6 +289,9 @@
       const anchorStart = previewMine ? previewMine.start : newStartHour;
       const cascada = computeFullCascade(draggedActivityId, dayIndex, anchorStart);
 
+      // Horarios GLOBALES finales (una fila = un horario): el mapa `times`
+      // de la propagación, no mapas por día (una misma fila no puede quedar
+      // con dos horarios según qué día se procese último).
       let newDays = [...activity.daysOfWeek];
       const idx = newDays.indexOf(dragSourceDay);
       if (idx !== -1) {
@@ -297,41 +301,13 @@
       }
       newDays = [...new Set(newDays)].sort((a, b) => a - b);
 
-      // Horarios GLOBALES finales (una fila = un horario): el mapa `times`
-      // de la propagación, no mapas por día (una misma fila no puede quedar
-      // con dos horarios según qué día se procese último).
-      const updates: Promise<unknown>[] = [];
-      for (const [id, slot] of cascada) {
-        const orig = activities.find(a => a.id === id);
-        if (id === draggedActivityId) {
-          updates.push(db.activities.update(id, {
-            startTime: formatTime(slot.start),
-            endTime: formatTime(slot.end),
-            daysOfWeek: newDays,
-            updatedAt: Date.now()
-          }));
-        } else if (orig && (formatTime(slot.start) !== orig.startTime || formatTime(slot.end) !== orig.endTime)) {
-          updates.push(db.activities.update(id, {
-            startTime: formatTime(slot.start),
-            endTime: formatTime(slot.end),
-            updatedAt: Date.now()
-          }));
-        }
-      }
       // M1: una sola transacción — un fallo a mitad no deja escrituras
       // parciales. El reset de estado corre SIEMPRE (finally).
-      try {
-        await db.transaction('rw', db.activities, async () => {
-          await Promise.all(updates);
-        });
-      } catch {
-        toastErr('No se pudo mover la actividad — intenta de nuevo');
-      } finally {
-        dropPreview = null;
-        lastDragOverSlot = NaN;
-        draggedActivityId = null;
-        dragSourceDay = null;
-      }
+      await commitWeeklyTimes(cascada, `Mover ${activity.name} a ${days[dayIndex]}`, { id: draggedActivityId, days: newDays });
+      dropPreview = null;
+      lastDragOverSlot = NaN;
+      draggedActivityId = null;
+      dragSourceDay = null;
     } else {
       dropPreview = null;
       lastDragOverSlot = NaN;
@@ -383,25 +359,47 @@
       activities, activity.id!, newStart, endHour,
       { parse: parseTime, format: formatTime }, [...activity.daysOfWeek]
     ).times;
+    await commitWeeklyTimes(cascada, `${activity.name} → ${format12h(formatTime(newStart))}`);
+  }
+
+  /**
+   * Único punto de escritura de horarios globales (drop, teclado y resize lo
+   * reusan): escribe en transacción las filas cuyo slot cambió y registra el
+   * undo (los snapshots "antes" se toman de la store, que aún es el estado
+   * previo). Devuelve el label del undo o null si nada cambió.
+   */
+  async function commitWeeklyTimes(
+    times: Map<string, { start: number; end: number }>,
+    label: string,
+    daysChange?: { id: string; days: number[] }
+  ): Promise<string | null> {
+    const stamp = Date.now();
     const updates: Promise<unknown>[] = [];
-    for (const [id, slot] of cascada) {
-      const orig = activities.find(a => a.id === id);
-      if (orig && (formatTime(slot.start) !== orig.startTime || formatTime(slot.end) !== orig.endTime)) {
-        updates.push(db.activities.update(id, {
-          startTime: formatTime(slot.start),
-          endTime: formatTime(slot.end),
-          updatedAt: Date.now()
-        }));
+    const rows: { before: Activity; after: Activity }[] = [];
+    for (const [id, slot] of times) {
+      const before = activities.find(a => a.id === id);
+      if (!before) continue;
+      const t0 = formatTime(slot.start);
+      const t1 = formatTime(slot.end);
+      const days = daysChange?.id === id ? daysChange.days : before.daysOfWeek;
+      if (t0 !== before.startTime || t1 !== before.endTime || days !== before.daysOfWeek) {
+        rows.push({
+          before: cloneAct(before),
+          after: { ...cloneAct(before), startTime: t0, endTime: t1, daysOfWeek: days, updatedAt: stamp }
+        });
+        updates.push(db.activities.put(rows[rows.length - 1].after));
       }
     }
-    if (updates.length === 0) return;
+    if (updates.length === 0) return null;
     try {
       await db.transaction('rw', db.activities, async () => {
         await Promise.all(updates);
       });
-      toastOk(`${activity.name} → ${format12h(formatTime(newStart))}`);
+      pushUndo({ label, rows });
+      return label;
     } catch {
       toastErr('No se pudo mover la actividad — intenta de nuevo');
+      return null;
     }
   }
 
@@ -465,14 +463,7 @@
     // Commit global: la nueva duración se resuelve en TODOS los días y se
     // escribe el horario global final (una fila = un horario).
     const times = propagateWeekly(activities, st.id, st.origStart, endHour, { parse: parseTime, format: formatTime }, activities.find(a => a.id === st.id)?.daysOfWeek ?? [], (slots.get(st.id)?.end ?? st.origEnd) - st.origStart).times;
-    const updates: Promise<unknown>[] = [];
-    for (const [id, slot] of times) {
-      const orig = activities.find(a => a.id === id);
-      if (orig && (formatTime(slot.start) !== orig.startTime || formatTime(slot.end) !== orig.endTime)) {
-        updates.push(db.activities.update(id, { startTime: formatTime(slot.start), endTime: formatTime(slot.end), updatedAt: Date.now() }));
-      }
-    }
-    await Promise.all(updates);
+    await commitWeeklyTimes(times, `Estirar ${activities.find(a => a.id === st.id)?.name ?? 'actividad'}`);
     dropPreview = null;
     lastDragOverSlot = NaN;
   }

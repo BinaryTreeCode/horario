@@ -9,6 +9,7 @@
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
+  import { pushUndo, cloneAct } from '../lib/undo';
 
   interface Props {
     day: number;
@@ -56,7 +57,8 @@
     } as unknown as Activity);
   }
 
-  const dayName = $derived(['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'][day]);
+  const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+  const dayName = $derived(DAY_NAMES[day]);
   const startHour = $derived(settings.startHour);
   const endHour = $derived(settings.endHour);
   const totalHours = $derived(endHour - startHour);
@@ -687,10 +689,19 @@
         act.endTime = formatTime(slot.end);
       }
     }
+    const stamp = Date.now();
+    const ovBefore = await db.dayOverrides.get(day) ?? null;
     await db.dayOverrides.put({
       day,
       activities: $state.snapshot(overrideActs),
-      updatedAt: Date.now()
+      updatedAt: stamp
+    });
+    // Undo: el snapshot del override captura el día completo (actividades
+    // incluidas) — commitResolved nunca toca filas master.
+    pushUndo({
+      label: `Mover en ${DAY_NAMES[day]}`,
+      rows: [],
+      overrides: [{ day, before: ovBefore, after: await db.dayOverrides.get(day) ?? null }]
     });
   }
 
@@ -803,14 +814,27 @@
     try {
       if (isTemporaryMode) {
         const overrideActs = await ensureOverride();
+        const victim = overrideActs.find(a => a.id === id);
         const filtered = overrideActs.filter(a => a.id !== id);
+        const ovBefore = await db.dayOverrides.get(day);
         await db.dayOverrides.put({
           day,
           activities: filtered,
           updatedAt: Date.now()
         });
+        if (victim) {
+          pushUndo({
+            label: `Quitar ${victim.name} de ${DAY_NAMES[day]}`,
+            rows: [],
+            overrides: [{ day, before: ovBefore ?? null, after: await db.dayOverrides.get(day) ?? null }]
+          });
+        }
       } else {
+        const before = await db.activities.get(id);
         await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });
+        if (before) {
+          pushUndo({ label: `Eliminar ${before.name}`, rows: [{ before, after: await db.activities.get(id) ?? null }] });
+        }
       }
       toastOk('Actividad eliminada');
     } catch (err: any) {
