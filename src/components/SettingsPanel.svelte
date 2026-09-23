@@ -133,7 +133,9 @@
     localCategories = e.detail.items;
   }
   function handleDndFinalize(e: any) {
-    localCategories = e.detail.items.map((item: any, index: number) => ({ ...item, order: index }));
+    // A3: el reordenado es una mutación local — updatedAt es lo que hace
+    // que el push incremental (y el LWW del servidor) lo incluya.
+    localCategories = e.detail.items.map((item: any, index: number) => ({ ...item, order: index, updatedAt: Date.now() }));
   }
 
   // Reactive derived options
@@ -222,7 +224,7 @@
     const id = `cat-${Date.now()}`;
     localCategories = [
       ...localCategories,
-      { id, label: 'Nueva Categoría', color: '#999999', order: localCategories.length }
+      { id, label: 'Nueva Categoría', color: '#999999', order: localCategories.length, updatedAt: Date.now() }
     ];
   }
 
@@ -232,7 +234,7 @@
 
   function updateCategory(id: string, field: string, value: any) {
     localCategories = localCategories.map(c => 
-      c.id === id ? { ...c, [field]: value } : c
+      c.id === id ? { ...c, [field]: value, updatedAt: Date.now() } : c
     );
   }
 
@@ -438,7 +440,7 @@
         </header>
         <div 
           class="categories-list" 
-          use:dndzone={{items: localCategories, flipDurationMs, type: 'categories'}} 
+          use:dndzone={{items: localCategories, flipDurationMs, type: 'categories', delayTouchStart: 200}}
           onconsider={handleDndConsider} 
           onfinalize={handleDndFinalize}
         >
@@ -753,7 +755,13 @@
     cursor: grab;
     display: flex;
     align-items: center;
+    justify-content: center;
     padding: 0 0.25rem;
+    /* M7: con dragHandle, el grip es la única zona de agarre — área táctil
+       de la regla 5 (≥44px) para que el dedo no pelee con el scroll. */
+    min-width: 44px;
+    min-height: 44px;
+    touch-action: none;
   }
 
   .grip-handle:active {

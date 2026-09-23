@@ -33,7 +33,7 @@ bunx drizzle-kit push  # migraciones → DATABASE_URL (requiere .env.local)
 3. **Toda mutación local** setea `updatedAt: Date.now()` — el sync incremental y el LWW dependen de ello.
 4. **Import de datos**: solo vía `validateImport()` → confirmación UI → `importValidatedData()`. Nunca escribir BD con datos sin normalizar.
 5. **Touch targets ≥ 44px** en toda acción táctil; `aria-label` en todo botón icónico; label programático en todo input.
-6. **Drag & drop**: la vista Semana usa `svelte-dnd-action`; la vista Día usa Pointer Events propios (long-press 260ms táctil). No usar HTML5 DnD nativo (no funciona en táctil).
+6. **Drag & drop**: la vista Día usa Pointer Events propios (long-press 260ms táctil). La vista Semana usa HTML5 DnD para mouse + Pointer Events/long-press para táctil (motor propio compartido, cascada en `src/lib/cascade.ts`). Las categorías de Ajustes usan `svelte-dnd-action` con `dragHandle` + `delayTouchStart`. No usar HTML5 DnD puro como única vía (no funciona en táctil).
 7. **Español** en UI, commits y docs. CSS con tokens existentes (`--color-green-dark`, etc.), glassmorphism.
 8. **Verificación antes de commit**: `bun test` + `bun run build` en verde; cambios de UI → smoke en el preview del hilo.
 
