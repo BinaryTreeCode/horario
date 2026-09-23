@@ -476,7 +476,12 @@
     const slots: { id: string; start: number; end: number }[] = dayActivities
       .filter(a => a.id !== draggedId)
       .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-    const resolved = resolveDayCascade([...slots, { id: draggedId, start: newStartHour, end: newStartHour + duration }], endHour);
+    // Semántica local: el arrastrado es la pared (movedId) y su hora actual es
+    // el origen — habilita el intercambio al soltar sobre una sola actividad.
+    const resolved = resolveDayCascade(
+      [...slots, { id: draggedId, start: newStartHour, end: newStartHour + duration }],
+      endHour, draggedId, startHour, parseTime(activity.startTime)
+    );
     for (const slot of resolved) result.set(slot.id, { start: slot.start, end: slot.end });
     return result;
   }
@@ -600,7 +605,12 @@
     const slots = dayActivities
       .filter(a => a.id !== resizing!.id)
       .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-    return resolveDayCascade([...slots, { id: resizing.id, start: resizing.origStart, end: newEnd }], endHour);
+    // El resize nunca intercambia (su origen se solapa consigo mismo → cae a
+    // empuje por diseño); solo acota y empuja lo que pisa.
+    return resolveDayCascade(
+      [...slots, { id: resizing.id, start: resizing.origStart, end: newEnd }],
+      endHour, resizing.id, startHour, resizing.origStart
+    );
   }
 
   function onResizeMove(e: PointerEvent) {
@@ -674,7 +684,7 @@
       .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
     const resolved = resolveDayCascade(
       [...slots, { id: activity.id!, start: newStart, end: newStart + dur }],
-      endHour, undefined, startHour
+      endHour, activity.id!, startHour, parseTime(activity.startTime)
     );
     await commitResolved(new Map(resolved.map(sl => [sl.id, { start: sl.start, end: sl.end }])));
   }

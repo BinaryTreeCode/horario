@@ -17,40 +17,93 @@ const codec = {
 
 const s = (id: string, start: number, end: number) => ({ id, start, end });
 
-describe('resolveDayCascade', () => {
-  test('sin colisiones, no toca nada', () => {
-    const out = resolveDayCascade([s('a', 7, 8), s('b', 9, 10)], 22, undefined, 7);
-    expect(out).toEqual([s('a', 7, 8), s('b', 9, 10)]);
+/** Mapa id → slot para aserciones legibles. */
+const byId = (out: { id: string; start: number; end: number }[]) =>
+  out.reduce((m, x) => m.set(x.id, x), new Map<string, { id: string; start: number; end: number }>());
+
+describe('resolveDayCascade — semántica local', () => {
+  test('drop en hueco libre: el resto del día NO se mueve (huecos preservados)', () => {
+    // a 7-8, hueco 8-9.5, b 9.5-10.5: soltar c (desde 10.75) en 8.25 no toca a b
+    const out = byId(resolveDayCascade(
+      [s('a', 7, 8), s('b', 9.5, 10.5), s('c', 8.25, 9.25)],
+      22, 'c', 7, 10.75
+    ));
+    expect(out.get('c')!.start).toBe(8.25);
+    expect(out.get('a')).toEqual(s('a', 7, 8));
+    expect(out.get('b')).toEqual(s('b', 9.5, 10.5));
   });
 
-  test('push-down preserva duración', () => {
-    const out = resolveDayCascade([s('a', 7, 8), s('b', 7.5, 9)], 22, undefined, 7);
-    const b = out.find(x => x.id === 'b')!;
-    expect(b.start).toBe(8);
-    expect(b.end).toBe(9.5);
+  test('drop sobre UN bloque con origen despejado: INTERCAMBIO', () => {
+    // b (1h) cae en 8-9 donde está a (1h): a va al origen de b (9-10) — sin hueco
+    const out = byId(resolveDayCascade(
+      [s('a', 8, 9), s('b', 8, 9), s('c', 10, 11.5)],
+      22, 'b', 7, 9
+    ));
+    expect(out.get('b')).toEqual(s('b', 8, 9));
+    expect(out.get('a')).toEqual(s('a', 9, 10)); // intercambiado al origen
+    expect(out.get('c')).toEqual(s('c', 10, 11.5)); // nadie más se movió
   });
 
-  test('empate con pin: la existente se empuja, no se solapa', () => {
-    // Drop a las 9:00 exacto (encima de b): la pared (dragged) va primero
-    const out = resolveDayCascade([s('b', 9, 10), s('dragged', 9, 10.5)], 22, 'dragged', 7);
-    const b = out.find(x => x.id === 'b')!;
-    const d = out.find(x => x.id === 'dragged')!;
-    expect(d.start).toBe(9);
-    expect(b.start).toBeGreaterThanOrEqual(10.5 - 0.001); // empujada después de la pared
+  test('swap guard: pisado más largo que el origen → empuje, no intercambio', () => {
+    // b (2h) sobre a (1h): a (2h→1h) no cabe en el origen de b
+    const out = byId(resolveDayCascade(
+      [s('a', 8, 9), s('b', 8, 10)],
+      22, 'b', 7, 9
+    ));
+    expect(out.get('b')!.start).toBe(8);
+    expect(out.get('a')!.start).toBe(10); // empujado después de b
   });
 
-  test('la pared (pin) nunca se mueve ni se recorta', () => {
-    const out = resolveDayCascade([s('a', 7, 8), s('dragged', 8, 10), s('c', 9, 11)], 22, 'dragged', 7);
-    const d = out.find(x => x.id === 'dragged')!;
-    expect(d.start).toBe(8);
-    expect(d.end).toBe(10);
+  test('swap guard: el pisado al origen solaparía a un tercero → empuje', () => {
+    // b (1h) sobre a (1h), pero c vive en el origen de b (9-9.75). El swap se
+    // rechaza (a pisaría a c) → empuje: a cae en 9-10 pisa a c → c se empuja.
+    const out = byId(resolveDayCascade(
+      [s('a', 8, 9), s('b', 8, 9), s('c', 9, 9.75)],
+      22, 'b', 7, 9
+    ));
+    expect(out.get('b')!.start).toBe(8);
+    expect(out.get('a')!.start).toBe(9); // empujado tras b
+    expect(out.get('c')!.start).toBe(10); // cadena: a aterrizó encima
   });
 
-  test('día lleno: nada sale por debajo de startHour (A2)', () => {
-    // 7:00–10:00 con 3.5h de actividades: la compresión no puede crear 06:30
+  test('sin origen (drag entre columnas): siempre empuje, nunca swap', () => {
+    // a se empuja a 10.5-11.5 y aterriza sobre c (11-13) → la cadena continúa.
+    const out = byId(resolveDayCascade(
+      [s('a', 8, 9), s('b', 8.5, 10.5), s('c', 11, 13)],
+      22, 'b', 7, null
+    ));
+    expect(out.get('a')!.start).toBe(10.5); // empujado
+    expect(out.get('c')!.start).toBe(11.5); // cadena: a aterrizó encima
+  });
+
+  test('dos pisados: cadena local, lo de arriba y lo lejano intactos', () => {
+    // d cae en 8.5-9.5 pisa a b (8.25-9.25) y a c (9-10)
+    const out = byId(resolveDayCascade(
+      [s('a', 7, 8), s('b', 8.25, 9.25), s('c', 9, 10), s('d', 8.5, 9.5)],
+      22, 'd', 7, null
+    ));
+    expect(out.get('d')!.start).toBe(8.5);
+    expect(out.get('a')).toEqual(s('a', 7, 8)); // arriba del drop: intacto
+    expect(out.get('b')!.start).toBe(9.5); // pisado → empujado tras d
+    expect(out.get('c')!.start).toBe(10.5); // en la cadena
+  });
+
+  test('el primer hueco libre corta la cadena', () => {
+    // d (1.5h) cae en 8.5-10, empuja a y b; c está lejos tras el hueco 12-13
+    const out = byId(resolveDayCascade(
+      [s('a', 8, 9), s('b', 9, 10), s('c', 13, 14), s('d', 8.5, 10)],
+      22, 'd', 7, null
+    ));
+    expect(out.get('d')).toEqual(s('d', 8.5, 10));
+    expect(out.get('a')!.start).toBe(10);
+    expect(out.get('b')!.start).toBe(11);
+    expect(out.get('c')).toEqual(s('c', 13, 14)); // hueco 12-13 la protegió
+  });
+
+  test('día lleno: nada sale de [startHour, endHour] (A2)', () => {
     const out = resolveDayCascade(
-      [s('a', 7, 8.5), s('b', 8, 9.5), s('c', 9, 10.5), s('dragged', 7, 9)],
-      10, 'dragged', 7
+      [s('a', 7, 8.5), s('b', 8, 9.5), s('c', 9, 10.5), s('d', 7, 9)],
+      10, 'd', 7, null
     );
     for (const slot of out) {
       expect(slot.start).toBeGreaterThanOrEqual(7 - 0.001);
@@ -59,15 +112,14 @@ describe('resolveDayCascade', () => {
   });
 
   test('endHour 24: los slots llegan a 24:00 sin pasarse', () => {
-    const out = resolveDayCascade([s('a', 22, 23.5), s('b', 23, 24.5)], 24, undefined, 7);
+    const out = resolveDayCascade([s('a', 22, 23.5), s('b', 23, 24.5)], 24, 'b', 7, null);
     for (const slot of out) {
       expect(slot.end).toBeLessThanOrEqual(24.001);
     }
   });
 
   test('minutos enteros: sin 09:60 por flotantes (9.999h)', () => {
-    // Duración con flotante feo: 9:00 → 10:59.94
-    const out = resolveDayCascade([s('a', 9, 9.999), s('b', 10, 11)], 22, undefined, 7);
+    const out = resolveDayCascade([s('a', 9, 9.999), s('b', 10, 11)], 22, 'b', 7, null);
     for (const slot of out) {
       const totalMin = Math.round(slot.start * 60);
       expect(totalMin % 15).toBe(0);
@@ -90,11 +142,9 @@ describe('propagateWeekly', () => {
   test('mover trabajo1 a sábado 8:00: push consistente, cero solapes sin resolver', () => {
     const res = propagateWeekly(acts, 'trabajo1', 8, 22, codec, [5]);
     // trabajo1 8:00–9:30 pisa al desayuno (9:00) el sábado → empujado a 9:30.
-    // Una fila = un horario: el push es global (opción 2 elegida) y el cierre
-    // garantiza que TODOS los días quedan resueltos — eso es lo opuesto a la
-    // corrupción ex-C3 (solapes heredados que nadie calculó).
+    // Una fila = un horario: el push es global (opción elegida) y el cierre
+    // garantiza que TODOS los días quedan resueltos — cero solapes heredados.
     expect(res.times.get('desayuno')!.start).toBeCloseTo(9.5, 3);
-    // Aserción fuerte: ningún par de actividades se solapa en NINGÚN día.
     for (let d = 0; d < 7; d++) {
       const slots = acts
         .filter(a => (a.id === 'trabajo1' ? d === 5 : a.daysOfWeek.includes(d)))
@@ -111,15 +161,12 @@ describe('propagateWeekly', () => {
   test('colisión nueva en destino empuja al vecino con duración preservada', () => {
     const res = propagateWeekly(acts, 'trabajo1', 9, 22, codec, [5]);
     const sab = res.byDay.get(5)!;
-    // trabajo1 a las 9:00-10:30 empuja desayuno (9:00-9:30) a 10:30-11:00
     expect(sab.get('trabajo1')!.start).toBe(9);
     expect(sab.get('desayuno')!.start).toBeCloseTo(10.5, 3);
     expect(sab.get('desayuno')!.end).toBeCloseTo(11, 3);
   });
 
   test('la propagación cierra transitivamente: vecinos afectados re-resuelven sus otros días', () => {
-    // Desayuno (todos los días) a las 9:15: colisiona con trabajo1 (9:15) en L-V.
-    // El push cambia trabajo1, lo que afecta SUS días → iteración extra.
     const res = propagateWeekly(acts, 'desayuno', 9.25, 22, codec, [0, 1, 2, 3, 4, 5, 6]);
     const lunes = res.byDay.get(1)!;
     const t1 = lunes.get('trabajo1')!;
@@ -128,7 +175,6 @@ describe('propagateWeekly', () => {
 
   test('drag entre columnas: mineDays sin el origen (quita lunes, agrega sábado)', () => {
     const res = propagateWeekly(acts, 'trabajo1', 12, 22, codec, [4, 5]);
-    // El horario global final es único (una fila = un horario)
     const t = res.times.get('trabajo1')!;
     expect(t.start).toBe(12);
     expect(t.end).toBe(13.5);

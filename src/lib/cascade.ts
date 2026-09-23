@@ -1,23 +1,28 @@
 /**
- * Resolución de colisiones (cascada push-down) compartida por las vistas
- * Día y Semana. Un solo dueño: cuando cambia la matemática, cambia en ambos
- * lados. Pura y testeada (cascade.test.ts).
+ * Resolución de colisiones del drag & drop compartida por las vistas Día y
+ * Semana. Un solo dueño: cuando cambia la matemática, cambia en ambos lados.
+ * Pura y testeada (cascade.test.ts).
  *
- * Modelo (greedy forward, acotado por construcción): cada bloque se coloca
- * después de lo ya colocado (push-down) preservando su duración; si no cabe
- * antes del fin del día se sube pegado al final; si tampoco cabe ahí, queda
- * en el borde y se recorta (último recurso). NADA sale nunca del rango
- * [startHour, endHour] ni por abajo ni por arriba (A2) — sin horas
- * negativas tipo "06:30" en un día 7–10.
+ * Semántica LOCAL (decidida con el usuario): el bloque soltado es una pared
+ * y solo se mueve lo que pisa directamente.
+ *  1. Sin colisión → el resto del día NO se entera: sin cerrar huecos ni
+ *     mover vecinos (el barrido global re-empaquetaba la columna entera y
+ *     "arrastraba" bloques que no estorbaban).
+ *  2. Un solo bloque pisado → INTERCAMBIO: el pisado ocupa el origen del
+ *     arrastrado, cada uno conserva su duración y nadie más se mueve.
+ *     Guardas: el intercambio se descarta (y cae a empuje) si el pisado no
+ *     cabe en el origen, solaparía a otro bloque o al propio arrastrado.
+ *  3. Dos o más pisados → empuje LOCAL en cadena: solo los pisados y quien
+ *     choquen directo debajo; el primer hueco libre corta la cadena; como
+ *     último recurso se recorta contra el fin del día.
+ *  4. Los bloques por encima del drop jamás se tocan. NADA sale del rango
+ *     [startHour, endHour] (A2) y todo queda en minutos enteros (anti
+ *     "09:60" por flotantes con datos importados).
  *
- * Aritmética en MINUTOS ENTEROS: evita "09:60" por error de coma flotante
- * con duraciones importadas no múltiplo de 15 (9.999h → 09:60).
- *
- * Multi-día: las actividades son UNA fila con horario global, así que un
- * cambio se propaga en cierre transitivo: cada día afectado se resuelve con
- * la actividad arrastrada ANCLADA (pin) a lo que el usuario vio; los vecinos
- * empujados cambian su horario global, lo que puede afectar SUS otros días →
- * se re-resuelven hasta estabilizar (acotado a 7 iteraciones = 7 días).
+ * Multi-día (Semana): una fila = un horario global; propagateWeekly resuelve
+ * cada día con la arrastrada ANCLADA (pin) a lo que el usuario vio y propaga
+ * en cierre transitivo hasta estabilizar, con protección anti-corrupción
+ * ex-C3 (el push de un vecino solo es global si no rompe SUS otros días).
  */
 import type { Activity } from './types.js';
 
@@ -37,48 +42,83 @@ export interface TimeCodec {
 const toMin = (h: number) => Math.round(h * 60);
 
 /**
- * Aplica la cascada push-down a un día completo, en minutos enteros y
- * acotada a [startHour, endHour]. `slots` debe cubrir TODAS las actividades
- * del día. Con `pinnedId`, esa actividad es una pared: nunca se mueve ni se
- * recorta (el usuario la vio así). Sin pinnedId, todos los bloques son
- * colocables. Toque mínimo: no cierra huecos pre-existentes (M2).
+ * Resuelve un día. `slots` debe incluir TODOS los bloques del día, con el
+ * bloque movido (`movedId`, requerido) en su posición DESTINO. `originStart`
+ * es de donde salió el movido (habilita el intercambio); null = bloque nuevo.
  */
 export function resolveDayCascade(
   slots: Slot[],
   endHour: number,
-  pinnedId?: string,
-  startHour = 0
+  movedId: string,
+  startHour = 0,
+  originStart?: number | null
 ): Slot[] {
   const startMin = toMin(startHour);
   const endMin = toMin(endHour);
 
-  // En empates de arranque la pared va PRIMERO: si el drop cae exactamente
-  // encima de otra actividad, la existente se empuja hacia abajo (hay
-  // espacio) — misma semántica push-down que la vista Día, no solape.
-  const all = slots
-    .map(s => ({ id: s.id, start: toMin(s.start), end: toMin(s.end) }))
-    .sort((a, b) => a.start - b.start || (a.id === pinnedId ? -1 : b.id === pinnedId ? 1 : 0));
+  const finish = (list: { id: string; start: number; end: number }[]) =>
+    list
+      .sort((a, b) => a.start - b.start)
+      .map(s => ({ id: s.id, start: s.start / 60, end: s.end / 60 }));
 
+  const moved = slots.find(s => s.id === movedId);
+  if (!moved) {
+    return slots.map(s => ({ id: s.id, start: toMin(s.start) / 60, end: toMin(s.end) / 60 }));
+  }
+  const mStart = Math.max(startMin, toMin(moved.start));
+  const mEnd = Math.min(endMin, Math.max(mStart, toMin(moved.end)));
+
+  const others = slots
+    .filter(s => s.id !== movedId)
+    .map(s => ({ id: s.id, start: toMin(s.start), end: Math.max(toMin(s.start), toMin(s.end)) }))
+    .sort((a, b) => a.start - b.start);
+
+  // 1) Sin colisión: el resto del día no se entera (huecos preservados).
+  const colliding = others.filter(o => o.start < mEnd && mStart < o.end);
+  if (colliding.length === 0) {
+    return finish([...others, { id: movedId, start: mStart, end: mEnd }]);
+  }
+
+  // 2) Un solo pisado con origen despejado → intercambio (swap).
+  if (colliding.length === 1 && originStart != null) {
+    const d = colliding[0];
+    const dDur = d.end - d.start;
+    const oStart = toMin(originStart);
+    const oEnd = oStart + dDur;
+    const rest = others.filter(o => o.id !== d.id);
+    const fitsDay = oStart >= startMin && oEnd <= endMin;
+    // Libre: no solapa a ningún otro bloque ni al arrastrado en su destino.
+    const freeSpot =
+      !rest.some(o => o.start < oEnd && oStart < o.end) && !(mStart < oEnd && oStart < mEnd);
+    if (fitsDay && freeSpot) {
+      return finish([
+        ...rest,
+        { id: d.id, start: oStart, end: oEnd },
+        { id: movedId, start: mStart, end: mEnd }
+      ]);
+    }
+  }
+
+  // 3) Empuje local en cadena: pisados + quienes queden en el camino directo.
   const out: { id: string; start: number; end: number }[] = [];
-  let cursor = startMin; // fin del último bloque colocado (barrera de push-down)
-
-  for (const slot of all) {
-    if (slot.id === pinnedId) {
-      // Pared: queda exactamente donde el usuario la soltó.
-      cursor = Math.max(cursor, slot.end);
-      out.push(slot);
+  let cursor = mEnd; // fin del último bloque colocado de la cadena
+  for (const o of others) {
+    const collides = o.start < mEnd && mStart < o.end;
+    // Arriba del drop, o ya tras el primer hueco libre: intacto.
+    if (!collides && (o.end <= mStart || o.start >= cursor)) {
+      out.push(o);
       continue;
     }
-
-    const dur = Math.max(0, slot.end - slot.start);
-    let start = Math.max(slot.start, cursor); // push-down preservando duración
+    const dur = Math.max(0, o.end - o.start);
+    let start = Math.max(o.start, cursor); // push-down preservando duración
     let end = start + dur;
-
     if (end > endMin) {
-      // No cabe donde quedó: subir pegado al final del día (comprimir hacia
-      // atrás) si hay hueco completo; si no, pegado al borde y recorte.
+      // No cabe antes del fin del día: subir pegado al final si el hueco está
+      // libre; si no, pegado al borde y recorte (último recurso).
       const pulled = Math.max(cursor, endMin - dur);
-      if (pulled + dur <= endMin) {
+      const pulledFree =
+        pulled + dur <= endMin && !out.some(q => q.start < pulled + dur && pulled < q.end);
+      if (pulledFree) {
         start = pulled;
         end = pulled + dur;
       } else {
@@ -86,15 +126,12 @@ export function resolveDayCascade(
         end = endMin;
       }
     }
-
     if (start < startMin) start = startMin;
     end = Math.max(end, start); // guard anti-inversión
-
-    out.push({ id: slot.id, start, end });
+    out.push({ id: o.id, start, end });
     cursor = Math.max(cursor, end);
   }
-
-  return out.map(s => ({ id: s.id, start: s.start / 60, end: s.end / 60 }));
+  return finish([...out, { id: movedId, start: mStart, end: mEnd }]);
 }
 
 export interface WeeklyResolution {
@@ -133,18 +170,23 @@ export function propagateWeekly(
   const myDays = new Set(mineDays);
   const isOnDay = (a: Activity, day: number) =>
     a.id === actId ? myDays.has(day) : a.daysOfWeek.includes(day);
+  // Origen del arrastrado en un día concreto: su horario global previo si ya
+  // estaba ese día (habilita el intercambio); null si el día es nuevo (drag
+  // entre columnas → no hay nada que intercambiar, cae a empuje).
+  const originOnDay = (day: number): number | null =>
+    act.daysOfWeek.includes(day) ? codec.parse(act.startTime) : null;
 
   const daySet = new Set<number>(mineDays);
   for (let iter = 0; iter < 7; iter++) {
     let changed = false;
     for (const day of [...daySet].sort((a, b) => a - b)) {
       const slots = activities.filter(a => isOnDay(a, day)).map(a => times.get(a.id!)!);
-      const resolved = resolveDayCascade(slots, endHour, actId, startHour);
+      const resolved = resolveDayCascade(slots, endHour, actId, startHour, originOnDay(day));
       for (const s of resolved) {
         const cur = times.get(s.id);
         if (!cur || Math.abs(cur.start - s.start) > 1e-9 || Math.abs(cur.end - s.end) > 1e-9) {
-          // El push de un vecino es LOCAL al día: cambiar su horario global
-          // lo movería también en días donde NADIE lo empujó (corrupción
+          // El push/swap de un vecino es LOCAL al día: cambiar su horario
+          // global lo movería también en días donde NADIE lo pisó (corrupción
           // silenciosa, ex-C3). Protección: solo se acepta el movimiento
           // global del vecino si no colisiona con nadie en SUS otros días;
           // si rompería, se descarta (queda el solape local permitido).
