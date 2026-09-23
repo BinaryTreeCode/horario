@@ -479,11 +479,11 @@
     const slots: { id: string; start: number; end: number }[] = dayActivities
       .filter(a => a.id !== draggedId)
       .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-    // Semántica local: el arrastrado es la pared (movedId) y su hora actual es
-    // el origen — habilita el intercambio al soltar sobre una sola actividad.
+    // Semántica local: el arrastrado es la pared (movedId); al soltar sobre
+    // una sola actividad aplica la regla de mitades (arriba/abajo pegado).
     const resolved = resolveDayCascade(
       [...slots, { id: draggedId, start: newStartHour, end: newStartHour + duration }],
-      endHour, draggedId, startHour, parseTime(activity.startTime)
+      endHour, draggedId, startHour
     );
     for (const slot of resolved) result.set(slot.id, { start: slot.start, end: slot.end });
     return result;
@@ -609,11 +609,11 @@
     const slots = dayActivities
       .filter(a => a.id !== resizing!.id)
       .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-    // El resize nunca intercambia (su origen se solapa consigo mismo → cae a
-    // empuje por diseño); solo acota y empuja lo que pisa.
+    // El resize no reubica el arrastrado (keepPlace): conserva su inicio y
+    // solo empuja lo que pisa al estirar.
     return resolveDayCascade(
       [...slots, { id: resizing.id, start: resizing.origStart, end: newEnd }],
-      endHour, resizing.id, startHour, resizing.origStart
+      endHour, resizing.id, startHour, true
     );
   }
 
@@ -688,7 +688,7 @@
       .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
     const resolved = resolveDayCascade(
       [...slots, { id: activity.id!, start: newStart, end: newStart + dur }],
-      endHour, activity.id!, startHour, parseTime(activity.startTime)
+      endHour, activity.id!, startHour
     );
     await commitResolved(new Map(resolved.map(sl => [sl.id, { start: sl.start, end: sl.end }])));
   }

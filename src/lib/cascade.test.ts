@@ -21,66 +21,89 @@ const s = (id: string, start: number, end: number) => ({ id, start, end });
 const byId = (out: { id: string; start: number; end: number }[]) =>
   out.reduce((m, x) => m.set(x.id, x), new Map<string, { id: string; start: number; end: number }>());
 
-describe('resolveDayCascade — semántica local', () => {
+describe('resolveDayCascade — semántica local con regla de mitades', () => {
   test('drop en hueco libre: el resto del día NO se mueve (huecos preservados)', () => {
-    // a 7-8, hueco 8-9.5, b 9.5-10.5: soltar c (desde 10.75) en 8.25 no toca a b
+    // a 7-8, hueco 8-9.5, b 9.5-10.5: soltar c en 8.25 no toca a nadie
     const out = byId(resolveDayCascade(
       [s('a', 7, 8), s('b', 9.5, 10.5), s('c', 8.25, 9.25)],
-      22, 'c', 7, 10.75
+      22, 'c', 7
     ));
     expect(out.get('c')!.start).toBe(8.25);
     expect(out.get('a')).toEqual(s('a', 7, 8));
     expect(out.get('b')).toEqual(s('b', 9.5, 10.5));
   });
 
-  test('drop sobre UN bloque con origen despejado: INTERCAMBIO', () => {
-    // b (1h) cae en 8-9 donde está a (1h): a va al origen de b (9-10) — sin hueco
+  test('mitad superior del pisado → queda ARRIBA pegado, sin empujar nada', () => {
+    // b cae dentro de a (8-9) con centro en 8 (mitad superior)
+    // → b sube pegado 7-8 (termina donde empieza a), a intacto.
     const out = byId(resolveDayCascade(
-      [s('a', 8, 9), s('b', 8, 9), s('c', 10, 11.5)],
-      22, 'b', 7, 9
+      [s('a', 8, 9), s('b', 7.5, 8.5)],
+      22, 'b', 7
+    ));
+    expect(out.get('b')).toEqual(s('b', 7, 8));
+    expect(out.get('a')).toEqual(s('a', 8, 9));
+  });
+
+  test('empate de centros (drop coincidente) → ABAJO: lo espera quien suelta en la parte baja', () => {
+    const out = byId(resolveDayCascade(
+      [s('a', 8, 9), s('b', 8, 9)],
+      22, 'b', 7
+    ));
+    expect(out.get('a')).toEqual(s('a', 8, 9));
+    expect(out.get('b')).toEqual(s('b', 9, 10));
+  });
+
+  test('mitad inferior del pisado → queda DEBAJO pegado', () => {
+    // b cae en 8.5-9.5 dentro de a (8-9): centro 9 > 8.5 (mitad inferior)
+    // → b baja pegado 9-10 (empieza donde termina a), a intacto.
+    const out = byId(resolveDayCascade(
+      [s('a', 8, 9), s('b', 8.5, 9.5)],
+      22, 'b', 7
+    ));
+    expect(out.get('a')).toEqual(s('a', 8, 9));
+    expect(out.get('b')).toEqual(s('b', 9, 10));
+  });
+
+  test('mitad superior con el hueco ocupado → toma el inicio del pisado y lo empuja', () => {
+    // z ocupa el hueco 7-7.5 sobre a: b (drop 7.5-8.5, mitad superior) no cabe
+    // pegado arriba → entra en 8-9 (inicio del pisado) y empuja a a; z intacto.
+    const out = byId(resolveDayCascade(
+      [s('z', 7, 7.5), s('a', 8, 9), s('b', 7.5, 8.5)],
+      22, 'b', 7
     ));
     expect(out.get('b')).toEqual(s('b', 8, 9));
-    expect(out.get('a')).toEqual(s('a', 9, 10)); // intercambiado al origen
-    expect(out.get('c')).toEqual(s('c', 10, 11.5)); // nadie más se movió
+    expect(out.get('a')!.start).toBe(9);
+    expect(out.get('z')).toEqual(s('z', 7, 7.5));
   });
 
-  test('swap guard: pisado más largo que el origen → empuje, no intercambio', () => {
-    // b (2h) sobre a (1h): a (2h→1h) no cabe en el origen de b
+  test('mitad inferior empuja en cadena lo que el destino pisa', () => {
+    // b (15min) cae en la mitad inferior de a (8-9) → baja pegado 9-9:15, pero
+    // c vive ahí → c baja a 9:15-10:15; a intacto.
     const out = byId(resolveDayCascade(
-      [s('a', 8, 9), s('b', 8, 10)],
-      22, 'b', 7, 9
+      [s('a', 8, 9), s('c', 9, 10), s('b', 8.5, 8.75)],
+      22, 'b', 7
     ));
-    expect(out.get('b')!.start).toBe(8);
-    expect(out.get('a')!.start).toBe(10); // empujado después de b
+    expect(out.get('a')).toEqual(s('a', 8, 9));
+    expect(out.get('b')).toEqual(s('b', 9, 9.25));
+    expect(out.get('c')!.start).toBe(9.25);
   });
 
-  test('swap guard: el pisado al origen solaparía a un tercero → empuje', () => {
-    // b (1h) sobre a (1h), pero c vive en el origen de b (9-9.75). El swap se
-    // rechaza (a pisaría a c) → empuje: a cae en 9-10 pisa a c → c se empuja.
+  test('keepPlace (resize): el arrastrado conserva su inicio y solo empuja', () => {
+    // Estirar b hasta 9.5: la regla de mitades no aplica (no se reubica) y
+    // empuja a a, que estorbaba.
     const out = byId(resolveDayCascade(
-      [s('a', 8, 9), s('b', 8, 9), s('c', 9, 9.75)],
-      22, 'b', 7, 9
+      [s('a', 8, 9), s('b', 8, 9.5)],
+      22, 'b', 7, true
     ));
-    expect(out.get('b')!.start).toBe(8);
-    expect(out.get('a')!.start).toBe(9); // empujado tras b
-    expect(out.get('c')!.start).toBe(10); // cadena: a aterrizó encima
-  });
-
-  test('sin origen (drag entre columnas): siempre empuje, nunca swap', () => {
-    // a se empuja a 10.5-11.5 y aterriza sobre c (11-13) → la cadena continúa.
-    const out = byId(resolveDayCascade(
-      [s('a', 8, 9), s('b', 8.5, 10.5), s('c', 11, 13)],
-      22, 'b', 7, null
-    ));
-    expect(out.get('a')!.start).toBe(10.5); // empujado
-    expect(out.get('c')!.start).toBe(11.5); // cadena: a aterrizó encima
+    expect(out.get('b')).toEqual(s('b', 8, 9.5));
+    expect(out.get('a')!.start).toBe(9.5);
   });
 
   test('dos pisados: cadena local, lo de arriba y lo lejano intactos', () => {
     // d cae en 8.5-9.5 pisa a b (8.25-9.25) y a c (9-10)
     const out = byId(resolveDayCascade(
       [s('a', 7, 8), s('b', 8.25, 9.25), s('c', 9, 10), s('d', 8.5, 9.5)],
-      22, 'd', 7, null
+      22, 'd', 7
     ));
     expect(out.get('d')!.start).toBe(8.5);
     expect(out.get('a')).toEqual(s('a', 7, 8)); // arriba del drop: intacto
@@ -92,7 +115,7 @@ describe('resolveDayCascade — semántica local', () => {
     // d (1.5h) cae en 8.5-10, empuja a y b; c está lejos tras el hueco 12-13
     const out = byId(resolveDayCascade(
       [s('a', 8, 9), s('b', 9, 10), s('c', 13, 14), s('d', 8.5, 10)],
-      22, 'd', 7, null
+      22, 'd', 7
     ));
     expect(out.get('d')).toEqual(s('d', 8.5, 10));
     expect(out.get('a')!.start).toBe(10);
@@ -103,7 +126,7 @@ describe('resolveDayCascade — semántica local', () => {
   test('día lleno: nada sale de [startHour, endHour] (A2)', () => {
     const out = resolveDayCascade(
       [s('a', 7, 8.5), s('b', 8, 9.5), s('c', 9, 10.5), s('d', 7, 9)],
-      10, 'd', 7, null
+      10, 'd', 7
     );
     for (const slot of out) {
       expect(slot.start).toBeGreaterThanOrEqual(7 - 0.001);
@@ -112,14 +135,14 @@ describe('resolveDayCascade — semántica local', () => {
   });
 
   test('endHour 24: los slots llegan a 24:00 sin pasarse', () => {
-    const out = resolveDayCascade([s('a', 22, 23.5), s('b', 23, 24.5)], 24, 'b', 7, null);
+    const out = resolveDayCascade([s('a', 22, 23.5), s('b', 23, 24.5)], 24, 'b', 7);
     for (const slot of out) {
       expect(slot.end).toBeLessThanOrEqual(24.001);
     }
   });
 
   test('minutos enteros: sin 09:60 por flotantes (9.999h)', () => {
-    const out = resolveDayCascade([s('a', 9, 9.999), s('b', 10, 11)], 22, 'b', 7, null);
+    const out = resolveDayCascade([s('a', 9, 9.999), s('b', 10, 11)], 22, 'b', 7);
     for (const slot of out) {
       const totalMin = Math.round(slot.start * 60);
       expect(totalMin % 15).toBe(0);
@@ -139,15 +162,15 @@ describe('propagateWeekly', () => {
     mkAct('rutina', [4, 5, 6], '10:45', '11:45')
   ];
 
-  test('mover trabajo1 a sábado 8:00: push consistente, cero solapes sin resolver', () => {
+  test('mover trabajo1 a sábado 8:00: mitad superior → sube pegado, desayuno intacto', () => {
     const res = propagateWeekly(acts, 'trabajo1', 8, 22, codec, [5]);
-    // trabajo1 8:00–9:30 pisa al desayuno (9:00) el sábado → empujado a 9:30.
-    // Una fila = un horario: el push es global (opción elegida) y el cierre
-    // garantiza que TODOS los días quedan resueltos — cero solapes heredados.
-    expect(res.times.get('desayuno')!.start).toBeCloseTo(9.5, 3);
+    // Centro del drop (8:45) en la mitad superior del desayuno (9:00-9:30)
+    // → trabajo1 sube pegado 7:30-9:00 y el desayuno NO se mueve.
+    expect(res.times.get('trabajo1')!.start).toBeCloseTo(7.5, 3);
+    expect(res.times.get('desayuno')!.start).toBe(9);
     for (let d = 0; d < 7; d++) {
       const slots = acts
-        .filter(a => (a.id === 'trabajo1' ? d === 5 : a.daysOfWeek.includes(d)))
+        .filter(a => (a.id === 'trabajo1' ? [4, 5].includes(d) : a.daysOfWeek.includes(d)))
         .map(a => res.times.get(a.id!)!)
         .sort((x, y) => x.start - y.start);
       for (let i = 1; i < slots.length; i++) {
@@ -158,19 +181,23 @@ describe('propagateWeekly', () => {
     expect(res.times.get('rutina')!.start).toBe(10.75);
   });
 
-  test('colisión nueva en destino empuja al vecino con duración preservada', () => {
+  test('mitad inferior en el destino: el arrastrado queda debajo del pisado', () => {
     const res = propagateWeekly(acts, 'trabajo1', 9, 22, codec, [5]);
     const sab = res.byDay.get(5)!;
-    expect(sab.get('trabajo1')!.start).toBe(9);
-    expect(sab.get('desayuno')!.start).toBeCloseTo(10.5, 3);
-    expect(sab.get('desayuno')!.end).toBeCloseTo(11, 3);
+    // Centro del drop (9:45) en la mitad inferior del desayuno (9:00-9:30)
+    // → trabajo1 baja pegado 9:30-11:00; desayuno intacto.
+    expect(sab.get('trabajo1')!.start).toBe(9.5);
+    expect(sab.get('desayuno')!.start).toBe(9);
+    expect(sab.get('desayuno')!.end).toBe(9.5);
   });
 
   test('la propagación cierra transitivamente: vecinos afectados re-resuelven sus otros días', () => {
     const res = propagateWeekly(acts, 'desayuno', 9.25, 22, codec, [0, 1, 2, 3, 4, 5, 6]);
     const lunes = res.byDay.get(1)!;
-    const t1 = lunes.get('trabajo1')!;
-    expect(t1.start).toBeGreaterThanOrEqual(9.5 - 0.001); // empujado después del desayuno
+    // Mitad superior del trabajo1 (9:15-10:45 = 9.25-10.75) → desayuno sube
+    // pegado 8:45-9:15 (8.75-9.25).
+    expect(lunes.get('desayuno')!.end).toBeCloseTo(9.25, 3);
+    expect(lunes.get('trabajo1')!.start).toBe(9.25);
   });
 
   test('drag entre columnas: mineDays sin el origen (quita lunes, agrega sábado)', () => {
