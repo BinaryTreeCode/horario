@@ -849,11 +849,22 @@
   }
 
   /* El fantasma arrastrado: sin transición de top (el HTML5 DnD no mueve la
-     tarjeta, solo la imagen del cursor) pero elevado y semi-transparente. */
+     tarjeta, solo la imagen del cursor) pero elevado, semi-transparente y
+     con una presión sutil (98%) — feedback de agarre minimalista. */
   .activity-item.drag-ghost {
     opacity: 0.55;
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
     z-index: 40;
+    transform: scale(0.98);
+  }
+
+  /* Accesibilidad: sin deslizamientos para quien pide menos movimiento. */
+  @media (prefers-reduced-motion: reduce) {
+    .activity-item,
+    .activity-item.drag-ghost {
+      transition: none !important;
+      animation: none !important;
+    }
   }
   .activity-item:hover,
   .activity-item:focus-visible {

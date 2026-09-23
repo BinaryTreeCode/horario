@@ -389,7 +389,9 @@
 
   function moveGhost(clientY: number) {
     if (!pendingDrag) return;
-    pendingDrag.card.style.transform = `translateY(${clientY - pendingDrag.startY}px)`;
+    // Lift minimalista: el fantasma crece 3% — feedback de agarre sin ruido.
+    // Al soltar, la transición base de transform lo asienta de vuelta a 1.
+    pendingDrag.card.style.transform = `translateY(${clientY - pendingDrag.startY}px) scale(1.03)`;
   }
 
   // M5: auto-scroll del contenedor al arrastrar cerca de sus bordes — sin
@@ -1299,6 +1301,17 @@
     z-index: 100;
     cursor: grabbing;
     will-change: transform;
+  }
+
+  /* Accesibilidad: quien pide menos movimiento no recorre la cascada —
+     los cambios de posición son instantáneos, sin deslizamientos. */
+  @media (prefers-reduced-motion: reduce) {
+    .daily-activity-card,
+    .daily-activity-card.dragging,
+    .resize-handle::after {
+      transition: none !important;
+      animation: none !important;
+    }
   }
 
   .daily-activity-card:hover {
