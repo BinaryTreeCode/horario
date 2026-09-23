@@ -488,6 +488,11 @@
       flex-wrap: wrap;
       gap: 0.75rem;
     }
+    /* Regla dura #5: los .btn medían 42px reales (line-height recortaba el min-height). */
+    .dashboard-header :global(.btn) {
+      min-height: 44px;
+      line-height: 1;
+    }
     .header-left {
       width: 100%;
       justify-content: space-between;

@@ -42,6 +42,10 @@
   let confirmImport = $state(false);
   let pendingImport = $state<{ validation: ValidationResult; summary: string; warnings: string[] } | null>(null);
 
+  // Botón real para el file input oculto (táctil: el label-que-envuelve era frágil)
+  let fileInput: HTMLInputElement | null = $state(null);
+  let importFileName = $state<string | null>(null);
+
   $effect(() => {
     isLoggedIn().then(v => { loggedIn = v; authLoading = false; });
     const off = onSyncChange((s) => { syncStatus = s; });
@@ -265,7 +269,11 @@
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = ''; // reset DESPUÉS de capturar el file (asignar value='' limpia input.files)
-    if (!file) return;
+    if (!file) {
+      importFileName = null;
+      return;
+    }
+    importFileName = file.name;
     if (file.size > MAX_IMPORT_SIZE) {
       toastErr(`El archivo es demasiado grande (${(file.size / 1024 / 1024).toFixed(1)} MB). El límite es ${MAX_IMPORT_SIZE / 1024 / 1024} MB.`);
       return;
@@ -464,10 +472,25 @@
               <Download size={18} /> Exportar JSON
             </button>
             
-            <label class="btn btn-secondary btn-backup import-label">
+            <button
+              class="btn btn-secondary btn-backup import-btn"
+              onclick={() => fileInput?.click()}
+              aria-label="Importar JSON: elegir archivo"
+            >
               <Upload size={18} /> Importar JSON
-              <input type="file" accept=".json,.txt,application/json,text/plain" onchange={handleImport} hidden />
-            </label>
+            </button>
+            {#if importFileName}
+              <span class="import-filename" role="status">Archivo: {importFileName}</span>
+            {/if}
+            <input
+              bind:this={fileInput}
+              type="file"
+              accept=".json,.txt,application/json,text/plain"
+              onchange={handleImport}
+              class="sr-only"
+              tabindex="-1"
+              aria-hidden="true"
+            />
           </div>
           <p class="backup-info">Exporta actividades, categorías, ediciones temporales e imágenes para respaldarlas o moverlas a otro navegador. Al importar se te pedirá confirmación y verás un resumen antes de reemplazar tus datos.</p>
         </div>
@@ -810,8 +833,18 @@
     background: white;
   }
 
-  .import-label {
+  .import-btn {
     margin: 0;
+  }
+
+  .import-filename {
+    font-size: 0.75rem;
+    color: var(--color-brown-bark);
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
   }
 
   .backup-info {
@@ -973,6 +1006,35 @@
     min-width: 0;
   }
 
+  /* Regla dura #5 (AGENTS.md): todo target táctil ≥ 44px. Medido a 360px:
+     inputs 35px, selects 42px, color wells 32×32, remove-cat 40×40, auth inputs 35px.
+     Agrupado por intención: texto/selección (44px + 16px anti-zoom iOS), color, acción. */
+  @media (max-width: 768px) {
+    /* Texto y selección: el 16px evita el auto-zoom de iOS (<16px al enfocar) */
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    select,
+    .form-group-compact select,
+    .auth-form input,
+    .category-edit-item input[type="text"] {
+      min-height: 44px;
+      font-size: 16px;
+    }
+    input[type="color"] {
+      width: 44px;
+      height: 44px;
+    }
+    .remove-cat {
+      min-width: 44px;
+      min-height: 44px;
+    }
+    .btn-backup,
+    .import-btn {
+      min-height: 44px;
+    }
+  }
+
   @media (max-width: 640px) {
     .modal-content {
       max-width: 100%;
@@ -990,6 +1052,9 @@
     }
     .backup-actions {
       flex-direction: column;
+    }
+    .import-filename {
+      max-width: 100%;
     }
   }
 </style>
