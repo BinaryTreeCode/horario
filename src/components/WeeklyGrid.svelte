@@ -456,16 +456,17 @@
   }
 
   async function onResizeUp(e: PointerEvent) {
-    const st = resizing;
+    const st = resizing!; // null → computeResizePreview da null y sale antes de usarse
+    // Calcular ANTES de limpiar: computeResizePreview necesita `resizing`.
+    const slots = computeResizePreview(e.clientY);
     cleanupResizeListeners();
     resizing = null;
-    if (!st) return;
-    const slots = computeResizePreview(e.clientY);
     if (!slots) { dropPreview = null; return; }
     // Commit global: la nueva duración se resuelve en TODOS los días y se
     // escribe el horario global final (una fila = un horario).
-    const times = propagateWeekly(activities, st.id, st.origStart, endHour, { parse: parseTime, format: formatTime }, activities.find(a => a.id === st.id)?.daysOfWeek ?? [], (slots.get(st.id)?.end ?? st.origEnd) - st.origStart).times;
-    await commitWeeklyTimes(times, `Estirar ${activities.find(a => a.id === st.id)?.name ?? 'actividad'}`);
+    const act = activities.find(a => a.id === st.id);
+    const times = propagateWeekly(activities, st.id, st.origStart, endHour, { parse: parseTime, format: formatTime }, act?.daysOfWeek ?? [], (slots.get(st.id)?.end ?? st.origEnd) - st.origStart, 0, true).times;
+    await commitWeeklyTimes(times, `Estirar ${act?.name ?? 'actividad'}`);
     dropPreview = null;
     lastDragOverSlot = NaN;
   }

@@ -628,12 +628,11 @@
   }
 
   async function onResizeUp(e: PointerEvent) {
-    const st = resizing;
+    // Calcular ANTES de limpiar: computeResizePreview necesita `resizing`.
+    const resolved = computeResizePreview(e.clientY);
     cleanupResizeListeners();
     resizing = null;
     draggedActivityId = null;
-    if (!st) return;
-    const resolved = computeResizePreview(e.clientY);
     if (resolved) {
       suppressNextClick = true;
       setTimeout(() => { suppressNextClick = false; }, 150);

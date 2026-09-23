@@ -207,6 +207,19 @@ describe('propagateWeekly', () => {
     expect(t.end).toBe(13.5);
   });
 
+  test('resize multi-día (keepPlace): misma duración en todos los días, inicio intacto', () => {
+    // Estirar Rutina (10:45-11:45) a 1.5h: en TODOS sus días conserva 10:45 y
+    // empuja solo lo que pisa; el desayuno (9:00-9:30) no se entera.
+    const res = propagateWeekly(acts, 'rutina', 10.75, 22, codec, [4, 5, 6], 1.5, 0, true);
+    expect(res.times.get('rutina')!.start).toBe(10.75);
+    expect(res.times.get('rutina')!.end).toBeCloseTo(12.25, 3);
+    // El push del vecino solo si no rompe sus otros días (protección ex-C3).
+    for (const d of [4, 5, 6]) {
+      const day = res.byDay.get(d)!;
+      expect(day.get('rutina')!.start).toBe(10.75);
+    }
+  });
+
   test('sin espacio en el día: compresión acotada, sin horas negativas', () => {
     const tight: Activity[] = [
       mkAct('a', [0], '07:00', '08:30'),

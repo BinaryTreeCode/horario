@@ -153,6 +153,8 @@ export interface WeeklyResolution {
  * `pinnedStart` es el arranque que el usuario vio en el preview (la pared).
  * `mineDays` son los días finales de la arrastrada (el commit puede quitar el
  * origen en un drag entre columnas — la BD aún tiene los viejos).
+ * `keepPlace` (resize): la actividad estirada conserva su inicio en TODOS los
+ * días — la nueva duración solo empuja lo que pisa, sin regla de mitades.
  */
 export function propagateWeekly(
   activities: Activity[],
@@ -162,7 +164,8 @@ export function propagateWeekly(
   codec: TimeCodec,
   mineDays: number[],
   newDuration?: number,
-  startHour = 0
+  startHour = 0,
+  keepPlace = false
 ): WeeklyResolution {
   const act = activities.find(a => a.id === actId);
   if (!act) return { byDay: new Map(), times: new Map() };
@@ -182,7 +185,7 @@ export function propagateWeekly(
     let changed = false;
     for (const day of [...daySet].sort((a, b) => a - b)) {
       const slots = activities.filter(a => isOnDay(a, day)).map(a => times.get(a.id!)!);
-      const resolved = resolveDayCascade(slots, endHour, actId, startHour);
+      const resolved = resolveDayCascade(slots, endHour, actId, startHour, keepPlace);
       for (const s of resolved) {
         const cur = times.get(s.id);
         if (!cur || Math.abs(cur.start - s.start) > 1e-9 || Math.abs(cur.end - s.end) > 1e-9) {
