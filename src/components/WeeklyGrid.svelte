@@ -869,12 +869,16 @@
   }
 
   /* Handle de redimensionado (estirar borde inferior) */
+  /* Zona PROPORCIONAL (30%, piso 9px, tope 22px): tarjetas cortas de 15-30
+     min conservan superficie suficiente para agarrar y mover. */
   .resize-handle {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
-    height: 14px;
+    height: 30%;
+    min-height: 9px;
+    max-height: 22px;
     cursor: ns-resize;
     touch-action: none;
   }

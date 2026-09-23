@@ -1257,15 +1257,18 @@
     cursor: grabbing;
   }
 
-  /* Handle de redimensionado (estirar borde inferior): zona táctil generosa,
-     invisible hasta hover en desktop; en táctil siempre leve indicación */
+  /* Handle de redimensionado (estirar borde inferior): invisible hasta hover
+     en desktop; en táctil siempre leve indicación. Zona PROPORCIONAL (30% de
+     la tarjeta, piso 9px, tope 22px): en tarjetas cortas de 15-30 min el
+     agarre/mover nunca queda más chico que la zona de estirar. */
   .resize-handle {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
-    height: 22px;
-    min-height: 22px;
+    height: 30%;
+    min-height: 9px;
+    max-height: 22px;
     cursor: ns-resize;
     touch-action: none; /* el gesto es del resize, no del scroll */
     display: flex;
