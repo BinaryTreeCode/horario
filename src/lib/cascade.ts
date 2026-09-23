@@ -1,11 +1,17 @@
 /**
  * Resolución de colisiones (cascada push-down) compartida por las vistas
- * Día y Semana. Antes vivía duplicada (y desincronizada) en cada componente;
- * ahora un solo dueño: cuando cambia la matemática, cambia en ambos lados.
+ * Día y Semana. Un solo dueño: cuando cambia la matemática, cambia en ambos
+ * lados. Pura y testeada (cascade.test.ts).
  *
- * Modelo: una actividad modificada empuja a las siguientes hacia abajo
- * preservando su duración; la última del día se recorta si excede endHour.
- * Solapes solo cuando no hay espacio total en el día (decisión de producto).
+ * Modelo (greedy forward, acotado por construcción): cada bloque se coloca
+ * después de lo ya colocado (push-down) preservando su duración; si no cabe
+ * antes del fin del día se sube pegado al final; si tampoco cabe ahí, queda
+ * en el borde y se recorta (último recurso). NADA sale nunca del rango
+ * [startHour, endHour] ni por abajo ni por arriba (A2) — sin horas
+ * negativas tipo "06:30" en un día 7–10.
+ *
+ * Aritmética en MINUTOS ENTEROS: evita "09:60" por error de coma flotante
+ * con duraciones importadas no múltiplo de 15 (9.999h → 09:60).
  *
  * Multi-día: las actividades son UNA fila con horario global, así que un
  * cambio se propaga en cierre transitivo: cada día afectado se resuelve con
@@ -27,57 +33,68 @@ export interface TimeCodec {
   format: (hour: number) => string;
 }
 
-const EPS = 0.0001;
+/** Hora → minutos enteros, redondeados al minuto (blindaje anti-flotantes). */
+const toMin = (h: number) => Math.round(h * 60);
 
 /**
- * Aplica la cascada push-down a un día completo. `slots` debe cubrir TODAS
- * las actividades del día. Con `pinnedId`, esa actividad es una pared: nunca
- * se mueve ni se recorta, y nadie se recorta por hacerle lugar (el solape
- * remanente es el caso "no hay espacio" permitido). Sin pinnedId es la
- * matemática original (la movida también puede ser empujada por las previas).
+ * Aplica la cascada push-down a un día completo, en minutos enteros y
+ * acotada a [startHour, endHour]. `slots` debe cubrir TODAS las actividades
+ * del día. Con `pinnedId`, esa actividad es una pared: nunca se mueve ni se
+ * recorta (el usuario la vio así). Sin pinnedId, todos los bloques son
+ * colocables. Toque mínimo: no cierra huecos pre-existentes (M2).
  */
-export function resolveDayCascade(slots: Slot[], endHour: number, pinnedId?: string): Slot[] {
+export function resolveDayCascade(
+  slots: Slot[],
+  endHour: number,
+  pinnedId?: string,
+  startHour = 0
+): Slot[] {
+  const startMin = toMin(startHour);
+  const endMin = toMin(endHour);
+
   // En empates de arranque la pared va PRIMERO: si el drop cae exactamente
   // encima de otra actividad, la existente se empuja hacia abajo (hay
   // espacio) — misma semántica push-down que la vista Día, no solape.
-  const all = [...slots].sort((a, b) =>
-    a.start - b.start || (a.id === pinnedId ? -1 : b.id === pinnedId ? 1 : 0)
-  );
+  const all = slots
+    .map(s => ({ id: s.id, start: toMin(s.start), end: toMin(s.end) }))
+    .sort((a, b) => a.start - b.start || (a.id === pinnedId ? -1 : b.id === pinnedId ? 1 : 0));
 
-  // 1) Push-down: cada bloque que arranca dentro del anterior se desliza a
-  //    continuación, conservando su duración (la pared no se mueve).
-  for (let i = 1; i < all.length; i++) {
-    const prev = all[i - 1];
-    const cur = all[i];
-    if (cur.id === pinnedId) continue;
-    if (cur.start < prev.end - EPS) {
-      const shift = prev.end - cur.start;
-      cur.start += shift;
-      cur.end += shift;
-    }
-  }
+  const out: { id: string; start: number; end: number }[] = [];
+  let cursor = startMin; // fin del último bloque colocado (barrera de push-down)
 
-  // 2) Pasada hacia atrás: compresión al fin del día y cierre de huecos,
-  //    preservando duraciones. Nunca toca la pared (ni recorta a alguien
-  //    contra la pared: queda el solape permitido).
-  for (let i = all.length - 1; i >= 0; i--) {
-    const cur = all[i];
-    const dur = cur.end - cur.start;
-    if (cur.id !== pinnedId && cur.end > endHour + EPS) {
-      cur.end = endHour;
-      cur.start = endHour - dur;
+  for (const slot of all) {
+    if (slot.id === pinnedId) {
+      // Pared: queda exactamente donde el usuario la soltó.
+      cursor = Math.max(cursor, slot.end);
+      out.push(slot);
+      continue;
     }
-    if (i > 0 && all[i - 1].id !== pinnedId && cur.id !== pinnedId) {
-      const prev = all[i - 1];
-      if (prev.end > cur.start + EPS) {
-        const prevDur = prev.end - prev.start;
-        prev.end = cur.start;
-        prev.start = cur.start - prevDur;
+
+    const dur = Math.max(0, slot.end - slot.start);
+    let start = Math.max(slot.start, cursor); // push-down preservando duración
+    let end = start + dur;
+
+    if (end > endMin) {
+      // No cabe donde quedó: subir pegado al final del día (comprimir hacia
+      // atrás) si hay hueco completo; si no, pegado al borde y recorte.
+      const pulled = Math.max(cursor, endMin - dur);
+      if (pulled + dur <= endMin) {
+        start = pulled;
+        end = pulled + dur;
+      } else {
+        start = Math.min(start, endMin);
+        end = endMin;
       }
     }
+
+    if (start < startMin) start = startMin;
+    end = Math.max(end, start); // guard anti-inversión
+
+    out.push({ id: slot.id, start, end });
+    cursor = Math.max(cursor, end);
   }
 
-  return all;
+  return out.map(s => ({ id: s.id, start: s.start / 60, end: s.end / 60 }));
 }
 
 export interface WeeklyResolution {
@@ -100,7 +117,8 @@ export function propagateWeekly(
   endHour: number,
   codec: TimeCodec,
   mineDays: number[],
-  newDuration?: number
+  newDuration?: number,
+  startHour = 0
 ): WeeklyResolution {
   const act = activities.find(a => a.id === actId);
   if (!act) return { byDay: new Map(), times: new Map() };
@@ -121,12 +139,30 @@ export function propagateWeekly(
     let changed = false;
     for (const day of [...daySet].sort((a, b) => a - b)) {
       const slots = activities.filter(a => isOnDay(a, day)).map(a => times.get(a.id!)!);
-      for (const s of resolveDayCascade(slots, endHour, actId)) {
+      const resolved = resolveDayCascade(slots, endHour, actId, startHour);
+      for (const s of resolved) {
         const cur = times.get(s.id);
         if (!cur || Math.abs(cur.start - s.start) > 1e-9 || Math.abs(cur.end - s.end) > 1e-9) {
+          // El push de un vecino es LOCAL al día: cambiar su horario global
+          // lo movería también en días donde NADIE lo empujó (corrupción
+          // silenciosa, ex-C3). Protección: solo se acepta el movimiento
+          // global del vecino si no colisiona con nadie en SUS otros días;
+          // si rompería, se descarta (queda el solape local permitido).
+          const owner = activities.find(a => a.id === s.id);
+          if (owner && owner.id !== actId) {
+            const otherDays = owner.daysOfWeek.filter(d => !daySet.has(d));
+            const breaks = otherDays.some(d =>
+              activities
+                .filter(a => a.id !== owner.id && a.daysOfWeek.includes(d))
+                .some(o => {
+                  const t = times.get(o.id!)!;
+                  return s.start < t.end - 1e-9 && t.start < s.end - 1e-9;
+                })
+            );
+            if (breaks) continue;
+          }
           times.set(s.id, s);
           changed = true;
-          const owner = activities.find(a => a.id === s.id);
           if (owner) owner.daysOfWeek.forEach(d => daySet.add(d));
         }
       }

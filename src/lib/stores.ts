@@ -106,8 +106,11 @@ export function parseTime(time: string): number {
 }
 
 export function formatTime(hour: number): string {
-    const h = Math.floor(hour);
-    const m = Math.round((hour - h) * 60);
+    // Minutos enteros normalizados: evita "09:60" con flotantes importados
+    // (9.999h → 599.94 min → redondeo a 600 → 10:00). Clamp a 24:00.
+    const total = Math.min(24 * 60, Math.round(hour * 60));
+    const h = Math.floor(total / 60);
+    const m = total % 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 

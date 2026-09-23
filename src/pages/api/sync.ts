@@ -16,7 +16,7 @@ function json(data: unknown, status = 200) {
 
 // ── Validación ligera del lado servidor ──────────────────────────────────────
 
-const TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+const TIME_RE = /^(?:([01]?\d|2[0-3]):([0-5]\d)|24:00)$/;
 
 function isTime(v: unknown): v is string {
   return typeof v === 'string' && TIME_RE.test(v);
