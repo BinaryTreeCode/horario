@@ -1213,6 +1213,12 @@
     user-select: none; /* sin selección de texto que interfiera con el drag */
   }
 
+  .daily-activity-card:focus-visible {
+    outline: 3px solid var(--color-green-dark, #2d5a3d);
+    outline-offset: 2px;
+    z-index: 3;
+  }
+
   .daily-activity-card:active {
     cursor: grabbing;
   }

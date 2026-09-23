@@ -371,6 +371,40 @@
     }
   }
 
+  // M6 (WCAG 2.5.7): mover sin puntero. Reusa la cascada del drop: la
+  // actividad ancla en ±15 min y las vecinas se resuelven en TODOS sus días.
+  // Misma transacción y reset de estado que handleDrop.
+  async function nudgeWeekly(activity: Activity, deltaH: number) {
+    if (draggedActivityId !== null) return;
+    const dur = parseTime(activity.endTime) - parseTime(activity.startTime);
+    let newStart = Math.round((parseTime(activity.startTime) + deltaH) * 4) / 4;
+    newStart = Math.max(startHour, Math.min(newStart, endHour - dur));
+    const cascada = propagateWeekly(
+      activities, activity.id!, newStart, endHour,
+      { parse: parseTime, format: formatTime }, [...activity.daysOfWeek]
+    ).times;
+    const updates: Promise<unknown>[] = [];
+    for (const [id, slot] of cascada) {
+      const orig = activities.find(a => a.id === id);
+      if (orig && (formatTime(slot.start) !== orig.startTime || formatTime(slot.end) !== orig.endTime)) {
+        updates.push(db.activities.update(id, {
+          startTime: formatTime(slot.start),
+          endTime: formatTime(slot.end),
+          updatedAt: Date.now()
+        }));
+      }
+    }
+    if (updates.length === 0) return;
+    try {
+      await db.transaction('rw', db.activities, async () => {
+        await Promise.all(updates);
+      });
+      toastOk(`${activity.name} → ${format12h(formatTime(newStart))}`);
+    } catch {
+      toastErr('No se pudo mover la actividad — intenta de nuevo');
+    }
+  }
+
   function clearDragPreview() {
     // C2: corre en dragend (soltar fuera de la grilla, Esc, drop fallido).
     // Sin el reset de ids, la tarjeta queda con opacidad 0.55 y fuera del
@@ -580,7 +614,15 @@
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
               style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
               onclick={() => onEditActivity(activity.id!)}
-              aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{activity.steps?.length ? `, ${activity.steps.length} pasos` : ''}"
+              onkeydown={(e) => {
+                // M6 (WCAG 2.5.7): ↑/↓ = ±15 min con cascada global. Enter y
+                // Espacio ya abren edición (comportamiento nativo de <button>).
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  nudgeWeekly(activity, e.key === 'ArrowUp' ? -0.25 : 0.25);
+                }
+              }}
+              aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{activity.steps?.length ? `, ${activity.steps.length} pasos` : ''}. Flechas arriba/abajo para mover, Enter para editar"
               title="{activity.name} • {format12h(activity.startTime)} - {format12h(activity.endTime)}"
             >
               <div class="activity-title">
@@ -827,6 +869,8 @@
     opacity: 1;
     z-index: 5;
     box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+    outline: 3px solid var(--color-green-dark, #2d5a3d);
+    outline-offset: 2px;
   }
 
   .activity-item:active {
