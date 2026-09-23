@@ -318,13 +318,26 @@
           }));
         }
       }
-      await Promise.all(updates);
+      // M1: una sola transacción — un fallo a mitad no deja escrituras
+      // parciales. El reset de estado corre SIEMPRE (finally).
+      try {
+        await db.transaction('rw', db.activities, async () => {
+          await Promise.all(updates);
+        });
+      } catch {
+        toastErr('No se pudo mover la actividad — intenta de nuevo');
+      } finally {
+        dropPreview = null;
+        lastDragOverSlot = NaN;
+        draggedActivityId = null;
+        dragSourceDay = null;
+      }
+    } else {
+      dropPreview = null;
+      lastDragOverSlot = NaN;
+      draggedActivityId = null;
+      dragSourceDay = null;
     }
-
-    dropPreview = null;
-    lastDragOverSlot = NaN;
-    draggedActivityId = null;
-    dragSourceDay = null;
   }
 
   let lastDragOverSlot = NaN;
@@ -348,11 +361,22 @@
     dropPreview = { day: dayIndex, slots: computeWeekLayoutForDrop(dayIndex, draggedActivityId, newStartHour) };
   }
 
-  function handleDragLeaveDay(dayIndex: number) {
-    if (dropPreview?.day === dayIndex) dropPreview = null;
+  function handleDragLeaveDay(e: DragEvent, dayIndex: number) {
+    // M4: dragleave también dispara al entrar a un hijo — solo limpiar si el
+    // puntero realmente salió de la columna (o el drag terminó).
+    const to = e.relatedTarget as Node | null;
+    const col = e.currentTarget as HTMLElement;
+    if (!to || !col.contains(to)) {
+      if (dropPreview?.day === dayIndex) dropPreview = null;
+    }
   }
 
   function clearDragPreview() {
+    // C2: corre en dragend (soltar fuera de la grilla, Esc, drop fallido).
+    // Sin el reset de ids, la tarjeta queda con opacidad 0.55 y fuera del
+    // layout hasta el próximo arrastre.
+    draggedActivityId = null;
+    dragSourceDay = null;
     dropPreview = null;
     lastDragOverSlot = NaN;
   }
@@ -537,7 +561,7 @@
         <div 
           class="slots-grid"
           ondragover={(e) => handleDragOver(e, i)}
-          ondragleave={() => handleDragLeaveDay(i)}
+          ondragleave={(e) => handleDragLeaveDay(e, i)}
           ondrop={(e) => handleDrop(e, i)}
         >
           {#each dayData.items as activity (activity.id)}

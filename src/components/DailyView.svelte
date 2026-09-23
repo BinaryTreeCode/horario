@@ -86,6 +86,11 @@
 
   onDestroy(() => {
     clearInterval(interval);
+    // Desmontaje a mitad de drag/gesto: sin esto, los listeners de window
+    // quedan colgados y referencian nodos muertos.
+    cleanupDragListeners();
+    cleanupResizeListeners();
+    stopEdgeScroll();
   });
 
   const currentMinutes = $derived(now.getHours() * 60 + now.getMinutes());
@@ -274,6 +279,7 @@
     for (const act of overrideActs) {
       const { id: _, ...clone } = act;
       clone.daysOfWeek = [day];
+      clone.id = newId(); // sin id, add() falla con DataError (PK 'id' sin autoincrement)
       await db.activities.add(clone);
     }
 
@@ -355,6 +361,8 @@
     window.addEventListener('pointermove', onDragPointerMove, { passive: false });
     window.addEventListener('pointerup', onDragPointerUp);
     window.addEventListener('pointercancel', onDragPointerCancel);
+    // C1: no pasivo es lo que permite preventDefault del scroll en el drag.
+    window.addEventListener('touchmove', onDragTouchMove, { passive: false });
   }
 
   function activateDrag() {
@@ -369,13 +377,40 @@
       window.addEventListener('contextmenu', preventDragContextMenu, true);
     }
     moveGhost(pendingDrag.lastClientY);
+    ensureEdgeScroll(); // M5
   }
 
-  function preventDragContextMenu(e: Event) { e.preventDefault(); }
+  function preventDragContextMenu(e: Event) {
+    e.preventDefault();
+    e.stopPropagation(); // M3: el oncontextmenu de la tarjeta no debe abrir el menú en Android
+  }
 
   function moveGhost(clientY: number) {
     if (!pendingDrag) return;
     pendingDrag.card.style.transform = `translateY(${clientY - pendingDrag.startY}px)`;
+  }
+
+  // M5: auto-scroll del contenedor al arrastrar cerca de sus bordes — sin
+  // esto no se puede llevar una actividad a una hora fuera de pantalla.
+  const EDGE_SCROLL_ZONE = 56;   // px de franja activa
+  const EDGE_SCROLL_SPEED = 12;  // px por frame
+  let edgeScrollRaf = 0;
+  function edgeScrollTick() {
+    if (!pendingDrag?.started) { edgeScrollRaf = 0; return; }
+    const container = document.querySelector('.daily-container');
+    if (container) {
+      const rect = container.getBoundingClientRect();
+      const y = pendingDrag.lastClientY;
+      if (y < rect.top + EDGE_SCROLL_ZONE) container.scrollBy(0, -EDGE_SCROLL_SPEED);
+      else if (y > rect.bottom - EDGE_SCROLL_ZONE) container.scrollBy(0, EDGE_SCROLL_SPEED);
+    }
+    edgeScrollRaf = requestAnimationFrame(edgeScrollTick);
+  }
+  function ensureEdgeScroll() {
+    if (!edgeScrollRaf && pendingDrag?.started) edgeScrollRaf = requestAnimationFrame(edgeScrollTick);
+  }
+  function stopEdgeScroll() {
+    if (edgeScrollRaf) { cancelAnimationFrame(edgeScrollRaf); edgeScrollRaf = 0; }
   }
 
   function onDragPointerMove(e: PointerEvent) {
@@ -483,6 +518,7 @@
       dropPreview = null;
       lastPreviewY = NaN;
     }
+    stopEdgeScroll(); // M5
   }
 
   function onDragPointerCancel() {
@@ -495,16 +531,36 @@
       st.card.style.touchAction = '';
     }
     window.removeEventListener('contextmenu', preventDragContextMenu, true);
+    // C2: reset completo — sin esto la tarjeta queda fantasma (fuera de
+    // columnas, ancho completo) hasta el siguiente arrastre.
+    draggedActivityId = null;
     dropPreview = null;
     topOverride = null;
     lastPreviewY = NaN;
     pendingDrag = null;
+    stopEdgeScroll(); // M5
+  }
+
+  // C1: touch-action se decide cuando el dedo TOCA la pantalla (la tarjeta
+  // tiene pan-y para el scroll) — cambiarlo a los 260ms del long-press ya no
+  // afecta ese gesto. El único freno fiable del scroll durante el drag es un
+  // touchmove no pasivo con preventDefault. Se registra al iniciar el drag
+  // y se retira al terminar (el scroll normal de la página no se toca).
+  function onDragTouchMove(e: TouchEvent) {
+    if (pendingDrag?.started) {
+      if (e.cancelable) e.preventDefault();
+      if (e.touches.length === 1) {
+        // Sintetiza el seguimiento del ghost por si pointermove se pierde.
+        onDragPointerMove(e.touches[0] as unknown as PointerEvent);
+      }
+    }
   }
 
   function cleanupDragListeners() {
     window.removeEventListener('pointermove', onDragPointerMove);
     window.removeEventListener('pointerup', onDragPointerUp);
     window.removeEventListener('pointercancel', onDragPointerCancel);
+    window.removeEventListener('touchmove', onDragTouchMove);
   }
 
   // ── Resize (estirar borde inferior) ──────────────────────────────────
@@ -597,8 +653,28 @@
     // Metodología acordada: en la vista Día, el drag SIEMPRE es una edición
     // temporal del día (override ⚡) — nunca reescribe la plantilla master.
     // "Guardar como plantilla" es la acción explícita que la promueve.
-    await commitResolved(resolved);
-    draggedActivityId = null;
+    try {
+      await commitResolved(resolved);
+    } finally {
+      // C2: el estado del drag se limpia SIEMPRE — error o no, la tarjeta
+      // no puede quedar en modo fantasma hasta el próximo arrastre.
+      draggedActivityId = null;
+    }
+  }
+
+  /** M6: mueve una actividad ±15 min (teclado) respetando la cascada. */
+  async function nudgeActivity(activity: Activity, deltaH: number) {
+    const dur = parseTime(activity.endTime) - parseTime(activity.startTime);
+    let newStart = Math.round((parseTime(activity.startTime) + deltaH) * 4) / 4;
+    newStart = Math.max(startHour, Math.min(newStart, endHour - dur));
+    const slots = dayActivities
+      .filter(a => a.id !== activity.id)
+      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
+    const resolved = resolveDayCascade(
+      [...slots, { id: activity.id!, start: newStart, end: newStart + dur }],
+      endHour, undefined, startHour
+    );
+    await commitResolved(new Map(resolved.map(sl => [sl.id, { start: sl.start, end: sl.end }])));
   }
 
   /** Escribe un layout resuelto (id → slot) al override del día visible. */
@@ -816,7 +892,20 @@
           onpointerdown={(e) => handlePointerDown(e, activity)}
           oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
           onclick={() => { if (suppressNextClick) return; onEditActivity(activity.id!, activity); }}
-          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onEditActivity(activity.id!, activity); }}
+          onkeydown={(e) => {
+            // M6 (WCAG 2.5.7): mover sin puntero. ↑/↓ = ±15 min con cascada;
+            // Enter abre edición; Espacio SOLO activa (preventDefault: la
+            // tarjeta no puede desplazar la página).
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+              e.preventDefault();
+              nudgeActivity(activity, e.key === 'ArrowUp' ? -0.25 : 0.25);
+            } else if (e.key === ' ') {
+              e.preventDefault();
+              if (!suppressNextClick) onEditActivity(activity.id!, activity);
+            } else if (e.key === 'Enter') {
+              onEditActivity(activity.id!, activity);
+            }
+          }}
           style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; border-left-color: {getActivityColor(activity.categoryId, categories)}"
         >
           <div class="activity-content" class:compact={activity.durationMins <= 20}>
