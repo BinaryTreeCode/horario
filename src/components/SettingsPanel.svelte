@@ -830,7 +830,6 @@
     gap: 0.5rem;
     padding: 0.6rem;
     cursor: pointer;
-    background: white;
   }
 
   .import-btn {
