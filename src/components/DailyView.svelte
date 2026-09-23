@@ -251,7 +251,7 @@
 
   async function doRestoreDefault() {
     await db.dayOverrides.delete(day);
-    toastOk('Plantilla por defecto restaurada');
+    toastOk('Plantilla restaurada');
   }
 
   async function saveAsPermanentTemplate() {
@@ -287,7 +287,7 @@
 
     // Remove the override since it's now the master
     await db.dayOverrides.delete(day);
-    toastOk('Cambios aplicados como plantilla semanal');
+    toastOk('Aplicado a la plantilla semanal');
   }
 
   let confirmDelete = $state(false);
@@ -374,6 +374,7 @@
     draggedActivityId = pendingDrag.activityId;
     try { pendingDrag.card.setPointerCapture(pendingDrag.pointerId); } catch { /* noop */ }
     pendingDrag.card.classList.add('dragging');
+    navigator.vibrate?.(10); // háptica sutil: el drag se armó
     if (pendingDrag.pointerType !== 'mouse') {
       pendingDrag.card.style.touchAction = 'none';
       window.addEventListener('contextmenu', preventDragContextMenu, true);
@@ -502,6 +503,7 @@
     if (st.started) {
       suppressNextClick = true;
       setTimeout(() => { suppressNextClick = false; }, 150);
+      navigator.vibrate?.(8); // háptica: el drop se registró
       // El preview muere ANTES de limpiar draggedActivityId: las vecinas
       // conservan el layout final (la store aún no re-emitio), así no saltan.
       dropPreview = computeLayoutForDrop(e.clientY, st.activityId);
@@ -777,7 +779,7 @@
       }
 
       if (placed === null) {
-        toastErr('No hay hueco libre en el día para duplicar');
+        toastErr('No hay hueco libre para duplicar');
         return;
       }
 
@@ -808,7 +810,7 @@
       if (clone) {
         toastOk(`${clone.name} → ${format12h(clone.startTime)}`);
       } else {
-        toastErr('No hay hueco libre ese día para duplicar');
+        toastErr('No hay hueco libre para duplicar');
       }
     }
   }
@@ -916,6 +918,7 @@
           <p>Día libre — tocá cualquier hueco del horario para crear una actividad</p>
         </div>
       {/if}
+      {#key day}
       {#each layoutActivities as activity (activity.id)}
         {@const totalSteps = activity.steps?.length || 0}
         {@const doneSteps = activity.steps?.filter(s => s.completed).length || 0}
@@ -924,7 +927,7 @@
           class:is-short={activity.durationMins <= 20}
           role="button"
           tabindex="0"
-          aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{totalSteps ? `, ${doneSteps} de ${totalSteps} pasos` : ''}. Arrastrar para mover, abrir para editar"
+          aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{totalSteps ? `, ${doneSteps} de ${totalSteps} pasos` : ''}. Arrastrar o tocar para editar"
           onpointerdown={(e) => handlePointerDown(e, activity)}
           oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
           onclick={() => { if (suppressNextClick) return; onEditActivity(activity.id!, activity); }}
@@ -968,19 +971,19 @@
               class="edit-btn"
               onclick={(e) => { e.stopPropagation(); onEditActivity(activity.id!, activity); }}
               aria-label="Editar {activity.name}"
-              title="Editar actividad y ver pasos"
+              title="Editar"
             >
               <Edit3 size={13} />
             </button>
           </div>
           <div
             class="resize-handle"
-            title="Estirar para cambiar la duración"
             aria-hidden="true"
             onpointerdown={(e) => startResize(e, activity)}
           ></div>
         </div>
       {/each}
+      {/key}
 
       {#if isNowInRange}
         <div class="time-bar" style="top: {barTopPercent}%">
@@ -1289,6 +1292,17 @@
   .daily-activity-card:hover .resize-handle::after {
     opacity: 1;
   }
+
+  /* Entrada escalonada al cambiar de día: se re-monta el track ({#key day})
+     y nth-child reparte los delays — cero JS, cero bytes en el chunk. */
+  .daily-activity-card {
+    animation: fadeIn .25s ease-out backwards;
+  }
+  .daily-activity-card:nth-child(2) { animation-delay: 20ms }
+  .daily-activity-card:nth-child(3) { animation-delay: 40ms }
+  .daily-activity-card:nth-child(4) { animation-delay: 60ms }
+  .daily-activity-card:nth-child(5) { animation-delay: 80ms }
+  .daily-activity-card:nth-child(n+6) { animation-delay: 100ms }
 
   /* Estado de arrastre activo (pointer drag) */
   .daily-activity-card.dragging {

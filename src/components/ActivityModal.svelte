@@ -355,7 +355,7 @@
         }
       }
 
-      toastOk(id !== null ? 'Actividad actualizada ✓' : 'Actividad creada ✓');
+      toastOk(id !== null ? 'Actividad guardada ✓' : 'Actividad creada ✓');
       onClose();
     } catch (error: any) {
       console.error('Failed to save activity:', error);

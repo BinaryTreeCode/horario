@@ -254,6 +254,7 @@
   function handleDragStart(e: DragEvent, activity: Activity, dayIndex: number) {
     draggedActivityId = activity.id!;
     dragSourceDay = dayIndex;
+    navigator.vibrate?.(10); // háptica sutil: el drag se armó
     const rect = (e.target as HTMLElement).getBoundingClientRect();
     dragOffset = (e.clientY - rect.top) / slotHeightPx;
     
@@ -304,6 +305,7 @@
       // M1: una sola transacción — un fallo a mitad no deja escrituras
       // parciales. El reset de estado corre SIEMPRE (finally).
       await commitWeeklyTimes(cascada, `Mover ${activity.name} a ${days[dayIndex]}`, { id: draggedActivityId, days: newDays });
+      navigator.vibrate?.(8); // háptica: el drop se registró
       dropPreview = null;
       lastDragOverSlot = NaN;
       draggedActivityId = null;
@@ -398,7 +400,7 @@
       pushUndo({ label, rows });
       return label;
     } catch {
-      toastErr('No se pudo mover la actividad — intenta de nuevo');
+      toastErr('No se pudo mover');
       return null;
     }
   }
@@ -525,7 +527,7 @@
     if (clone) {
       toastOk(`${clone.name} → ${format12h(clone.startTime)}`);
     } else {
-      toastErr('No hay hueco libre ese día para duplicar');
+      toastErr('No hay hueco libre para duplicar');
     }
   }
 
