@@ -409,9 +409,9 @@
 </script>
 
 <div class="modal-overlay" onclick={onClose}>
-  <div class="modal-content glass-panel" tabindex="-1" bind:this={modalEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
+  <div class="modal-content glass-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1" bind:this={modalEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
     <header class="modal-header">
-      <h2>{id !== null ? 'Editar' : 'Nueva'} Actividad</h2>
+      <h2 id="modal-title">{id !== null ? 'Editar' : 'Nueva'} Actividad</h2>
       <button class="close-btn" onclick={onClose} aria-label="Cerrar sin guardar"><X size={20} /></button>
     </header>
 
@@ -535,7 +535,8 @@
                   type="button"
                   class="step-check-btn"
                   onclick={() => toggleStep(step.id)}
-                  title={step.completed ? "Marcar como pendiente" : "Marcar como completado"}
+                  aria-label="Completar paso"
+                  aria-pressed={step.completed}
                 >
                   {#if step.completed}
                     <CheckSquare size={18} class="check-icon done" />
@@ -553,7 +554,7 @@
                   type="button"
                   class="step-delete-btn"
                   onclick={() => removeStep(step.id)}
-                  title="Eliminar paso"
+                  aria-label="Eliminar paso"
                 >
                   <Trash2 size={15} />
                 </button>
@@ -1373,6 +1374,40 @@
     }
     .scope-options {
       flex-direction: column;
+    }
+  }
+  /* A11y táctil (regla dura #5): en móvil todo control del modal mide ≥44px.
+     Último bloque del archivo: gana el cascade sobre las queries de 640/540. */
+  @media (max-width: 768px) {
+    .close-btn {
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .chip,
+    .time-select-modern,
+    .step-input,
+    .btn-add-step,
+    .image-upload-btn,
+    .preset-btn-sparkle,
+    .day-toggle {
+      min-height: 44px;
+    }
+    .chip {
+      padding: 0.4rem 0.9rem;
+    }
+    .preset-btn-sparkle {
+      padding: 0.35rem 0.8rem;
+    }
+    .step-check-btn,
+    .step-delete-btn {
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
   }
 </style>
