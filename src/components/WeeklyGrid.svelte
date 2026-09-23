@@ -560,6 +560,8 @@
 <svelte:window onclick={closeContextMenu} onscroll={closeContextMenu} />
 
 <div class="weekly-grid-container" style="--total-slots: {totalSlots}; --slot-height: {slotHeightPx}px">
+  <div class="scroll-hint" aria-hidden="true">Deslizá para ver los días →</div>
+  <div class="grid-scroll">
   <div class="time-column">
     <div class="header-spacer"></div>
     {#each hours as hour}
@@ -576,7 +578,6 @@
   </div>
 
   <div class="days-columns">
-    <div class="scroll-hint" aria-hidden="true">Deslizá para ver todos los días →</div>
     {#each days as day, i}
       {@const dayData = getDayActivitiesWithLayout(i, dropPreview?.day === i ? dropPreview.slots : undefined, draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i) ? draggedActivityId : null)}
       <div class="day-column">
@@ -651,6 +652,7 @@
       </div>
     {/each}
   </div>
+  </div>
 
   {#if contextMenu.show}
     <!-- Portal a body: backdrop-filter de .glass-panel ancestro crea containing block y rompe el position:fixed -->
@@ -685,14 +687,20 @@
 
 <style>
   .weekly-grid-container {
-    display: flex;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    min-width: 720px;
+    max-width: 100%;
     padding-bottom: 1rem;
     padding-top: 10px;
     position: relative;
     scrollbar-width: thin;
+  }
+
+  /* El scroll es del CONTENIDO (no del contenedor): así la columna de horas
+     puede quedar pegajosa y los días no arrastran la página entera. */
+  .grid-scroll {
+    display: flex;
+    min-width: 720px;
   }
 
   .time-column {
@@ -703,6 +711,13 @@
     border-right: 1px solid rgba(0,0,0,0.08);
     user-select: none;
     flex-shrink: 0;
+    /* Pegajosa al deslizar hacia los lados: las horas siempre visibles. */
+    position: sticky;
+    left: 0;
+    z-index: 20;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .header-spacer {
