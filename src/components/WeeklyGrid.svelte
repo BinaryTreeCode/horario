@@ -7,6 +7,7 @@
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
+  import { portal } from '../lib/portal';
 
   interface Props {
     activities: Activity[];
@@ -18,6 +19,41 @@
   }
 
   let { activities, categories, settings, dayOverrides = [], onSelectDay, onEditActivity }: Props = $props();
+
+  /**
+   * Long-press táctil (G6): iOS no dispara `contextmenu`, así que el menú de
+   * duplicar/eliminar era inalcanzable ahí. 550ms con el dedo quieto abre el
+   * mismo menú que el click-derecho de desktop; un movimiento >10px lo cancela
+   * (es scroll, no long-press).
+   */
+  let lpTimer: ReturnType<typeof setTimeout> | null = null;
+  let lpStart = { x: 0, y: 0 };
+
+  function handleItemPointerDown(e: PointerEvent, activityId: string) {
+    if (e.pointerType !== 'touch') return; // mouse ya tiene contextmenu
+    lpStart = { x: e.clientX, y: e.clientY };
+    lpTimer = setTimeout(() => {
+      lpTimer = null;
+      // handleContextMenu llama e.preventDefault(): el objeto necesita el método
+      // (deuda de firma pre-existente; cast local, sin tocar el handler viejo)
+      handleContextMenu({
+        clientX: lpStart.x,
+        clientY: lpStart.y,
+        preventDefault: () => {},
+      } as unknown as MouseEvent, activityId as unknown as number);
+    }, 550);
+  }
+
+  function handleItemPointerMove(e: PointerEvent) {
+    if (lpTimer && (Math.abs(e.clientX - lpStart.x) > 10 || Math.abs(e.clientY - lpStart.y) > 10)) {
+      clearTimeout(lpTimer);
+      lpTimer = null;
+    }
+  }
+
+  function handleItemPointerUp() {
+    if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+  }
 
   const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
   const startHour = $derived(settings.startHour);
@@ -360,8 +396,9 @@
   function handleContextMenu(e: MouseEvent, activityId: number) {
     e.preventDefault();
     // Clamp para que el menú no se salga de la ventana
+    // (MENU_H: 2-3 items × 44px + padding — con 130 el menú quedaba fuera en landscape)
     const MENU_W = 220;
-    const MENU_H = 130;
+    const MENU_H = 160;
     const x = Math.min(e.clientX, window.innerWidth - MENU_W - 8);
     const y = Math.min(e.clientY, window.innerHeight - MENU_H - 8);
     contextMenu = { show: true, x: Math.max(4, x), y: Math.max(4, y), activityId };
@@ -463,6 +500,10 @@
               draggable="true"
               ondragstart={(e) => handleDragStart(e, activity, i)}
               ondragend={clearDragPreview}
+              onpointerdown={(e) => handleItemPointerDown(e, activity.id!)}
+              onpointermove={handleItemPointerMove}
+              onpointerup={handleItemPointerUp}
+              onpointercancel={handleItemPointerUp}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
               style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
               onclick={() => onEditActivity(activity.id!)}
@@ -497,7 +538,8 @@
   </div>
 
   {#if contextMenu.show}
-    <div class="custom-context-menu glass-panel" style="top: {contextMenu.y}px; left: {contextMenu.x}px">
+    <!-- Portal a body: backdrop-filter de .glass-panel ancestro crea containing block y rompe el position:fixed -->
+    <div class="custom-context-menu glass-panel" use:portal style="top: {contextMenu.y}px; left: {contextMenu.x}px">
       <button onclick={duplicateActivity} aria-label="Duplicar actividad como bloque independiente">
         <Copy size={16} /> Duplicar (Independiente)
       </button>
@@ -811,12 +853,6 @@
     border-radius: 12px;
     box-shadow: 0 10px 25px rgba(0,0,0,0.15);
     border: 1px solid rgba(0,0,0,0.05);
-    animation: fadeIn 0.1s ease-out;
-  }
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: scale(0.95); }
-    to { opacity: 1; transform: scale(1); }
   }
 
   .custom-context-menu button {
@@ -824,6 +860,7 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.75rem 1rem;
+    min-height: 44px; /* regla dura #5: medido 39px antes */
     border: none;
     background: transparent;
     cursor: pointer;

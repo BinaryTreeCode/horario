@@ -20,6 +20,41 @@
 
   let { day, activities, categories, settings, dayOverrides = [], onEditActivity }: Props = $props();
 
+  /**
+   * Tap en un slot vacío del track (G4): abre el modal de creación con la hora
+   * precargada según el punto tocado. Se ignora si el tap fue sobre una tarjeta
+   * o si vino después de un drag (suppressNextClick).
+   */
+  function handleTrackTap(e: MouseEvent) {
+    if (suppressNextClick) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('.daily-activity-card, .context-menu, button')) return;
+    const track = e.currentTarget as HTMLElement;
+    const rect = track.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const yPercent = y / rect.height;
+    const hour = startHour + yPercent * (endHour - startHour);
+    // Snap a 15 min y clamp dentro del rango visible
+    const snapped = Math.max(startHour, Math.min(Math.round(hour * 4) / 4, endHour - 0.25));
+    const h = Math.floor(snapped);
+    const m = Math.round((snapped - h) * 60);
+    const fmt = (v: number) => v.toString().padStart(2, '0');
+    // Fin = inicio + 60 min, normalizado (no clavado en :59)
+    const endTotal = h * 60 + m + 60;
+    onEditActivity(null as unknown as number, {
+      id: '',
+      categoryId: categories[0]?.id ?? 'rutina',
+      name: '',
+      description: '',
+      image: null,
+      startTime: `${fmt(h)}:${fmt(m)}`,
+      endTime: `${fmt(Math.floor(endTotal / 60) % 24)}:${fmt(endTotal % 60)}`,
+      daysOfWeek: [day],
+      steps: [],
+      updatedAt: 0,
+    } as unknown as Activity);
+  }
+
   const dayName = $derived(['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'][day]);
   const startHour = $derived(settings.startHour);
   const endHour = $derived(settings.endHour);
@@ -732,7 +767,13 @@
       {/each}
     </div>
 
-    <div class="activities-track">
+    <div class="activities-track" onclick={handleTrackTap} role="presentation">
+      {#if layoutActivities.length === 0}
+        <div class="empty-state glass-panel" aria-live="polite">
+          <span class="empty-icon">🌱</span>
+          <p>Día libre — tocá cualquier hueco del horario para crear una actividad</p>
+        </div>
+      {/if}
       {#each layoutActivities as activity (activity.id)}
         {@const totalSteps = activity.steps?.length || 0}
         {@const doneSteps = activity.steps?.filter(s => s.completed).length || 0}
@@ -1001,6 +1042,29 @@
     flex: 1;
     position: relative;
     margin-left: 1rem;
+  }
+
+  /* G12: invitación cuando el día no tiene actividades (el tap en el track crea) */
+  .empty-state {
+    position: absolute;
+    inset: 15% 8% auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1.25rem 1rem;
+    text-align: center;
+    pointer-events: none; /* el tap pasa al track → abre el modal */
+    color: var(--color-brown-bark);
+    opacity: 0.85;
+  }
+  .empty-state .empty-icon {
+    font-size: 1.75rem;
+  }
+  .empty-state p {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.45;
   }
 
   .daily-activity-card {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { X, ListChecks, ChevronDown, ChevronUp } from '@lucide/svelte';
+  import { portal } from '../lib/portal';
   import type { Activity } from '../lib/types';
 
   interface Props {
@@ -23,7 +24,8 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="lightbox-fullscreen" onclick={handleOverlayClick} role="dialog" aria-modal="true">
+<!-- Portal a body: un ancestro con backdrop-filter crea containing block y ancla este overlay fixed a la sección scrolleada en vez del viewport -->
+<div class="lightbox-fullscreen" use:portal onclick={handleOverlayClick} role="dialog" aria-modal="true">
   <img class="lightbox-img" src={activity.image} alt={activity.name} onclick={handleOverlayClick} />
 
   <!-- Barra superior flotante: nombre + botón de cierre -->

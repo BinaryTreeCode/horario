@@ -25,12 +25,16 @@
     if (e.key === 'Escape') { e.stopPropagation(); close(false); }
     if (e.key === 'Enter') { e.stopPropagation(); close(true); }
   }
+  import { portal } from '../lib/portal';
+
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
 {#if open}
+  <!-- Portal a body: un ancestro con backdrop-filter crea containing block y ancla este overlay fixed a la sección scrolleada en vez del viewport -->
   <div
+    use:portal
     class="confirm-overlay"
     role="presentation"
     onclick={(e) => e.target === e.currentTarget && close(false)}

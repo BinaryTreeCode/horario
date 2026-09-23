@@ -73,6 +73,14 @@
     return () => window.removeEventListener('keydown', handleKey);
   });
 
+  // Foco inicial dentro del diálogo (lectores de pantalla y teclado: si no,
+  // el foco queda en <body> y el trap de Tab no tiene punto de partida).
+  // El componente se monta solo cuando se muestra ({#if showActivityModal}),
+  // así que el montaje ES la apertura.
+  $effect(() => {
+    if (modalEl) modalEl.focus({ preventScroll: true });
+  });
+
   function trapFocus(e: KeyboardEvent) {
     if (e.key !== 'Tab' || !modalEl) return;
     const focusables = modalEl.querySelectorAll<HTMLElement>(
@@ -990,12 +998,18 @@
     justify-content: center;
     align-items: center;
     z-index: 200;
+    /* el gesto de scroll sobre el overlay no encadena al fondo */
+    overscroll-behavior: contain;
+    touch-action: none;
   }
 
   .modal-content {
     width: 95%;
     max-width: 500px;
+    /* dvh: el teclado virtual SÍ reduce dvh (no vh) — el footer queda visible al escribir.
+       vh primero como fallback (cascade: la última declaración válida gana). */
     max-height: 92vh;
+    max-height: 92dvh;
     padding: 0;
     overflow-y: auto;
     background: white;

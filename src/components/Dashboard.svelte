@@ -282,6 +282,17 @@
     {/await}
   {/if}
 
+  <!-- FAB móvil (G5): nueva actividad siempre al alcance del pulgar -->
+  {#if !showSettings && !showActivityModal}
+    <button
+      class="fab"
+      onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)}
+      aria-label="Nueva Actividad"
+    >
+      <Plus size={26} />
+    </button>
+  {/if}
+
   <Toasts />
 </div>
 
@@ -503,6 +514,36 @@
       justify-content: flex-end;
       gap: 0.5rem;
     }
+    /* G9: en landscape corto el header se come la mitad de la pantalla —
+       compactar a solo íconos (los textos quedan en aria-label) y permitir
+       que left/right compartan una sola fila (los width:100% fuerzan 2 filas).
+       Va DESPUÉS de las reglas base: misma especificidad, gana el orden. */
+    @media (orientation: landscape) and (max-height: 420px) {
+      .dashboard-header {
+        padding: 0.4rem 1rem;
+        padding-top: calc(0.4rem + env(safe-area-inset-top, 0px));
+        gap: 0.5rem;
+      }
+      .hide-mobile {
+        display: none;
+      }
+      .logo {
+        font-size: 0.95rem;
+      }
+      .dashboard-header :global(.btn) {
+        /* regla dura #5: nunca por debajo de 44px ni en landscape corto */
+        min-height: 44px;
+        padding: 0.3rem 0.6rem;
+      }
+      .view-tabs button {
+        padding: 0.35rem 0.5rem;
+        font-size: 0.8rem;
+      }
+      .header-left,
+      .header-right {
+        width: auto;
+      }
+    }
     .grid-section {
       padding: 0.5rem;
     }
@@ -525,6 +566,36 @@
     .view-tabs button {
       padding: 0.35rem 0.6rem;
       font-size: 0.8rem;
+    }
+  }
+
+  /* G5: FAB flotante — creación de actividades al alcance del pulgar.
+     Solo móvil (desktop tiene el botón del header siempre visible). */
+  .fab {
+    display: none;
+  }
+  @media (max-width: 768px) {
+    .fab {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: fixed;
+      right: calc(1rem + env(safe-area-inset-right, 0px));
+      bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: none;
+      background: var(--color-green-dark);
+      color: white;
+      box-shadow: 0 6px 20px rgba(45, 90, 39, 0.4);
+      cursor: pointer;
+      z-index: 50; /* bajo modales (100/200) y toasts (3000) */
+      transition: transform 0.15s, background 0.2s;
+    }
+    .fab:active {
+      transform: scale(0.92);
+      background: var(--color-green-moss);
     }
   }
 </style>

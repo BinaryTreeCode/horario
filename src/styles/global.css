@@ -23,6 +23,15 @@
   box-sizing: border-box;
 }
 
+/* G11: cuando hay un modal abierto, el fondo no scrollea con el dedo.
+   Selectores puros (sin JS): cada overlay abre/cierra y el body se congela.
+   Se congela html además de body porque la propagación de overflow no
+   siempre frena el scroll del viewport (medido en Chromium). */
+html:has(.modal-overlay),
+body:has(.modal-overlay) {
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   padding: 0;
