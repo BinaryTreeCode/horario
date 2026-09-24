@@ -99,27 +99,44 @@ describe('resolveDayCascade — semántica local con regla de mitades', () => {
     expect(out.get('a')!.start).toBe(9.5);
   });
 
-  test('dos pisados: cadena local, lo de arriba y lo lejano intactos', () => {
-    // d cae en 8.5-9.5 pisa a b (8.25-9.25) y a c (9-10)
+  test('dos pisados: mitades contra el CORTADO (centro del drop), cadena al resto', () => {
+    // d (8.5-9.5, centro 9) pisa b (8.25-9.25) y c (9-10): el cortado es b
+    // (contiene el centro). Centro 9 > centro de b 8.75 → mitad inferior →
+    // d queda DEBAJO de b (9.25), b intacto y c empujado en cadena.
     const out = byId(resolveDayCascade(
       [s('a', 7, 8), s('b', 8.25, 9.25), s('c', 9, 10), s('d', 8.5, 9.5)],
       22, 'd', 7
     ));
-    expect(out.get('d')!.start).toBe(8.5);
+    expect(out.get('d')).toEqual(s('d', 9.25, 10.25));
     expect(out.get('a')).toEqual(s('a', 7, 8)); // arriba del drop: intacto
-    expect(out.get('b')!.start).toBe(9.5); // pisado → empujado tras d
-    expect(out.get('c')!.start).toBe(10.5); // en la cadena
+    expect(out.get('b')).toEqual(s('b', 8.25, 9.25)); // cortado: intacto
+    expect(out.get('c')!.start).toBe(10.25); // en la cadena
+  });
+
+  test('pila contigua pisada: se INSERTA entre los bloques (no desliza junta)', () => {
+    // Pila b (9-10) + c (10-11) pegados. d (1h) cae 9.25-10.25, centro 9.75
+    // ∈ b → mitades: centro 9.75 > 9.5 (mitad inferior de b) → d queda DEBAJO
+    // de b (10-11) y c (lo que seguía pegado) baja en cadena: la pila se parte.
+    const out = byId(resolveDayCascade(
+      [s('b', 9, 10), s('c', 10, 11), s('d', 9.25, 10.25)],
+      22, 'd', 7
+    ));
+    expect(out.get('b')).toEqual(s('b', 9, 10)); // arriba del corte: intacto
+    expect(out.get('d')).toEqual(s('d', 10, 11)); // insertado ENTRE b y c
+    expect(out.get('c')).toEqual(s('c', 11, 12)); // desplazado por la inserción
   });
 
   test('el primer hueco libre corta la cadena', () => {
-    // d (1.5h) cae en 8.5-10, empuja a y b; c está lejos tras el hueco 12-13
+    // d (1.5h) cae 8.5-10 (centro 9.25 ∈ b 9-10, mitad superior): mitades →
+    // sube pegado al inicio de b (9). a queda intacto (no lo pisa el final),
+    // b baja en cadena y c está protegido por el hueco 12-13.
     const out = byId(resolveDayCascade(
       [s('a', 8, 9), s('b', 9, 10), s('c', 13, 14), s('d', 8.5, 10)],
       22, 'd', 7
     ));
-    expect(out.get('d')).toEqual(s('d', 8.5, 10));
-    expect(out.get('a')!.start).toBe(10);
-    expect(out.get('b')!.start).toBe(11);
+    expect(out.get('d')).toEqual(s('d', 9, 10.5));
+    expect(out.get('a')).toEqual(s('a', 8, 9));
+    expect(out.get('b')!.start).toBe(10.5);
     expect(out.get('c')).toEqual(s('c', 13, 14)); // hueco 12-13 la protegió
   });
 

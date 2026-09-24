@@ -26,10 +26,9 @@
   /**
    * Tap en un slot vacío del track (G4): abre el modal de creación con la hora
    * precargada según el punto tocado. Se ignora si el tap fue sobre una tarjeta
-   * o si vino después de un drag (suppressNextClick).
+   * o menú; tras un drag, el motor ya suprime el click sintético por su cuenta.
    */
   function handleTrackTap(e: MouseEvent) {
-    if (suppressNextClick) return;
     const target = e.target as HTMLElement;
     if (target.closest('.daily-activity-card, .context-menu, button')) return;
     const track = e.currentTarget as HTMLElement;
@@ -98,12 +97,7 @@
   let dragOffsetHours = 0;
   let grabClientY = 0; // punto de agarre (px) — lo usa onActivate del motor
   let draggedActivityId = $state<string | null>(null);
-  let suppressNextClick = false;
-  /** Bloquea el click sintético que sigue al pointerup de un drag/resize. */
-  function suppressClick() {
-    suppressNextClick = true;
-    setTimeout(() => { suppressNextClick = false; }, 150);
-  }
+  // (La supresión del click sintético post-drag vive en el motor.)
   /**
    * Vista previa del layout durante el drag: id → {start, end} en horas.
    * No toca la BD — solo alimenta a layoutActivities para que las tarjetas
@@ -117,7 +111,6 @@
    * la lleva desde el fantasma hasta su slot, sin teletransporte.
    */
   let topOverride = $state<{ id: string; start: number; end: number } | null>(null);
-  let lastPreviewY = NaN;
   type Slot = { id: string; start: number; end: number };
   const toSlotMap = (slots: Slot[]) => new Map(slots.map(s => [s.id, { start: s.start, end: s.end }]));
   /** Doble rAF: la store re-emite y el navegador pinta antes de soltar el ancla. */
@@ -126,7 +119,11 @@
   const engine = createDragEngine({
     ghostClass: 'dragging',
     scrollAxis: 'y',
-    scrollContainer: () => document.querySelector('.daily-container')
+    scrollContainer: () => document.querySelector('.daily-container'),
+    quietHold: {
+      ms: 550,
+      onQuiet: (t, x, y) => openContextMenuAt(t.activityId, x, y)
+    }
   });
 
   const currentMinutes = $derived(now.getHours() * 60 + now.getMinutes());
@@ -355,11 +352,12 @@
       draggedActivityId = t.activityId;
     },
     onMove(_t, _x, clientY) {
-      if (draggedActivityId === null) return;
-      updateDropPreview(clientY);
+      if (draggedActivityId === null || !engine.active()) return;
+      // Publica el layout predicho: las vecinas se deslizan en vivo vía su
+      // transition CSS de top/height. Síncrono: ordenar ≤20 items es trivial.
+      dropPreview = computeLayoutForDrop(clientY, draggedActivityId);
     },
     async onDrop(t, _x, clientY) {
-      suppressClick();
       // El preview muere ANTES de limpiar draggedActivityId: las vecinas
       // conservan el layout final (la store aún no re-emitio), así no saltan.
       dropPreview = computeLayoutForDrop(clientY, t.activityId);
@@ -373,7 +371,7 @@
       } finally {
         // Si la store re-emitio el mismo layout, soltar el ancla es
         // inobservable; si el commit falló, esto devuelve la UI a la BD.
-        settle2(() => { dropPreview = null; topOverride = null; lastPreviewY = NaN; });
+        settle2(() => { dropPreview = null; topOverride = null; });
       }
     },
     onCancel() {
@@ -382,7 +380,6 @@
       draggedActivityId = null;
       dropPreview = null;
       topOverride = null;
-      lastPreviewY = NaN;
     }
   };
 
@@ -390,19 +387,6 @@
     grabClientY = e.clientY;
     // El motor arma: mouse por umbral (5px), táctil por long-press (260ms).
     engine.begin(e, { card: e.currentTarget as HTMLElement, activityId: activity.id! }, dragHooks);
-  }
-
-  /**
-   * Calcula el layout predicho para la posición actual del cursor y lo
-   * publica en dropPreview: las tarjetas vecinas empujadas se deslizan en
-   * vivo vía su transition CSS de top/height. Síncrono a propósito: el cálculo
-   * es trivial (ordenar ≤20 items) y rAF no corre en pestañas ocultas.
-   */
-  function updateDropPreview(clientY: number) {
-    if (clientY === lastPreviewY) return;
-    if (!engine.active()) return;
-    lastPreviewY = clientY;
-    dropPreview = computeLayoutForDrop(clientY, draggedActivityId);
   }
 
   /**
@@ -461,7 +445,6 @@
       const resolved = computeResizePreview(clientY, t.activityId, t.meta as ResizeMeta);
       draggedActivityId = null;
       if (resolved) {
-        suppressClick();
         await commitResolved(toSlotMap(resolved));
       }
       settle2(() => { dropPreview = null; topOverride = null; });
@@ -576,14 +559,19 @@
       : null
   );
 
-  function handleContextMenu(e: MouseEvent, activityId: number) {
+  function handleContextMenu(e: MouseEvent, activityId: string) {
     e.preventDefault();
-    // Clamp para que el menú no se salga de la ventana
+    openContextMenuAt(activityId, e.clientX, e.clientY);
+  }
+
+  /** Abre el menú contextual con clamp para que no se salga de la ventana.
+   *  Común al click derecho (G5) y al long-press táctil quieto (G6). */
+  function openContextMenuAt(activityId: string, x: number, y: number) {
     const MENU_W = 220;
     const MENU_H = 130;
-    const x = Math.min(e.clientX, window.innerWidth - MENU_W - 8);
-    const y = Math.min(e.clientY, window.innerHeight - MENU_H - 8);
-    contextMenu = { show: true, x: Math.max(4, x), y: Math.max(4, y), activityId };
+    const cx = Math.min(x, window.innerWidth - MENU_W - 8);
+    const cy = Math.min(y, window.innerHeight - MENU_H - 8);
+    contextMenu = { show: true, x: Math.max(4, cx), y: Math.max(4, cy), activityId };
   }
 
   function closeContextMenu() {
@@ -768,7 +756,7 @@
           aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{totalSteps ? `, ${doneSteps} de ${totalSteps} pasos` : ''}. Arrastrar o tocar para editar"
           onpointerdown={(e) => handlePointerDown(e, activity)}
           oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
-          onclick={() => { if (suppressNextClick) return; onEditActivity(activity.id!, activity); }}
+          onclick={() => onEditActivity(activity.id!, activity)}
           onkeydown={(e) => {
             // M6 (WCAG 2.5.7): mover sin puntero. ↑/↓ = ±15 min con cascada;
             // Enter abre edición; Espacio SOLO activa (preventDefault: la
@@ -778,7 +766,6 @@
               nudgeActivity(activity, e.key === 'ArrowUp' ? -0.25 : 0.25);
             } else if (e.key === ' ') {
               e.preventDefault();
-              if (!suppressNextClick) onEditActivity(activity.id!, activity);
             } else if (e.key === 'Enter') {
               onEditActivity(activity.id!, activity);
             }

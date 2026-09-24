@@ -83,13 +83,17 @@ export function resolveDayCascade(
     return finish([...others, { id: movedId, start: mStart, end: mEnd }]);
   }
 
-  // 2) Un solo pisado → REGLA DE MITADES: centro del drop en la mitad
-  //    superior del pisado → el arrastrado queda ARRIBA (pegado); en la
-  //    mitad inferior → DEBAJO (pegado). Como en una lista ordenable: nunca
-  //    en el medio ni dejando hueco contra el pisado.
+  // 2) REGLA DE MITADES contra el bloque CORTADO: el pisado que contiene el
+  //    centro del drop. Centro en la mitad superior del cortado → el
+  //    arrastrado queda ARRIBA (pegado); mitad inferior → DEBAJO (pegado).
+  //    Con una PILA CONTIGUA pisada (2+ bloques pegados) esto la TRATA COMO
+  //    BLOQUES SEPARADOS: se corta por el bloque bajo el dedo y el resto se
+  //    resuelve en cadena en el paso 3 — se puede insertar ENTRE ellos, en
+  //    vez de deslizar la pila entera como un solo bloque.
   let finalStart = mStart;
-  if (colliding.length === 1 && !keepPlace) {
-    const d = colliding[0];
+  if (colliding.length > 0 && !keepPlace) {
+    const center = (mStart + mEnd) / 2;
+    const d = colliding.find(o => center >= o.start && center < o.end) ?? colliding[0];
     const above = mStart + mEnd < d.start + d.end; // centros comparados ×2
     // (empate exacto, típico con tarjetas del mismo tamaño y snap de 15 min,
     // cae ABAJO: es lo que espera quien suelta en la parte baja)

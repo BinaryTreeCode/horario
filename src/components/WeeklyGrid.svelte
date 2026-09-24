@@ -27,12 +27,7 @@
   // ── Drag & Drop: la mecánica vive en src/lib/dragEngine.ts (dueño único,
   // compartida con la vista Día). El quiet-hold táctil de 550ms (G6: iOS no
   // dispara contextmenu) abre el menú: dedo quieto = menú, mover = drag.
-  let suppressNextClick = false;
-  /** Bloquea el click sintético que sigue al pointerup de un drag/resize. */
-  function suppressClick() {
-    suppressNextClick = true;
-    setTimeout(() => { suppressNextClick = false; }, 150);
-  }
+  // (La supresión del click sintético post-drag vive en el motor.)
 
   function openContextMenu(activityId: string, x: number, y: number) {
     // Clamp para que el menú no se salga de la ventana
@@ -255,7 +250,7 @@
       const key = target.day * 400 + start * 4; // recalcula solo al cambiar de slot
       if (key === lastPreviewKey) return;
       lastPreviewKey = key;
-      dropPreview = { day: target.day, slots: computeWeekLayoutForDrop(target.day, draggedActivityId, start) };
+      dropPreview = { day: target.day, slots: (propagateWeekly(activities, draggedActivityId, start, endHour, CODEC, [target.day]).byDay.get(target.day) ?? new Map()) };
     },
     async onDrop(t, x, y) {
       const sourceDay = (t.meta as { day: number }).day;
@@ -276,7 +271,6 @@
         newDays.push(day);
       }
       newDays = [...new Set(newDays)].sort((a, b) => a - b);
-      suppressClick();
       // M1: una sola transacción — un fallo a mitad no deja escrituras parciales.
       await commitWeeklyTimes(cascada, `Mover ${activity.name} a ${days[day]}`, { id: t.activityId, days: newDays });
       clearDragPreview();
@@ -307,13 +301,8 @@
   /**
    * Preview del drop en un día: usa la cascada multi-día (src/lib/cascade.ts).
    * Lo que se ve es lo que se guarda — el preview de la columna destino es
-   * exactamente el mapa que persistirá dragHooks.onDrop.
+   * exactamente el mapa que persistirá dragHooks.onDrop. (inline en onMove)
    */
-  function computeWeekLayoutForDrop(dayIndex: number, actId: string, newStartHour: number): Map<string, { start: number; end: number }> {
-    const res = propagateWeekly(activities, actId, newStartHour, endHour, CODEC, [dayIndex]);
-    return res.byDay.get(dayIndex) ?? new Map();
-  }
-
   /**
    * Cascada completa para el commit: TODOS los días de la actividad (incluido
    * el destino si el drag cruza columnas). La arrastrada queda ANCLADA al slot
@@ -431,7 +420,6 @@
       // resuelto — el reacomodo de cascada no debe redefinir el estirado.
       const act = activities.find(a => a.id === t.activityId);
       const times = propagateWeekly(activities, t.activityId, m.origStart, endHour, CODEC, act?.daysOfWeek ?? [], calc.newEnd - m.origStart, 0, true).times;
-      suppressClick();
       await commitWeeklyTimes(times, `Estirar ${act?.name ?? 'actividad'}`);
       dropPreview = null;
       lastPreviewKey = -1;
@@ -580,7 +568,7 @@
               onpointerdown={(e) => handleItemPointerDown(e, activity, i)}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
               style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
-              onclick={() => { if (suppressNextClick) return; onEditActivity(activity.id!); }}
+              onclick={() => onEditActivity(activity.id!)}
               onkeydown={(e) => {
                 // M6 (WCAG 2.5.7): ↑/↓ = ±15 min con cascada global. Enter y
                 // Espacio ya abren edición (comportamiento nativo de <button>).

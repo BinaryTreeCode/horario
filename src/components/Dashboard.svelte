@@ -11,7 +11,6 @@
   } from '../lib/stores';
   import WeeklyGrid from './WeeklyGrid.svelte';
   import DailyView from './DailyView.svelte';
-  import DonutCharts from './DonutCharts.svelte';
 
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
@@ -63,6 +62,7 @@
   // Precarga de modales cuando el navegador queda idle
   $effect(() => {
     preloadModals();
+    loadDonutCharts(); // los donuts salen del chunk inicial (lazy como los modales)
   });
   
   let showSettings = $state(false);
@@ -72,8 +72,10 @@
   // primera vez (−40 KB del camino crítico). Tras el idle se precargan.
   let SettingsPanelComp: typeof import('./SettingsPanel.svelte').default | null = $state(null);
   let ActivityModalComp: typeof import('./ActivityModal.svelte').default | null = $state(null);
+  let DonutChartsComp: typeof import('./DonutCharts.svelte').default | null = $state(null);
 
   let loadPromiseSettings: Promise<void> | null = $state(null);
+  let loadPromiseDonut: Promise<void> | null = $state(null);
   let loadPromiseActivity: Promise<void> | null = $state(null);
 
   function loadSettingsPanel() {
@@ -87,6 +89,12 @@
       ActivityModalComp = (await import('./ActivityModal.svelte')).default;
     })();
     return loadPromiseActivity;
+  }
+  function loadDonutCharts() {
+    loadPromiseDonut ??= (async () => {
+      DonutChartsComp = (await import('./DonutCharts.svelte')).default;
+    })();
+    return loadPromiseDonut;
   }
   function openSettings() {
     showSettings = true;
@@ -259,10 +267,12 @@
             />
           </div>
           <div class="stats-section">
-            <DonutCharts 
-              activities={$activitiesStore || []} 
-              categories={$categoriesStore || []} 
-            />
+            {#if DonutChartsComp}
+              <DonutChartsComp
+                activities={$activitiesStore || []}
+                categories={$categoriesStore || []}
+              />
+            {/if}
           </div>
         </div>
       {:else}
