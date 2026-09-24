@@ -3,6 +3,7 @@
   import type { Activity, Category, DayOverride } from '../lib/types';
   import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
   import { resolveDayCascade } from '../lib/cascade';
+  import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
   import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon } from '@lucide/svelte';
   import { db, newId } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
@@ -86,13 +87,46 @@
     }, 60000);
   });
 
+  // Desmontaje a mitad de drag/gesto: sin esto, los listeners de window
+  // quedan colgados y referencian nodos muertos. El motor limpia todo (C2).
   onDestroy(() => {
     clearInterval(interval);
-    // Desmontaje a mitad de drag/gesto: sin esto, los listeners de window
-    // quedan colgados y referencian nodos muertos.
-    cleanupDragListeners();
-    cleanupResizeListeners();
-    stopEdgeScroll();
+    engine.destroy();
+  });
+
+  // ── Estado del drag (leído por layoutActivities y los hooks del motor) ──
+  let dragOffsetHours = 0;
+  let grabClientY = 0; // punto de agarre (px) — lo usa onActivate del motor
+  let draggedActivityId = $state<string | null>(null);
+  let suppressNextClick = false;
+  /** Bloquea el click sintético que sigue al pointerup de un drag/resize. */
+  function suppressClick() {
+    suppressNextClick = true;
+    setTimeout(() => { suppressNextClick = false; }, 150);
+  }
+  /**
+   * Vista previa del layout durante el drag: id → {start, end} en horas.
+   * No toca la BD — solo alimenta a layoutActivities para que las tarjetas
+   * vecinas se deslicen (transition CSS) hacia su posición predicha.
+   * null = sin drag activo.
+   */
+  let dropPreview = $state<Map<string, { start: number; end: number }> | null>(null);
+  /**
+   * Ancla temporal de la tarjeta recién soltada/estirada: mientras la store
+   * re-emite, su layout viene de aquí (slot final) — así la transición CSS
+   * la lleva desde el fantasma hasta su slot, sin teletransporte.
+   */
+  let topOverride = $state<{ id: string; start: number; end: number } | null>(null);
+  let lastPreviewY = NaN;
+  type Slot = { id: string; start: number; end: number };
+  const toSlotMap = (slots: Slot[]) => new Map(slots.map(s => [s.id, { start: s.start, end: s.end }]));
+  /** Doble rAF: la store re-emite y el navegador pinta antes de soltar el ancla. */
+  const settle2 = (fn: () => void) => requestAnimationFrame(() => requestAnimationFrame(fn));
+
+  const engine = createDragEngine({
+    ghostClass: 'dragging',
+    scrollAxis: 'y',
+    scrollContainer: () => document.querySelector('.daily-container')
   });
 
   const currentMinutes = $derived(now.getHours() * 60 + now.getMinutes());
@@ -294,149 +328,68 @@
   let confirmRestore = $state(false);
   let confirmSavePermanent = $state(false);
 
-  // ── Drag & Drop con Pointer Events (mouse + táctil) ─────────────────────
-  // El DnD nativo de HTML5 no dispara en pantallas táctiles: se reimplementa
-  // con pointer events. Mouse: arrastra al superar 5px de movimiento.
-  // Táctil: long-press (260ms) para no pelear con el scroll vertical.
-  const DRAG_THRESHOLD_PX = 5;
-  const LONG_PRESS_MS = 260;
+  // ── Drag & Drop: la mecánica vive en src/lib/dragEngine.ts (dueño único,
+  // compartida con la vista Semana). Aquí solo la semántica de la vista. ──
 
-  interface PendingDrag {
-    activityId: string;
-    offsetYHours: number;   // punto de agarre dentro de la tarjeta, en horas
-    startX: number;
-    startY: number;
-    pointerId: number;
-    pointerType: string;
-    card: HTMLElement;
-    started: boolean;
-    timer: number | null;
-    lastClientY: number;
-  }
-  let pendingDrag: PendingDrag | null = null;
-  let dragOffsetHours = 0;
-  let draggedActivityId = $state<string | null>(null);
-  let suppressNextClick = false;
-
-  /**
-   * Vista previa del layout durante el drag: id → {start, end} en horas.
-   * No toca la BD — solo alimenta a layoutActivities para que las tarjetas
-   * vecinas se deslicen (transition CSS) hacia su posición predicha mientras
-   * se arrastra. null = sin drag activo.
-   */
-  let dropPreview = $state<Map<string, { start: number; end: number }> | null>(null);
-
-  /**
-   * Ancla temporal de la tarjeta recién soltada: mientras la store re-emite,
-   * su layout viene de aquí (slot final) — así la transición CSS la lleva
-   * desde la posición del fantasma hasta su slot, sin teletransporte.
-   */
-  let topOverride = $state<{ id: string; start: number; end: number } | null>(null);
-
-  function handlePointerDown(e: PointerEvent, activity: Activity) {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    const card = e.currentTarget as HTMLElement;
-    if (!card.closest('.activities-track')) return;
-
+  /** Calcula el offset del punto de agarre dentro de la tarjeta, en horas. */
+  function grabOffsetHours(card: HTMLElement, activity: Activity, clientY: number): number {
     const cardRect = card.getBoundingClientRect();
     const durH = parseTime(activity.endTime) - parseTime(activity.startTime);
-
-    pendingDrag = {
-      activityId: activity.id!,
-      offsetYHours: ((e.clientY - cardRect.top) / cardRect.height) * durH,
-      startX: e.clientX,
-      startY: e.clientY,
-      pointerId: e.pointerId,
-      pointerType: e.pointerType,
-      card,
-      started: false,
-      timer: null,
-      lastClientY: e.clientY
-    };
-
-    if (e.pointerType !== 'mouse') {
-      pendingDrag.timer = window.setTimeout(() => {
-        if (pendingDrag && !pendingDrag.started) activateDrag();
-      }, LONG_PRESS_MS);
-    }
-
-    window.addEventListener('pointermove', onDragPointerMove, { passive: false });
-    window.addEventListener('pointerup', onDragPointerUp);
-    window.addEventListener('pointercancel', onDragPointerCancel);
-    // C1: no pasivo es lo que permite preventDefault del scroll en el drag.
-    window.addEventListener('touchmove', onDragTouchMove, { passive: false });
+    return ((clientY - cardRect.top) / cardRect.height) * durH;
   }
 
-  function activateDrag() {
-    if (!pendingDrag || pendingDrag.started) return;
-    pendingDrag.started = true;
-    dragOffsetHours = pendingDrag.offsetYHours;
-    draggedActivityId = pendingDrag.activityId;
-    try { pendingDrag.card.setPointerCapture(pendingDrag.pointerId); } catch { /* noop */ }
-    pendingDrag.card.classList.add('dragging');
-    navigator.vibrate?.(10); // háptica sutil: el drag se armó
-    if (pendingDrag.pointerType !== 'mouse') {
-      pendingDrag.card.style.touchAction = 'none';
-      window.addEventListener('contextmenu', preventDragContextMenu, true);
-    }
-    moveGhost(pendingDrag.lastClientY);
-    ensureEdgeScroll(); // M5
+  /** Ancla del gesto de estirado: origen/fin originales + punto de agarre. */
+  interface ResizeMeta {
+    origStart: number;
+    origEnd: number;
+    startY: number;
   }
 
-  function preventDragContextMenu(e: Event) {
-    e.preventDefault();
-    e.stopPropagation(); // M3: el oncontextmenu de la tarjeta no debe abrir el menú en Android
-  }
-
-  function moveGhost(clientY: number) {
-    if (!pendingDrag) return;
-    // Lift minimalista: el fantasma crece 3% — feedback de agarre sin ruido.
-    // Al soltar, la transición base de transform lo asienta de vuelta a 1.
-    pendingDrag.card.style.transform = `translateY(${clientY - pendingDrag.startY}px) scale(1.03)`;
-  }
-
-  // M5: auto-scroll del contenedor al arrastrar cerca de sus bordes — sin
-  // esto no se puede llevar una actividad a una hora fuera de pantalla.
-  const EDGE_SCROLL_ZONE = 56;   // px de franja activa
-  const EDGE_SCROLL_SPEED = 12;  // px por frame
-  let edgeScrollRaf = 0;
-  function edgeScrollTick() {
-    if (!pendingDrag?.started) { edgeScrollRaf = 0; return; }
-    const container = document.querySelector('.daily-container');
-    if (container) {
-      const rect = container.getBoundingClientRect();
-      const y = pendingDrag.lastClientY;
-      if (y < rect.top + EDGE_SCROLL_ZONE) container.scrollBy(0, -EDGE_SCROLL_SPEED);
-      else if (y > rect.bottom - EDGE_SCROLL_ZONE) container.scrollBy(0, EDGE_SCROLL_SPEED);
-    }
-    edgeScrollRaf = requestAnimationFrame(edgeScrollTick);
-  }
-  function ensureEdgeScroll() {
-    if (!edgeScrollRaf && pendingDrag?.started) edgeScrollRaf = requestAnimationFrame(edgeScrollTick);
-  }
-  function stopEdgeScroll() {
-    if (edgeScrollRaf) { cancelAnimationFrame(edgeScrollRaf); edgeScrollRaf = 0; }
-  }
-
-  function onDragPointerMove(e: PointerEvent) {
-    if (!pendingDrag) return;
-    pendingDrag.lastClientY = e.clientY;
-
-    if (!pendingDrag.started) {
-      const dist = Math.hypot(e.clientX - pendingDrag.startX, e.clientY - pendingDrag.startY);
-      if (pendingDrag.pointerType === 'mouse') {
-        if (dist > DRAG_THRESHOLD_PX) activateDrag();
-      } else if (dist > 10 && pendingDrag.timer) {
-        // Movimiento antes del long-press = gesto de scroll: cancelar drag
-        clearTimeout(pendingDrag.timer);
-        pendingDrag.timer = null;
+  const dragHooks: DragHooks = {
+    onActivate(t) {
+      const activity = dayActivities.find(a => a.id === t.activityId);
+      if (!activity) return;
+      dragOffsetHours = grabOffsetHours(t.card, activity, grabClientY);
+      // El layout (y el preview) leen este id: excluye la tarjeta del
+      // clustering mientras es fantasma.
+      draggedActivityId = t.activityId;
+    },
+    onMove(_t, _x, clientY) {
+      if (draggedActivityId === null) return;
+      updateDropPreview(clientY);
+    },
+    async onDrop(t, _x, clientY) {
+      suppressClick();
+      // El preview muere ANTES de limpiar draggedActivityId: las vecinas
+      // conservan el layout final (la store aún no re-emitio), así no saltan.
+      dropPreview = computeLayoutForDrop(clientY, t.activityId);
+      // Anclamos la tarjeta arrastrada a SU slot final: se asienta con la
+      // transición CSS desde donde estaba el fantasma, sin teletransporte.
+      const mine = dropPreview.get(t.activityId);
+      draggedActivityId = t.activityId;
+      topOverride = mine ? { id: t.activityId, start: mine.start, end: mine.end } : null;
+      try {
+        await commitDropAt(dropPreview);
+      } finally {
+        // Si la store re-emitio el mismo layout, soltar el ancla es
+        // inobservable; si el commit falló, esto devuelve la UI a la BD.
+        settle2(() => { dropPreview = null; topOverride = null; lastPreviewY = NaN; });
       }
-      if (!pendingDrag.started) return;
+    },
+    onCancel() {
+      // C2: reset completo — sin esto la tarjeta queda fantasma (fuera de
+      // columnas, ancho completo) hasta el siguiente arrastre.
+      draggedActivityId = null;
+      dropPreview = null;
+      topOverride = null;
+      lastPreviewY = NaN;
     }
+  };
 
-    if (pendingDrag.pointerType !== 'mouse') e.preventDefault();
-    moveGhost(e.clientY);
-    updateDropPreview(e.clientY);
+  function handlePointerDown(e: PointerEvent, activity: Activity) {
+    grabClientY = e.clientY;
+    // El motor arma: mouse por umbral (5px), táctil por long-press (260ms).
+    engine.begin(e, { card: e.currentTarget as HTMLElement, activityId: activity.id! }, dragHooks);
   }
 
   /**
@@ -445,10 +398,9 @@
    * vivo vía su transition CSS de top/height. Síncrono a propósito: el cálculo
    * es trivial (ordenar ≤20 items) y rAF no corre en pestañas ocultas.
    */
-  let lastPreviewY = NaN;
   function updateDropPreview(clientY: number) {
     if (clientY === lastPreviewY) return;
-    if (!pendingDrag?.started) return;
+    if (!engine.active()) return;
     lastPreviewY = clientY;
     dropPreview = computeLayoutForDrop(clientY, draggedActivityId);
   }
@@ -489,180 +441,74 @@
     return result;
   }
 
-  async function onDragPointerUp(e: PointerEvent) {
-    const st = pendingDrag;
-    cleanupDragListeners();
-    if (!st) return;
-    if (st.timer) clearTimeout(st.timer);
-    st.card.classList.remove('dragging');
-    st.card.style.transform = '';
-    st.card.style.touchAction = '';
-    window.removeEventListener('contextmenu', preventDragContextMenu, true);
-    pendingDrag = null;
 
-    if (st.started) {
-      suppressNextClick = true;
-      setTimeout(() => { suppressNextClick = false; }, 150);
-      navigator.vibrate?.(8); // háptica: el drop se registró
-      // El preview muere ANTES de limpiar draggedActivityId: las vecinas
-      // conservan el layout final (la store aún no re-emitio), así no saltan.
-      dropPreview = computeLayoutForDrop(e.clientY, st.activityId);
-      // Anclamos la tarjeta arrastrada a SU slot final: se asienta con la
-      // transición CSS desde donde estaba el fantasma, sin teletransporte.
-      const mine = dropPreview.get(st.activityId);
-      draggedActivityId = st.activityId;
-      topOverride = mine ? { id: st.activityId, start: mine.start, end: mine.end } : null;
-      try {
-        await commitDropAt(e.clientY);
-      } finally {
-        // Si la store re-emitio el mismo layout, soltar el ancla es
-        // inobservable; si el commit falló, esto devuelve la UI a la BD.
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            dropPreview = null;
-            topOverride = null;
-            lastPreviewY = NaN;
-          });
-        });
-      }
-    } else {
-      dropPreview = null;
-      lastPreviewY = NaN;
-    }
-    stopEdgeScroll(); // M5
-  }
-
-  function onDragPointerCancel() {
-    const st = pendingDrag;
-    cleanupDragListeners();
-    if (st) {
-      if (st.timer) clearTimeout(st.timer);
-      st.card.classList.remove('dragging');
-      st.card.style.transform = '';
-      st.card.style.touchAction = '';
-    }
-    window.removeEventListener('contextmenu', preventDragContextMenu, true);
-    // C2: reset completo — sin esto la tarjeta queda fantasma (fuera de
-    // columnas, ancho completo) hasta el siguiente arrastre.
-    draggedActivityId = null;
-    dropPreview = null;
-    topOverride = null;
-    lastPreviewY = NaN;
-    pendingDrag = null;
-    stopEdgeScroll(); // M5
-  }
-
-  // C1: touch-action se decide cuando el dedo TOCA la pantalla (la tarjeta
-  // tiene pan-y para el scroll) — cambiarlo a los 260ms del long-press ya no
-  // afecta ese gesto. El único freno fiable del scroll durante el drag es un
-  // touchmove no pasivo con preventDefault. Se registra al iniciar el drag
-  // y se retira al terminar (el scroll normal de la página no se toca).
-  function onDragTouchMove(e: TouchEvent) {
-    if (pendingDrag?.started) {
-      if (e.cancelable) e.preventDefault();
-      if (e.touches.length === 1) {
-        // Sintetiza el seguimiento del ghost por si pointermove se pierde.
-        onDragPointerMove(e.touches[0] as unknown as PointerEvent);
-      }
-    }
-  }
-
-  function cleanupDragListeners() {
-    window.removeEventListener('pointermove', onDragPointerMove);
-    window.removeEventListener('pointerup', onDragPointerUp);
-    window.removeEventListener('pointercancel', onDragPointerCancel);
-    window.removeEventListener('touchmove', onDragTouchMove);
-  }
 
   // ── Resize (estirar borde inferior) ──────────────────────────────────
-  // Ancla del gesto de estirado: origen/fin originales + punto de agarre.
-  // El preview reutiliza topOverride (slot propio) + dropPreview (vecinas),
-  // así la tarjeta crece animada y las demás se deslizan igual que en el drag.
-  let resizing = $state<{ id: string; origStart: number; origEnd: number; startY: number; pointerId: number } | null>(null);
+  // Mismo motor, gesto inmediato y sin fantasma: la tarjeta crece por su
+  // topOverride y las vecinas se deslizan por dropPreview (igual que en drag).
+  const resizeHooks: DragHooks = {
+    onActivate(t) {
+      draggedActivityId = t.activityId; // excluye la tarjeta del clustering
+    },
+    onMove(t, _x, clientY) {
+      const resolved = computeResizePreview(clientY, t.activityId, t.meta as ResizeMeta);
+      if (!resolved) return;
+      const mine = resolved.find(s => s.id === t.activityId)!;
+      topOverride = { id: t.activityId, start: mine.start, end: mine.end };
+      dropPreview = toSlotMap(resolved);
+    },
+    async onDrop(t, _x, clientY) {
+      const resolved = computeResizePreview(clientY, t.activityId, t.meta as ResizeMeta);
+      draggedActivityId = null;
+      if (resolved) {
+        suppressClick();
+        await commitResolved(toSlotMap(resolved));
+      }
+      settle2(() => { dropPreview = null; topOverride = null; });
+    },
+    onCancel() {
+      draggedActivityId = null;
+      dropPreview = null;
+      topOverride = null;
+    }
+  };
 
   function startResize(e: PointerEvent, activity: Activity) {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.stopPropagation(); // no iniciar drag de la tarjeta ni su click
-    resizing = {
-      id: activity.id!,
-      origStart: parseTime(activity.startTime),
-      origEnd: parseTime(activity.endTime),
-      startY: e.clientY,
-      pointerId: e.pointerId
-    };
-    // Excluye la tarjeta del clustering mientras estira (ancho completo)
-    draggedActivityId = activity.id!;
-    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
-    window.addEventListener('pointermove', onResizeMove, { passive: false });
-    window.addEventListener('pointerup', onResizeUp);
-    window.addEventListener('pointercancel', onResizeCancel);
+    engine.beginImmediate(
+      e,
+      { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { origStart: parseTime(activity.startTime), origEnd: parseTime(activity.endTime), startY: e.clientY } satisfies ResizeMeta },
+      resizeHooks,
+      { ghost: false }
+    );
   }
 
   /** Slots del día tras estirar hasta clientY (cascada compartida, snap 15min). */
-  function computeResizePreview(clientY: number): { id: string; start: number; end: number }[] | null {
+  function computeResizePreview(
+    clientY: number,
+    actId: string,
+    meta: ResizeMeta
+  ): { id: string; start: number; end: number }[] | null {
     const track = document.querySelector('.activities-track');
-    if (!track || !resizing) return null;
+    if (!track) return null;
     const rect = track.getBoundingClientRect();
-    const deltaH = ((clientY - resizing.startY) / rect.height) * totalHours;
-    let newEnd = Math.round((resizing.origEnd + deltaH) * 4) / 4;
-    newEnd = Math.max(resizing.origStart + 0.25, Math.min(newEnd, endHour)); // mín 15min
+    const deltaH = ((clientY - meta.startY) / rect.height) * totalHours;
+    let newEnd = Math.round((meta.origEnd + deltaH) * 4) / 4;
+    newEnd = Math.max(meta.origStart + 0.25, Math.min(newEnd, endHour)); // mín 15min
     const slots = dayActivities
-      .filter(a => a.id !== resizing!.id)
+      .filter(a => a.id !== actId)
       .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
     // El resize no reubica el arrastrado (keepPlace): conserva su inicio y
     // solo empuja lo que pisa al estirar.
     return resolveDayCascade(
-      [...slots, { id: resizing.id, start: resizing.origStart, end: newEnd }],
-      endHour, resizing.id, startHour, true
+      [...slots, { id: actId, start: meta.origStart, end: newEnd }],
+      endHour, actId, startHour, true
     );
   }
 
-  function onResizeMove(e: PointerEvent) {
-    if (!resizing) return;
-    e.preventDefault();
-    const resolved = computeResizePreview(e.clientY);
-    if (!resolved) return;
-    const mine = resolved.find(s => s.id === resizing!.id)!;
-    topOverride = { id: resizing.id, start: mine.start, end: mine.end };
-    dropPreview = new Map(resolved.map(s => [s.id, { start: s.start, end: s.end }]));
-  }
-
-  async function onResizeUp(e: PointerEvent) {
-    // Calcular ANTES de limpiar: computeResizePreview necesita `resizing`.
-    const resolved = computeResizePreview(e.clientY);
-    cleanupResizeListeners();
-    resizing = null;
-    draggedActivityId = null;
-    if (resolved) {
-      suppressNextClick = true;
-      setTimeout(() => { suppressNextClick = false; }, 150);
-      await commitResolved(new Map(resolved.map(s => [s.id, { start: s.start, end: s.end }])));
-    }
-    requestAnimationFrame(() => requestAnimationFrame(() => { dropPreview = null; topOverride = null; }));
-  }
-
-  function onResizeCancel() {
-    cleanupResizeListeners();
-    resizing = null;
-    draggedActivityId = null;
-    dropPreview = null;
-    topOverride = null;
-  }
-
-  function cleanupResizeListeners() {
-    window.removeEventListener('pointermove', onResizeMove);
-    window.removeEventListener('pointerup', onResizeUp);
-    window.removeEventListener('pointercancel', onResizeCancel);
-  }
-
-  /** Aplica el drop en la posición final (clientY en px de viewport). */
-  async function commitDropAt(clientY: number) {
-    const track = document.querySelector('.activities-track');
-    if (!track || draggedActivityId === null) return;
-
-    // Misma matemática que el preview en vivo: lo que se vio mientras se
-    // arrastraba es exactamente lo que se guarda.
-    const resolved = computeLayoutForDrop(clientY, draggedActivityId);
+  /** Aplica el drop: el mapa resuelto del preview ES lo que se guarda
+   *  (misma matemática que se vio mientras se arrastraba). */
+  async function commitDropAt(resolved: Map<string, { start: number; end: number }>) {
     if (resolved.size === 0) return;
 
     // Metodología acordada: en la vista Día, el drag SIEMPRE es una edición
@@ -689,7 +535,7 @@
       [...slots, { id: activity.id!, start: newStart, end: newStart + dur }],
       endHour, activity.id!, startHour
     );
-    await commitResolved(new Map(resolved.map(sl => [sl.id, { start: sl.start, end: sl.end }])));
+    await commitResolved(toSlotMap(resolved));
   }
 
   /** Escribe un layout resuelto (id → slot) al override del día visible. */
@@ -716,13 +562,6 @@
       rows: [],
       overrides: [{ day, before: ovBefore, after: await db.dayOverrides.get(day) ?? null }]
     });
-  }
-
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault();
-    if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = 'move';
-    }
   }
 
   // Context Menu logic
@@ -953,7 +792,6 @@
                 <button
                   type="button"
                   class="activity-image-thumb"
-                  title="Ver imagen de la rutina"
                   aria-label="Ver imagen de {activity.name}"
                   onclick={(e) => { e.stopPropagation(); viewingImageActivity = activity; }}
                 >
@@ -961,7 +799,7 @@
                 </button>
               {/if}
               {#if totalSteps > 0 && activity.durationMins > 20}
-                <span class="activity-steps-badge" class:all-done={doneSteps === totalSteps && totalSteps > 0} title="{doneSteps} de {totalSteps} pasos completados">
+                <span class="activity-steps-badge" class:all-done={doneSteps === totalSteps && totalSteps > 0}>
                   <ListChecks size={12} /> {doneSteps}/{totalSteps}
                 </span>
               {/if}
@@ -970,7 +808,6 @@
               class="edit-btn"
               onclick={(e) => { e.stopPropagation(); onEditActivity(activity.id!, activity); }}
               aria-label="Editar {activity.name}"
-              title="Editar"
             >
               <Edit3 size={13} />
             </button>

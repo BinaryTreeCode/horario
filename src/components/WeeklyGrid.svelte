@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types';
   import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
   import { propagateWeekly } from '../lib/cascade';
@@ -10,6 +11,7 @@
   import { toastOk, toastErr } from '../lib/toast';
   import { pushUndo, cloneAct } from '../lib/undo';
   import { portal } from '../lib/portal';
+  import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
 
   interface Props {
     activities: Activity[];
@@ -22,40 +24,40 @@
 
   let { activities, categories, settings, dayOverrides = [], onSelectDay, onEditActivity }: Props = $props();
 
-  /**
-   * Long-press táctil (G6): iOS no dispara `contextmenu`, así que el menú de
-   * duplicar/eliminar era inalcanzable ahí. 550ms con el dedo quieto abre el
-   * mismo menú que el click-derecho de desktop; un movimiento >10px lo cancela
-   * (es scroll, no long-press).
-   */
-  let lpTimer: ReturnType<typeof setTimeout> | null = null;
-  let lpStart = { x: 0, y: 0 };
-
-  function handleItemPointerDown(e: PointerEvent, activityId: string) {
-    if (e.pointerType !== 'touch') return; // mouse ya tiene contextmenu
-    lpStart = { x: e.clientX, y: e.clientY };
-    lpTimer = setTimeout(() => {
-      lpTimer = null;
-      // handleContextMenu llama e.preventDefault(): el objeto necesita el método
-      // (deuda de firma pre-existente; cast local, sin tocar el handler viejo)
-      handleContextMenu({
-        clientX: lpStart.x,
-        clientY: lpStart.y,
-        preventDefault: () => {},
-      } as unknown as MouseEvent, activityId as unknown as number);
-    }, 550);
+  // ── Drag & Drop: la mecánica vive en src/lib/dragEngine.ts (dueño único,
+  // compartida con la vista Día). El quiet-hold táctil de 550ms (G6: iOS no
+  // dispara contextmenu) abre el menú: dedo quieto = menú, mover = drag.
+  let suppressNextClick = false;
+  /** Bloquea el click sintético que sigue al pointerup de un drag/resize. */
+  function suppressClick() {
+    suppressNextClick = true;
+    setTimeout(() => { suppressNextClick = false; }, 150);
   }
 
-  function handleItemPointerMove(e: PointerEvent) {
-    if (lpTimer && (Math.abs(e.clientX - lpStart.x) > 10 || Math.abs(e.clientY - lpStart.y) > 10)) {
-      clearTimeout(lpTimer);
-      lpTimer = null;
+  function openContextMenu(activityId: string, x: number, y: number) {
+    // Clamp para que el menú no se salga de la ventana
+    // (MENU_H: 2-3 items × 44px + padding — con 130 el menú quedaba fuera en landscape)
+    const MENU_W = 220;
+    const MENU_H = 160;
+    const cx = Math.min(x, window.innerWidth - MENU_W - 8);
+    const cy = Math.min(y, window.innerHeight - MENU_H - 8);
+    contextMenu = { show: true, x: Math.max(4, cx), y: Math.max(4, cy), activityId };
+  }
+
+  const engine = createDragEngine({
+    ghostClass: 'drag-ghost',
+    scrollAxis: 'x',
+    // El scroller real del eje x es el CONTENEDOR (.grid-scroll es flex,
+    // overflow visible): el auto-scroll de bordes necesita el que tiene
+    // overflow-x:auto.
+    scrollContainer: () => document.querySelector('.weekly-grid-container'),
+    quietHold: {
+      ms: 550,
+      onQuiet: (t, x, y) => openContextMenu(t.activityId, x, y)
     }
-  }
+  });
 
-  function handleItemPointerUp() {
-    if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
-  }
+  onDestroy(() => engine.destroy());
 
   const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
   const startHour = $derived(settings.startHour);
@@ -68,6 +70,9 @@
   const totalSlots = $derived(totalHours * slotsPerHour);
 
   const hours = $derived(Array.from({ length: totalHours + 1 }, (_, i) => startHour + i));
+
+  /** Codec de tiempos inyectable a la cascada (única instancia). */
+  const CODEC = { parse: parseTime, format: formatTime };
 
   // Calculate grid row position with 15-min precision using round
   function getRowPosition(timeStr: string) {
@@ -211,10 +216,85 @@
     };
   }
 
-  // Drag and Drop handlers
+  // Drag and Drop handlers (mecánica en src/lib/dragEngine.ts)
   let draggedActivityId = $state<string | null>(null);
   let dragSourceDay = $state<number | null>(null);
-  let dragOffset = $state(0);
+  let dragOffsetHours = 0;
+  let lastPreviewKey = -1;
+
+  /** Columna + grid bajo el puntero (null = fuera de la grilla). */
+  function dropTargetAt(x: number, y: number): { day: number; grid: HTMLElement } | null {
+    const col = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest('.day-column');
+    if (!col) return null;
+    const day = [...document.querySelectorAll('.day-column')].indexOf(col);
+    const grid = document.querySelectorAll('.slots-grid')[day] as HTMLElement | undefined;
+    return day >= 0 && grid ? { day, grid } : null;
+  }
+
+  /** Inicio (horas, snap 15min) para un drop en un grid — el preview y el
+   *  commit usan la MISMA matemática: lo que se ve es lo que se guarda. */
+  function slotStartAt(grid: HTMLElement, y: number, duration: number): number {
+    const rect = grid.getBoundingClientRect();
+    let start = (y - rect.top) / (slotHeightPx * slotsPerHour) + startHour - dragOffsetHours;
+    start = Math.round(start * 4) / 4;
+    return Math.max(startHour, Math.min(start, endHour - duration));
+  }
+
+  const dragHooks: DragHooks = {
+    onActivate(t) {
+      draggedActivityId = t.activityId;
+      dragSourceDay = (t.meta as { day: number }).day;
+    },
+    onMove(_t, x, y) {
+      if (draggedActivityId === null) return;
+      const activity = activities.find(a => a.id === draggedActivityId);
+      if (!activity) return;
+      const target = dropTargetAt(x, y);
+      if (!target) return;
+      const start = slotStartAt(target.grid, y, parseTime(activity.endTime) - parseTime(activity.startTime));
+      const key = target.day * 400 + start * 4; // recalcula solo al cambiar de slot
+      if (key === lastPreviewKey) return;
+      lastPreviewKey = key;
+      dropPreview = { day: target.day, slots: computeWeekLayoutForDrop(target.day, draggedActivityId, start) };
+    },
+    async onDrop(t, x, y) {
+      const sourceDay = (t.meta as { day: number }).day;
+      const activity = activities.find(a => a.id === t.activityId);
+      if (!activity) { clearDragPreview(); return; }
+      const target = dropTargetAt(x, y);
+      const day = target?.day ?? sourceDay;
+      const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
+      // Ancla = la MISMA matemática del preview: lo que se vio es lo que se guarda.
+      const newStart = target ? slotStartAt(target.grid, y, duration) : startHour;
+      dragSourceDay = sourceDay; // computeFullCascade la usa para el canje de días
+      const cascada = computeFullCascade(t.activityId, day, newStart);
+      let newDays = [...activity.daysOfWeek];
+      const idx = newDays.indexOf(sourceDay);
+      if (idx !== -1) {
+        newDays[idx] = day;
+      } else if (!newDays.includes(day)) {
+        newDays.push(day);
+      }
+      newDays = [...new Set(newDays)].sort((a, b) => a - b);
+      suppressClick();
+      // M1: una sola transacción — un fallo a mitad no deja escrituras parciales.
+      await commitWeeklyTimes(cascada, `Mover ${activity.name} a ${days[day]}`, { id: t.activityId, days: newDays });
+      clearDragPreview();
+    },
+    onCancel() {
+      // C2: soltar fuera de la grilla, Esc o cancel — sin reset la tarjeta
+      // queda con opacidad y fuera del layout hasta el próximo arrastre.
+      clearDragPreview();
+    }
+  };
+
+  function handleItemPointerDown(e: PointerEvent, activity: Activity, dayIndex: number) {
+    const card = e.currentTarget as HTMLElement;
+    const rect = card.getBoundingClientRect();
+    dragOffsetHours = ((e.clientY - rect.top) / rect.height) * (parseTime(activity.endTime) - parseTime(activity.startTime));
+    // El motor arma: mouse por umbral (5px), táctil por long-press (260ms).
+    engine.begin(e, { card, activityId: activity.id!, meta: { day: dayIndex } }, dragHooks);
+  }
 
   /**
    * Vista previa del drop (igual que la vista Día): id → {start, end} en
@@ -227,10 +307,10 @@
   /**
    * Preview del drop en un día: usa la cascada multi-día (src/lib/cascade.ts).
    * Lo que se ve es lo que se guarda — el preview de la columna destino es
-   * exactamente el mapa que persistirá handleDrop.
+   * exactamente el mapa que persistirá dragHooks.onDrop.
    */
   function computeWeekLayoutForDrop(dayIndex: number, actId: string, newStartHour: number): Map<string, { start: number; end: number }> {
-    const res = propagateWeekly(activities, actId, newStartHour, endHour, { parse: parseTime, format: formatTime }, [dayIndex]);
+    const res = propagateWeekly(activities, actId, newStartHour, endHour, CODEC, [dayIndex]);
     return res.byDay.get(dayIndex) ?? new Map();
   }
 
@@ -248,110 +328,14 @@
     const finalDays = dragSourceDay !== null && origDays.includes(dragSourceDay)
       ? [...origDays.filter(d => d !== dragSourceDay), targetDay]
       : [...origDays];
-    return propagateWeekly(activities, actId, anchorStart, endHour, { parse: parseTime, format: formatTime }, [...new Set(finalDays)]).times;
+    return propagateWeekly(activities, actId, anchorStart, endHour, CODEC, [...new Set(finalDays)]).times;
   }
 
-  function handleDragStart(e: DragEvent, activity: Activity, dayIndex: number) {
-    draggedActivityId = activity.id!;
-    dragSourceDay = dayIndex;
-    navigator.vibrate?.(10); // háptica sutil: el drag se armó
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
-    dragOffset = (e.clientY - rect.top) / slotHeightPx;
-    
-    if (e.dataTransfer) {
-      e.dataTransfer.setData('text/plain', activity.id!.toString());
-      e.dataTransfer.effectAllowed = 'move';
-    }
-  }
 
-  async function handleDrop(e: DragEvent, dayIndex: number) {
-    e.preventDefault();
-    if (draggedActivityId === null || dragSourceDay === null) return;
-
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    let slotIndex = Math.floor(y / slotHeightPx);
-
-    // Adjust by drag offset so it drops where you grabbed it
-    slotIndex = Math.max(0, slotIndex - Math.floor(dragOffset));
-
-    const activity = activities.find(a => a.id === draggedActivityId);
-
-    if (activity) {
-      const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
-      const durationSlots = Math.max(1, Math.round(duration * slotsPerHour));
-      slotIndex = Math.min(slotIndex, Math.max(0, totalSlots - durationSlots));
-
-      const newStartHour = startHour + (slotIndex / slotsPerHour);
-
-      // Persistir la cascada de TODOS los días (punto fijo entre días) con el
-      // slot del preview como ancla: lo que se vio es lo que se guarda.
-      const previewMine = dropPreview?.day === dayIndex ? dropPreview.slots.get(draggedActivityId) : undefined;
-      const anchorStart = previewMine ? previewMine.start : newStartHour;
-      const cascada = computeFullCascade(draggedActivityId, dayIndex, anchorStart);
-
-      // Horarios GLOBALES finales (una fila = un horario): el mapa `times`
-      // de la propagación, no mapas por día (una misma fila no puede quedar
-      // con dos horarios según qué día se procese último).
-      let newDays = [...activity.daysOfWeek];
-      const idx = newDays.indexOf(dragSourceDay);
-      if (idx !== -1) {
-        newDays[idx] = dayIndex;
-      } else if (!newDays.includes(dayIndex)) {
-        newDays.push(dayIndex);
-      }
-      newDays = [...new Set(newDays)].sort((a, b) => a - b);
-
-      // M1: una sola transacción — un fallo a mitad no deja escrituras
-      // parciales. El reset de estado corre SIEMPRE (finally).
-      await commitWeeklyTimes(cascada, `Mover ${activity.name} a ${days[dayIndex]}`, { id: draggedActivityId, days: newDays });
-      navigator.vibrate?.(8); // háptica: el drop se registró
-      dropPreview = null;
-      lastDragOverSlot = NaN;
-      draggedActivityId = null;
-      dragSourceDay = null;
-    } else {
-      dropPreview = null;
-      lastDragOverSlot = NaN;
-      draggedActivityId = null;
-      dragSourceDay = null;
-    }
-  }
-
-  let lastDragOverSlot = NaN;
-  function handleDragOver(e: DragEvent, dayIndex: number) {
-    e.preventDefault();
-    if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = 'move';
-    }
-    if (draggedActivityId === null) return;
-    // Preview en vivo: recalcula solo cuando el cursor cambia de slot de 15 min
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    let slotIndex = Math.max(0, Math.floor((e.clientY - rect.top) / slotHeightPx) - Math.floor(dragOffset));
-    if (slotIndex === lastDragOverSlot) return;
-    lastDragOverSlot = slotIndex;
-    const activity = activities.find(a => a.id === draggedActivityId);
-    if (!activity) return;
-    const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
-    const durationSlots = Math.max(1, Math.round(duration * slotsPerHour));
-    slotIndex = Math.min(slotIndex, Math.max(0, totalSlots - durationSlots));
-    const newStartHour = startHour + (slotIndex / slotsPerHour);
-    dropPreview = { day: dayIndex, slots: computeWeekLayoutForDrop(dayIndex, draggedActivityId, newStartHour) };
-  }
-
-  function handleDragLeaveDay(e: DragEvent, dayIndex: number) {
-    // M4: dragleave también dispara al entrar a un hijo — solo limpiar si el
-    // puntero realmente salió de la columna (o el drag terminó).
-    const to = e.relatedTarget as Node | null;
-    const col = e.currentTarget as HTMLElement;
-    if (!to || !col.contains(to)) {
-      if (dropPreview?.day === dayIndex) dropPreview = null;
-    }
-  }
 
   // M6 (WCAG 2.5.7): mover sin puntero. Reusa la cascada del drop: la
   // actividad ancla en ±15 min y las vecinas se resuelven en TODOS sus días.
-  // Misma transacción y reset de estado que handleDrop.
+  // Misma transacción y reset de estado que dragHooks.onDrop.
   async function nudgeWeekly(activity: Activity, deltaH: number) {
     if (draggedActivityId !== null) return;
     const dur = parseTime(activity.endTime) - parseTime(activity.startTime);
@@ -359,7 +343,7 @@
     newStart = Math.max(startHour, Math.min(newStart, endHour - dur));
     const cascada = propagateWeekly(
       activities, activity.id!, newStart, endHour,
-      { parse: parseTime, format: formatTime }, [...activity.daysOfWeek]
+      CODEC, [...activity.daysOfWeek]
     ).times;
     await commitWeeklyTimes(cascada, `${activity.name} → ${format12h(formatTime(newStart))}`);
   }
@@ -384,7 +368,11 @@
       const t0 = formatTime(slot.start);
       const t1 = formatTime(slot.end);
       const days = daysChange?.id === id ? daysChange.days : before.daysOfWeek;
-      if (t0 !== before.startTime || t1 !== before.endTime || days !== before.daysOfWeek) {
+      // Comparación por CONTENIDO (no por referencia): un daysChange con días
+      // idénticos no debe escribir una fila no-op (churn de updatedAt → ruido
+      // en el sync LWW).
+      const daysChanged = days.join(',') !== before.daysOfWeek.join(',');
+      if (t0 !== before.startTime || t1 !== before.endTime || daysChanged) {
         rows.push({
           before: cloneAct(before),
           after: { ...cloneAct(before), startTime: t0, endTime: t1, daysOfWeek: days, updatedAt: stamp }
@@ -406,81 +394,80 @@
   }
 
   function clearDragPreview() {
-    // C2: corre en dragend (soltar fuera de la grilla, Esc, drop fallido).
-    // Sin el reset de ids, la tarjeta queda con opacidad 0.55 y fuera del
-    // layout hasta el próximo arrastre.
+    // C2: corre al soltar, cancelar o con Esc. Sin el reset de ids, la
+    // tarjeta queda con opacidad 0.55 y fuera del layout hasta el próximo drag.
     draggedActivityId = null;
     dragSourceDay = null;
     dropPreview = null;
-    lastDragOverSlot = NaN;
+    lastPreviewKey = -1;
   }
 
   // ── Resize (estirar borde inferior) en la grilla semanal ─────────────
-  // Semántica acordada: la duración cambia en TODOS los días de la actividad
-  // (global, como el drag). Preview en la columna actual; el commit resuelve
-  // la cascada en cada día afectado.
-  let resizing = $state<{ id: string; day: number; origStart: number; origEnd: number; startY: number } | null>(null);
+  // Mismo motor, gesto inmediato y sin fantasma. Semántica acordada: la
+  // duración cambia en TODOS los días (global); keepPlace conserva el inicio.
+  interface WeekResizeMeta {
+    day: number;
+    origStart: number;
+    origEnd: number;
+    startY: number;
+  }
+
+  const weekResizeHooks: DragHooks = {
+    onActivate(t) {
+      draggedActivityId = t.activityId; // excluye la tarjeta del clustering
+    },
+    onMove(t, _x, clientY) {
+      const m = t.meta as WeekResizeMeta;
+      const calc = computeWeekResize(clientY, t.activityId, m);
+      if (calc) dropPreview = { day: m.day, slots: calc.slots };
+    },
+    async onDrop(t, _x, clientY) {
+      const m = t.meta as WeekResizeMeta;
+      const calc = computeWeekResize(clientY, t.activityId, m);
+      draggedActivityId = null;
+      dragSourceDay = null;
+      if (!calc) { dropPreview = null; return; }
+      // Commit global: la duración viene del PUNTERO (newEnd), no del mapa
+      // resuelto — el reacomodo de cascada no debe redefinir el estirado.
+      const act = activities.find(a => a.id === t.activityId);
+      const times = propagateWeekly(activities, t.activityId, m.origStart, endHour, CODEC, act?.daysOfWeek ?? [], calc.newEnd - m.origStart, 0, true).times;
+      suppressClick();
+      await commitWeeklyTimes(times, `Estirar ${act?.name ?? 'actividad'}`);
+      dropPreview = null;
+      lastPreviewKey = -1;
+    },
+    onCancel() {
+      draggedActivityId = null;
+      dragSourceDay = null;
+      dropPreview = null;
+    }
+  };
 
   function startResize(e: PointerEvent, activity: Activity, dayIndex: number) {
-    e.stopPropagation(); // no disparar long-press/click/drag nativo del ítem
+    e.stopPropagation(); // no disparar long-press/click/drag del ítem
     e.preventDefault();
-    resizing = {
-      id: activity.id!,
-      day: dayIndex,
-      origStart: parseTime(activity.startTime),
-      origEnd: parseTime(activity.endTime),
-      startY: e.clientY
-    };
-    window.addEventListener('pointermove', onResizeMove, { passive: false });
-    window.addEventListener('pointerup', onResizeUp);
-    window.addEventListener('pointercancel', onResizeCancel);
+    engine.beginImmediate(
+      e,
+      { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { day: dayIndex, origStart: parseTime(activity.startTime), origEnd: parseTime(activity.endTime), startY: e.clientY } satisfies WeekResizeMeta },
+      weekResizeHooks,
+      { ghost: false }
+    );
   }
 
-  function computeResizePreview(clientY: number): Map<string, { start: number; end: number }> | null {
-    if (!resizing) return null;
-    const col = document.querySelectorAll('.day-column .slots-grid')[resizing.day];
+  /**
+   * Cálculo COMPARTIDO por preview y commit del resize (una sola matemática):
+   * newEnd desde el puntero (snap 15min, clamp) y el mapa resuelto con
+   * keepPlace=true — al estirar, el INICIO queda anclado: la cascada empuja
+   * hacia abajo, nunca reacomoda la tarjeta que se estira.
+   */
+  function computeWeekResize(clientY: number, actId: string, m: WeekResizeMeta): { newEnd: number; slots: Map<string, { start: number; end: number }> } | null {
+    const col = document.querySelectorAll('.day-column .slots-grid')[m.day];
     if (!col) return null;
-    const rect = col.getBoundingClientRect();
-    const deltaSlots = (clientY - resizing.startY) / slotHeightPx;
-    let newEnd = Math.round((resizing.origEnd + deltaSlots / slotsPerHour) * 4) / 4;
-    newEnd = Math.max(resizing.origStart + 0.25, Math.min(newEnd, endHour));
-    const res = propagateWeekly(activities, resizing.id, resizing.origStart, endHour, { parse: parseTime, format: formatTime }, activities.find(a => a.id === resizing.id)?.daysOfWeek ?? [], newEnd - resizing.origStart);
-    return res.byDay.get(resizing.day) ?? null;
-  }
-
-  function onResizeMove(e: PointerEvent) {
-    if (!resizing) return;
-    e.preventDefault();
-    const slots = computeResizePreview(e.clientY);
-    if (slots) dropPreview = { day: resizing.day, slots };
-  }
-
-  async function onResizeUp(e: PointerEvent) {
-    const st = resizing!; // null → computeResizePreview da null y sale antes de usarse
-    // Calcular ANTES de limpiar: computeResizePreview necesita `resizing`.
-    const slots = computeResizePreview(e.clientY);
-    cleanupResizeListeners();
-    resizing = null;
-    if (!slots) { dropPreview = null; return; }
-    // Commit global: la nueva duración se resuelve en TODOS los días y se
-    // escribe el horario global final (una fila = un horario).
-    const act = activities.find(a => a.id === st.id);
-    const times = propagateWeekly(activities, st.id, st.origStart, endHour, { parse: parseTime, format: formatTime }, act?.daysOfWeek ?? [], (slots.get(st.id)?.end ?? st.origEnd) - st.origStart, 0, true).times;
-    await commitWeeklyTimes(times, `Estirar ${act?.name ?? 'actividad'}`);
-    dropPreview = null;
-    lastDragOverSlot = NaN;
-  }
-
-  function onResizeCancel() {
-    cleanupResizeListeners();
-    resizing = null;
-    dropPreview = null;
-  }
-
-  function cleanupResizeListeners() {
-    window.removeEventListener('pointermove', onResizeMove);
-    window.removeEventListener('pointerup', onResizeUp);
-    window.removeEventListener('pointercancel', onResizeCancel);
+    const deltaSlots = (clientY - m.startY) / slotHeightPx;
+    let newEnd = Math.round((m.origEnd + deltaSlots / slotsPerHour) * 4) / 4;
+    newEnd = Math.max(m.origStart + 0.25, Math.min(newEnd, endHour));
+    const res = propagateWeekly(activities, actId, m.origStart, endHour, CODEC, activities.find(a => a.id === actId)?.daysOfWeek ?? [], newEnd - m.origStart, 0, true);
+    return { newEnd, slots: res.byDay.get(m.day) ?? new Map() };
   }
 
   // Context Menu logic
@@ -494,15 +481,9 @@
     !!activities.find(a => a.id === contextMenu.activityId)?.image
   );
 
-  function handleContextMenu(e: MouseEvent, activityId: number) {
+  function handleContextMenu(e: MouseEvent, activityId: string) {
     e.preventDefault();
-    // Clamp para que el menú no se salga de la ventana
-    // (MENU_H: 2-3 items × 44px + padding — con 130 el menú quedaba fuera en landscape)
-    const MENU_W = 220;
-    const MENU_H = 160;
-    const x = Math.min(e.clientX, window.innerWidth - MENU_W - 8);
-    const y = Math.min(e.clientY, window.innerHeight - MENU_H - 8);
-    contextMenu = { show: true, x: Math.max(4, x), y: Math.max(4, y), activityId };
+    openContextMenu(activityId, e.clientX, e.clientY);
   }
 
   function closeContextMenu() {
@@ -587,11 +568,8 @@
             <span class="day-temp-badge" title="Tiene edición temporal activa en la vista diaria">⚡</span>
           {/if}
         </button>
-        <div 
+        <div
           class="slots-grid"
-          ondragover={(e) => handleDragOver(e, i)}
-          ondragleave={(e) => handleDragLeaveDay(e, i)}
-          ondrop={(e) => handleDrop(e, i)}
         >
           {#each dayData.items as activity (activity.id)}
             {@const numSlots = activity.numSlots}
@@ -599,16 +577,10 @@
               class="activity-item" 
               class:short={numSlots <= 1}
               class:drag-ghost={draggedActivityId === activity.id}
-              draggable="true"
-              ondragstart={(e) => handleDragStart(e, activity, i)}
-              ondragend={clearDragPreview}
-              onpointerdown={(e) => handleItemPointerDown(e, activity.id!)}
-              onpointermove={handleItemPointerMove}
-              onpointerup={handleItemPointerUp}
-              onpointercancel={handleItemPointerUp}
+              onpointerdown={(e) => handleItemPointerDown(e, activity, i)}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
               style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
-              onclick={() => onEditActivity(activity.id!)}
+              onclick={() => { if (suppressNextClick) return; onEditActivity(activity.id!); }}
               onkeydown={(e) => {
                 // M6 (WCAG 2.5.7): ↑/↓ = ±15 min con cascada global. Enter y
                 // Espacio ya abren edición (comportamiento nativo de <button>).
@@ -618,7 +590,6 @@
                 }
               }}
               aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{activity.steps?.length ? `, ${activity.steps.length} pasos` : ''}. Flechas arriba/abajo para mover, Enter para editar"
-              title="{activity.name} • {format12h(activity.startTime)} - {format12h(activity.endTime)}"
             >
               <div class="activity-title">
                 <span>{activity.name}</span>
@@ -635,14 +606,13 @@
                   </span>
                 {/if}
                 {#if activity.steps && activity.steps.length > 0}
-                  <span class="grid-steps-icon" title="{activity.steps.length} pasos">
+                  <span class="grid-steps-icon">
                     <ListChecks size={10} />
                   </span>
                 {/if}
               </div>
               <div
                 class="resize-handle"
-                title="Estirar para cambiar la duración (todos los días)"
                 aria-hidden="true"
                 onpointerdown={(e) => startResize(e, activity, i)}
               ></div>
