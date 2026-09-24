@@ -822,6 +822,8 @@
     flex-direction: column;
     justify-content: center;
     box-sizing: border-box;
+    -webkit-user-select: none;
+    user-select: none; /* arrastrar >5px no selecciona el texto de la grilla */
   }
 
   /* El fantasma arrastrado: sin transición de top (el HTML5 DnD no mueve la

@@ -165,6 +165,20 @@ describe('resolveDayCascade — semántica local con regla de mitades', () => {
       expect(totalMin % 15).toBe(0);
     }
   });
+
+  test('soltar fuera del rango: conserva la duración y se desplaza (no se acorta)', () => {
+    // Día 7-9: un bloque de 1h cae 9-10 (no cabe) → sube pegado al final
+    // completo; cae 6.5-7.5 → baja pegado al inicio completo.
+    const out = byId(resolveDayCascade([s('b', 9, 10)], 9, 'b', 7));
+    expect(out.get('b')).toEqual(s('b', 8, 9));
+    const up = byId(resolveDayCascade([s('b', 6.5, 7.5)], 9, 'b', 7));
+    expect(up.get('b')).toEqual(s('b', 7, 8));
+  });
+
+  test('sin movedId: conserva el orden de entrada (identidad con conversión)', () => {
+    const out = resolveDayCascade([s('b', 10, 11), s('a', 8, 9)], 22, 'fantasma', 7);
+    expect(out.map(x => x.id)).toEqual(['b', 'a']);
+  });
 });
 
 describe('propagateWeekly', () => {
@@ -235,6 +249,26 @@ describe('propagateWeekly', () => {
       const day = res.byDay.get(d)!;
       expect(day.get('rutina')!.start).toBe(10.75);
     }
+  });
+
+  test('ex-C3 estricta: el empuje de un vecino no puede pisar un día de mineDays', () => {
+    // n vive lunes+martes (8-9); z (lunes 7-7:30) bloquea el hueco ideal del
+    // drop; w vive martes 9:15-9:45; m (arrastrada) vive ambos días. El drop
+    // lunes 7:30-8:30 (mitad superior, hueco ocupado) mete a m en [8,9] y el
+    // empuje en cadena mandaría a n a [9,10] — que el martes la monta sobre
+    // w. Como martes ∈ daySet, la protección vieja no lo revisaba: corrupción
+    // silenciosa. Hoy el chequeo abarca TODOS los días del vecino: rechazado.
+    const acts = [
+      mkAct('n', [0, 1], '08:00', '09:00'),
+      mkAct('z', [0], '07:00', '07:30'),
+      mkAct('w', [1], '09:15', '09:45'),
+      mkAct('m', [0, 1], '08:00', '09:00')
+    ];
+    const res = propagateWeekly(acts, 'm', 7.5, 22, codec, [0, 1]);
+    expect(res.times.get('n')!.start).toBe(8); // empuje RECHAZADO (antes: 10)
+    const martes = res.byDay.get(1)!;
+    // Sin corrupción: n y w no se montan en martes.
+    expect(martes.get('n')!.end).toBeLessThanOrEqual(martes.get('w')!.start + 0.001);
   });
 
   test('sin espacio en el día: compresión acotada, sin horas negativas', () => {

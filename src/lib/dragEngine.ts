@@ -141,10 +141,15 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
       const after = pos < min + EDGE_ZONE ? before - EDGE_SPEED
         : pos > max - EDGE_ZONE ? before + EDGE_SPEED : before;
       if (after !== before) {
-        y ? (el.scrollTop = after) : (el.scrollLeft = after);
+        if (y) el.scrollTop = after; else el.scrollLeft = after;
         // Con el puntero quieto, el contenido se movió debajo: actualizar preview.
-        paintGhost();
-        em(cur);
+        // En el tope el navegador ignora el cambio (real === before): nada que
+        // re-emitir, o computeLayoutForDrop correría a 60 fps con el dedo quieto.
+        const real = y ? el.scrollTop : el.scrollLeft;
+        if (real !== before) {
+          paintGhost();
+          em(cur);
+        }
       }
     }
     raf = requestAnimationFrame(edgeTick);
