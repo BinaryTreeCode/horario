@@ -1,217 +1,165 @@
 /**
- * Resolución de colisiones del drag & drop compartida por las vistas Día y
- * Semana. Un solo dueño: cuando cambia la matemática, cambia en ambos lados.
- * Pura y testeada (cascade.test.ts).
+ * Resolución de colisiones del drag & drop — semántica "hueco libre"
+ * (infografía: 1 mover a hueco → se coloca; 2 no cabe/encima → ⛔ vuelve;
+ * 3 estirar usa el hueco y empuja vecinos; 4 límite del día = no crece).
  *
- * Semántica LOCAL (decidida con el usuario): el bloque soltado es una pared
- * y solo se mueve lo que pisa directamente.
- *  1. Sin colisión → el resto del día NO se entera: sin cerrar huecos ni
- *     mover vecinos.
- *  2. Soltar DENTRO de otro bloque → regla de mitades: centro del arrastrado
- *     en la MITAD SUPERIOR del pisado → queda ARRIBA, pegado (si ese hueco
- *     está ocupado, toma el inicio del pisado y lo empuja). MITAD INFERIOR →
- *     queda DEBAJO, empezando donde el pisado termina.
- *  3. Lo que el empuje pisa directo baja en cadena, preservando duraciones;
- *     el primer hueco libre corta la cadena; como último recurso se recorta
- *     contra el fin del día.
- *  4. Los bloques por encima del drop jamás se tocan. Lo que el motor mueve
- *     no sale de [startHour, endHour] (A2) y todo queda en minutos enteros.
- *  `keepPlace` (resize): el arrastrado NO se reubica — solo empuja lo que
- *  pisa (estirar conserva el inicio).
+ * Un solo dueño: cuando cambia la matemática, cambia en ambos lados.
+ * Pura y testeada (cascade.test.ts). Todo en MINUTOS ENTEROS desde la
+ * medianoche (blindaje anti-flotantes); las vistas convierten HH:mm ↔ min.
  *
- * Multi-día (Semana): propagateWeekly resuelve cada día y propaga en cierre
- * transitivo hasta estabilizar. Protección ex-C3: el movimiento global de un
- * vecino solo se acepta si no pisa a nadie en NINGUNO de sus otros días.
+ *  - MOVER: el punto de suelta no puede caer dentro de otro bloque (⛔).
+ *    Si cae en un hueco, el bloque se coloca dentro del hueco con snap,
+ *    nunca pisando a los vecinos. Si el hueco es más chico que el bloque,
+ *    el gesto es inválido (el fantasma se pinta igual, en rojo, y al soltar
+ *    el bloque vuelve a su sitio).
+ *  - ESTIRAR: el nuevo borde se acota por el hueco libre real (la suma de
+ *    duraciones de los vecinos del lado, no sus posiciones) y lo que avanza
+ *    empuja en cadena a los vecinos preservando sus duraciones.
+ *  - LÍMITE: nada sale de [minDia, maxDia]; si no hay espacio libre, no crece.
  */
-import type { Activity } from './types.js';
-
-export interface Slot {
+export interface Bloque {
   id: string;
-  start: number;
-  end: number;
+  /** Minutos desde medianoche. */
+  inicio: number;
+  /** Duración en minutos (> 0). */
+  duracion: number;
 }
 
-/** Convertidor inyectable para no importar la store desde este módulo puro. */
-export interface TimeCodec {
-  parse: (time: string) => number;
-  format: (hour: number) => string;
+const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+export const finDe = (b: Bloque) => b.inicio + b.duracion;
+export const snapMin = (m: number, snap: number) => Math.round(m / snap) * snap;
+
+export interface PlanMover {
+  /** Bloques finales del día destino (incluye el movido). */
+  destino: Bloque[];
+  /** Bloques finales del día origen (= destino si mismoDia). */
+  origen: Bloque[];
+  /** Posición propuesta del arrastrado (pinta el fantasma aunque sea inválido). */
+  bb: Bloque;
+  valido: boolean;
+  /** '' si válido; si no, el motivo para el usuario. */
+  motivo: string;
+  /** La vista lo rellena: día → bloques finales, para el preview. */
+  cambios?: Record<number, Bloque[]>;
 }
-
-const EPS = 1e-9;
-/** Cota de seguridad del cierre transitivo semanal. */
-const MAX_PASSES = 7;
-
-/** Hora → minutos enteros (blindaje anti-flotantes / "09:60"). */
-const toMin = (h: number) => Math.round(h * 60);
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const overlaps = (a: Slot, b: Slot) => a.start < b.end - EPS && b.start < a.end - EPS;
-const sameSlot = (a: Slot, b: Slot) =>
-  Math.abs(a.start - b.start) <= EPS && Math.abs(a.end - b.end) <= EPS;
-const toHours = (s: Slot): Slot => ({ id: s.id, start: s.start / 60, end: s.end / 60 });
 
 /**
- * Resuelve un día. `slots` debe incluir TODOS los bloques del día, con el
- * bloque movido (`movedId`) en su posición DESTINO.
+ * Plan de MOVER: `minuto` es el punto de suelta (del dedo) y `offsetMin`
+ * el agarre relativo del bloque. `origen`/`destino` vienen SIN el arrastrado
+ * ya removido... salvo `mismoDia`, donde `origen` sí lo incluye (se filtra
+ * acá) y es el mismo array que `destino`.
  */
-export function resolveDayCascade(
-  slots: Slot[],
-  endHour: number,
-  movedId: string,
-  startHour = 0,
-  keepPlace = false
-): Slot[] {
-  const startMin = toMin(startHour);
-  const endMin = toMin(endHour);
+export function planMover(
+  origen: Bloque[],
+  destino: Bloque[],
+  mismoDia: boolean,
+  id: string,
+  bloque: Bloque,
+  minuto: number,
+  offsetMin: number,
+  minDia: number,
+  maxDia: number,
+  snap: number
+): PlanMover {
+  // En cross-day la actividad puede YA vivir en el día destino: su propia
+  // instancia actual se filtra para que no se choque consigo misma.
+  const otros = (mismoDia ? origen : destino).filter(x => x.id !== id);
 
-  let moved: Slot | undefined;
-  const others: Slot[] = [];
-  for (const s of slots) {
-    const start = toMin(s.start);
-    const m = { id: s.id, start, end: Math.max(start, toMin(s.end)) };
-    if (s.id === movedId) moved = m;
-    else others.push(m);
-  }
-  if (!moved) return others.map(toHours);
+  // El punto de suelta cae DENTRO de otro bloque → prohibido (regla 2).
+  const encima = otros.some(o => minuto >= o.inicio && minuto < finDe(o));
+  // Hueco libre alrededor del punto de suelta.
+  const ini = Math.max(minDia, ...otros.filter(o => finDe(o) <= minuto).map(finDe));
+  const fn = Math.min(maxDia, ...otros.filter(o => o.inicio > minuto).map(o => o.inicio));
+  const cabe = !encima && fn - ini >= bloque.duracion;
 
-  // Acotar el movido al rango del día.
-  let mStart: number;
-  let mEnd: number;
-  if (keepPlace) {
-    // Resize: el inicio no se mueve; lo que se pasa del día se recorta.
-    mStart = clamp(moved.start, startMin, endMin);
-    mEnd = clamp(moved.end, mStart, endMin);
+  const deseado = snapMin(minuto - offsetMin, snap);
+  const bb: Bloque = {
+    id,
+    inicio: cabe
+      ? clamp(deseado, ini, fn - bloque.duracion)
+      : clamp(deseado, minDia, maxDia - bloque.duracion), // ghost rojo: posición visual libre
+    duracion: bloque.duracion
+  };
+
+  const nuevoDestino = [...otros, bb].sort((a, b) => a.inicio - b.inicio);
+  const nuevoOrigen = mismoDia
+    ? nuevoDestino
+    : origen.filter(x => x.id !== id).sort((a, b) => a.inicio - b.inicio);
+
+  return {
+    destino: nuevoDestino,
+    origen: nuevoOrigen,
+    bb,
+    valido: cabe,
+    motivo: encima ? '⛔ Encima de otro bloque' : cabe ? '' : '⛔ No cabe en este hueco'
+  };
+}
+
+export interface PlanResize {
+  /** Día completo con el estirado y sus vecinos empujados. */
+  bloques: Bloque[];
+  bb: Bloque;
+  /** La vista lo rellena: día → bloques finales, para el preview. */
+  cambios?: Record<number, Bloque[]>;
+}
+
+/**
+ * Plan de ESTIRAR (regla 3+4): crece/recoge hasta el hueco libre real —
+ * la suma de duraciones de los vecinos del lado, no sus posiciones — y
+ * empuja en cadena a quien pisa, preservando duraciones y sin salir del día.
+ */
+export function planResize(
+  bloques: Bloque[],
+  id: string,
+  lado: 'arriba' | 'abajo',
+  minuto: number,
+  minDia: number,
+  maxDia: number,
+  snap: number
+): PlanResize {
+  // La cadena de empuje asume vecinos ORDENADOS por inicio: con el orden de
+  // la BD (arbitrario) empujaría bloques equivocados y dejaría solapes.
+  const N = bloques.map(b => ({ ...b })).sort((a, b) => a.inicio - b.inicio);
+  const i = N.findIndex(x => x.id === id);
+  if (i === -1) return { bloques: N, bb: { id, inicio: minDia, duracion: 0 } };
+  const b = N[i];
+
+  if (lado === 'abajo') {
+    const libre = maxDia - finDe(b) - N.slice(i + 1).reduce((s, x) => s + x.duracion, 0);
+    const E = clamp(snapMin(minuto, snap), b.inicio + snap, finDe(b) + Math.max(0, libre));
+    b.duracion = E - b.inicio;
+    let cursor = finDe(b);
+    for (let k = i + 1; k < N.length; k++) {
+      if (N[k].inicio < cursor) N[k].inicio = Math.min(cursor, maxDia - N[k].duracion);
+      cursor = Math.max(cursor, finDe(N[k]));
+    }
   } else {
-    // Movimiento: se conserva la duración y se desplaza hasta que quepa.
-    // (Soltar fuera del rango mueve el bloque, no lo acorta.)
-    const dur = Math.min(moved.end - moved.start, endMin - startMin);
-    mStart = clamp(moved.start, startMin, endMin - dur);
-    mEnd = mStart + dur;
-  }
-  const durM = mEnd - mStart;
-
-  others.sort((a, b) => a.start - b.start);
-  const finish = (list: Slot[]) => list.sort((a, b) => a.start - b.start).map(toHours);
-
-  // 1) Sin colisión: el resto del día no se entera.
-  const colliding = others.filter(o => o.start < mEnd && mStart < o.end);
-  if (colliding.length === 0) {
-    return finish([...others, { id: movedId, start: mStart, end: mEnd }]);
-  }
-
-  // 2) Regla de mitades contra el bloque bajo el centro del drop. Una pila
-  //    contigua se trata como bloques separados: se puede insertar ENTRE ellos.
-  let finalStart = mStart;
-  if (!keepPlace) {
-    const center = (mStart + mEnd) / 2;
-    const d = colliding.find(o => center >= o.start && center < o.end) ?? colliding[0];
-    // Centros comparados ×2; el empate exacto cae ABAJO.
-    const above = mStart + mEnd < d.start + d.end;
-    if (above) {
-      const ideal = d.start - durM;
-      const blocked = others.some(o => o.id !== d.id && o.start < d.start && o.end > ideal);
-      finalStart = ideal >= startMin && !blocked ? ideal : d.start;
-    } else {
-      finalStart = d.end;
+    const libre = b.inicio - minDia - N.slice(0, i).reduce((s, x) => s + x.duracion, 0);
+    const F = finDe(b);
+    const S = clamp(snapMin(minuto, snap), b.inicio - Math.max(0, libre), F - snap);
+    b.inicio = S;
+    b.duracion = F - S;
+    let cursor = S;
+    for (let k = i - 1; k >= 0; k--) {
+      if (finDe(N[k]) > cursor) N[k].inicio = Math.max(cursor - N[k].duracion, minDia);
+      cursor = Math.min(cursor, N[k].inicio);
     }
-    finalStart = clamp(finalStart, startMin, endMin - durM);
   }
-  const fEnd = finalStart + durM;
-
-  // 3) Empuje en cadena. Todo bloque que entra acá cumple o.start < cursor,
-  //    así que arranca en `cursor`; si no cabe, se recorta contra el fin del día.
-  const out: Slot[] = [];
-  let cursor = fEnd;
-  for (const o of others) {
-    const hit = o.start < fEnd && finalStart < o.end;
-    if (!hit && (o.end <= finalStart || o.start >= cursor)) {
-      out.push(o); // arriba del drop o tras el primer hueco: intacto
-      continue;
-    }
-    const start = Math.min(cursor, endMin);
-    const end = Math.min(start + (o.end - o.start), endMin);
-    out.push({ id: o.id, start, end });
-    cursor = Math.max(cursor, end);
-  }
-  return finish([...out, { id: movedId, start: finalStart, end: fEnd }]);
-}
-
-export interface WeeklyResolution {
-  /** id → slot final, por día incluido en el cierre. */
-  byDay: Map<number, Map<string, Slot>>;
-  /** Horario global final por actividad (lo escribible en la BD). */
-  times: Map<string, Slot>;
+  return { bloques: N.sort((x, y) => x.inicio - y.inicio), bb: b };
 }
 
 /**
- * Propaga el cambio de una actividad a TODOS los días afectados.
- * `pinnedStart` es el arranque que el usuario vio en el preview (la pared).
- * `mineDays` son los días finales de la arrastrada (en un drag entre columnas
- * la BD aún tiene los viejos). `keepPlace` (resize): conserva el inicio en
- * todos los días; la nueva duración solo empuja lo que pisa.
+ * ex-C3: ¿el nuevo horario del bloque `id` pisaría a alguien en OTRO día
+ * donde también vive? `otrosDias` son los bloques completos de esos días.
+ * Evita la corrupción silenciosa al editar la plantilla de una actividad
+ * multi-día: lo válido en el día visible puede chocar en otro.
  */
-export function propagateWeekly(
-  activities: Activity[],
-  actId: string,
-  pinnedStart: number,
-  endHour: number,
-  codec: TimeCodec,
-  mineDays: number[],
-  newDuration?: number,
-  startHour = 0,
-  keepPlace = false
-): WeeklyResolution {
-  const byId = new Map(activities.map(a => [a.id!, a]));
-  const act = byId.get(actId);
-  if (!act) return { byDay: new Map(), times: new Map() };
-  const duration = newDuration ?? codec.parse(act.endTime) - codec.parse(act.startTime);
-
-  const times = new Map<string, Slot>();
-  for (const a of activities) {
-    times.set(a.id!, { id: a.id!, start: codec.parse(a.startTime), end: codec.parse(a.endTime) });
-  }
-  times.set(actId, { id: actId, start: pinnedStart, end: pinnedStart + duration });
-
-  const myDays = new Set(mineDays);
-  const isOnDay = (a: Activity, day: number) =>
-    a.id === actId ? myDays.has(day) : a.daysOfWeek.includes(day);
-  const slotsOn = (day: number) =>
-    activities.filter(a => isOnDay(a, day)).map(a => times.get(a.id!)!);
-
-  /** ex-C3: ¿el nuevo horario de `id` pisa a alguien en otro de SUS días? */
-  const breaksElsewhere = (id: string, s: Slot, day: number, proposed: Map<string, Slot>) =>
-    byId.get(id)!.daysOfWeek.some(
-      d =>
-        d !== day &&
-        activities.some(o => o.id !== id && isOnDay(o, d) && overlaps(s, proposed.get(o.id!)!))
-    );
-
-  const daySet = new Set<number>(mineDays);
-  for (let pass = 0; pass < MAX_PASSES; pass++) {
-    let changed = false;
-    for (const day of [...daySet].sort((a, b) => a - b)) {
-      const resolved = resolveDayCascade(slotsOn(day), endHour, actId, startHour, keepPlace);
-      // Lo que se mueve junto en este día se evalúa con su posición nueva,
-      // para que una pila que baja junta no se bloquee a sí misma.
-      const proposed = new Map(times);
-      for (const s of resolved) proposed.set(s.id, s);
-
-      for (const s of resolved) {
-        if (sameSlot(times.get(s.id)!, s)) continue;
-        if (s.id !== actId && breaksElsewhere(s.id, s, day, proposed)) {
-          proposed.set(s.id, times.get(s.id)!); // rechazado: queda el solape local
-          continue;
-        }
-        times.set(s.id, s);
-        changed = true;
-        byId.get(s.id)?.daysOfWeek.forEach(d => daySet.add(d));
-      }
-    }
-    if (!changed) break;
-  }
-
-  const byDay = new Map<number, Map<string, Slot>>();
-  for (const day of daySet) {
-    byDay.set(day, new Map(slotsOn(day).map(s => [s.id, s])));
-  }
-  return { byDay, times };
+export function chocaEnOtrosDias(cambios: Bloque[], id: string, otrosDias: Bloque[][]): boolean {
+  const movidos = cambios.filter(b => b.id === id);
+  if (movidos.length === 0) return false;
+  return otrosDias.some(dia =>
+    movidos.some(m =>
+      dia.some(o => o.id !== id && m.inicio < finDe(o) && o.inicio < finDe(m))
+    )
+  );
 }
