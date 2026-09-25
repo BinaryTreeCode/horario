@@ -23,7 +23,7 @@ bunx drizzle-kit push  # migraciones → DATABASE_URL (requiere .env.local)
 | `src/lib/importValidation.ts` | Validador puro de JSON importado (whitelist, sin tocar BD) |
 | `src/lib/sync.ts` | Push/pull LWW contra `/api/sync`, triggers, `syncState` |
 | `src/server/` | Drizzle + Neon (`db.ts`, `schema.ts`, `auth.ts`) |
-| `src/components/` | Svelte 5 runes; `Dashboard` (shell), `ScheduleBoard` (grilla semana/día con drag propio), `ActivityModal`, `SettingsPanel` (lazy) |
+| `src/components/` | Svelte 5 runes; `Dashboard` (shell), `DailyView` (Día) + `WeeklyGrid` (Semana, drag con motor compartido), `ActivityModal`, `SettingsPanel` (lazy) |
 | `src/lib/toast.ts` | Sistema de toasts propio — prohibido `alert()`/`confirm()` nativos |
 
 ## Reglas duras (romper alguna = bug en producción)
@@ -33,7 +33,7 @@ bunx drizzle-kit push  # migraciones → DATABASE_URL (requiere .env.local)
 3. **Toda mutación local** setea `updatedAt: Date.now()` — el sync incremental y el LWW dependen de ello.
 4. **Import de datos**: solo vía `validateImport()` → confirmación UI → `importValidatedData()`. Nunca escribir BD con datos sin normalizar.
 5. **Touch targets ≥ 44px** en toda acción táctil; `aria-label` en todo botón icónico; label programático en todo input.
-6. **Drag & drop**: Día y Semana son UNA grilla, `src/components/ScheduleBoard.svelte` (Pointer Events directos: mouse por umbral 6px, táctil por long-press 350ms, Esc cancela, touchmove no pasivo, auto-scroll rAF, fantasma flotante con validez en vivo y filtro por `pointerId`). Semántica "hueco libre" (infografía): mover SOLO a hueco libre — soltar sobre un bloque ocupado es ⛔ y vuelve —; estirar por los bordes come el hueco real y empuja vecinos en cadena; nada sale de `[startHour, endHour]`. La matemática vive SOLO en `src/lib/cascade.ts` (`planMover`/`planResize`, minutos enteros). Prohibido HTML5 DnD (no funciona en táctil). Las categorías de Ajustes usan `svelte-dnd-action` con `dragHandle` + `delayTouchStart`.
+6. **Drag & drop**: Día y Semana usan `src/lib/dragEngine.ts` (Pointer Events: mouse por umbral 5px, táctil por long-press 260ms, quiet-hold 550ms = menú contextual, Esc cancela, touchmove no pasivo, auto-scroll rAF, filtro por `pointerId`). Semántica "adelantar posiciones" (v2): soltar en hueco libre llena el hueco; sobre un bloque, MITAD SUPERIOR = insertar ANTES y MITAD INFERIOR = insertar DESPUÉS (rotación del tramo que conserva duraciones y huecos) — **reemplazos/intercambios PROHIBIDOS**; estirar come el hueco libre real y empuja vecinos en cadena; inválido → fantasma rojo y el bloque VUELVE (nada se escribe). Lo que se ve en el preview es lo que se guarda. La matemática vive SOLO en `src/lib/cascade.ts` (`resolveDayCascade`/`resolveResizeDay`/`resolveNudgeDay`/`propagateWeekly`, minutos enteros; el dedo crudo decide la mitad, el snap lo aplica la vista). Prohibido HTML5 DnD (no funciona en táctil). Las categorías de Ajustes usan `svelte-dnd-action` con `dragHandle` + `delayTouchStart`.
 7. **Español** en UI, commits y docs. CSS con tokens existentes (`--color-green-dark`, etc.), glassmorphism.
 8. **Verificación antes de commit**: `bun test` + `bun run build` en verde; cambios de UI → smoke en el preview del hilo.
 

@@ -9,7 +9,7 @@
     parseTime,
     formatTime
   } from '../lib/stores';
-  import ScheduleBoard from './ScheduleBoard.svelte';
+  import WeeklyGrid from './WeeklyGrid.svelte';
 
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
@@ -58,33 +58,11 @@
 
   let selectedDay = $state(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1); // 0 = Mon, 6 = Sun
 
-  // ── Navegación y alcance (ScheduleBoard) ──────────────────────────────
-  function lunesDe(d: Date): Date {
-    const x = new Date(d); x.setHours(0, 0, 0, 0);
-    x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
-    return x;
-  }
-  let lunes = $state(lunesDe(new Date()));
-  let alcance = $state<'dia' | 'plantilla'>('dia');
-
-  function navegar(nav: number | 'hoy') {
-    if (nav === 'hoy') { lunes = lunesDe(new Date()); selectedDay = (new Date().getDay() + 6) % 7; return; }
-    if (typeof nav !== 'number') return;
-    if (currentView === 'week') {
-      if (alcance === 'dia') { const l = new Date(lunes); l.setDate(l.getDate() + 7 * nav); lunes = l; }
-      return;
-    }
-    let d = selectedDay + nav;
-    const l = new Date(lunes);
-    if (d < 0) { d = 6; if (alcance === 'dia') { l.setDate(l.getDate() - 7); lunes = l; } }
-    if (d > 6) { d = 0; if (alcance === 'dia') { l.setDate(l.getDate() + 7); lunes = l; } }
-    selectedDay = d;
-  }
-
   // Precarga de modales cuando el navegador queda idle
   $effect(() => {
     preloadModals();
     loadDonutCharts(); // los donuts salen del chunk inicial (lazy como los modales)
+    loadDailyView(); // la vista Día es excluyente con la Semana: precarga idle
   });
   
   let showSettings = $state(false);
@@ -95,10 +73,12 @@
   let SettingsPanelComp: typeof import('./SettingsPanel.svelte').default | null = $state(null);
   let ActivityModalComp: typeof import('./ActivityModal.svelte').default | null = $state(null);
   let DonutChartsComp: typeof import('./DonutCharts.svelte').default | null = $state(null);
+  let DailyViewComp: typeof import('./DailyView.svelte').default | null = $state(null);
 
   let loadPromiseSettings: Promise<void> | null = $state(null);
   let loadPromiseDonut: Promise<void> | null = $state(null);
   let loadPromiseActivity: Promise<void> | null = $state(null);
+  let loadPromiseDaily: Promise<void> | null = $state(null);
 
   function loadSettingsPanel() {
     loadPromiseSettings ??= (async () => {
@@ -117,6 +97,12 @@
       DonutChartsComp = (await import('./DonutCharts.svelte')).default;
     })();
     return loadPromiseDonut;
+  }
+  function loadDailyView() {
+    loadPromiseDaily ??= (async () => {
+      DailyViewComp = (await import('./DailyView.svelte')).default;
+    })();
+    return loadPromiseDaily;
   }
   function openSettings() {
     showSettings = true;
@@ -276,29 +262,40 @@
 
   <main class="dashboard-main">
     <div class="view-container">
-      <div class="board-wrap glass-panel">
-        <ScheduleBoard
-          vista={currentView === 'week' ? 'semana' : 'dia'}
-          diaSel={selectedDay}
-          activities={$activitiesStore || []}
-          categories={$categoriesStore || []}
-          dayOverrides={$dayOverridesStore || []}
-          settings={settingsObj}
-          alcance={alcance}
-          lunes={lunes}
-          onOpenActivity={(id, day, initialData) => openActivityModal(id, day, initialData ?? null)}
-          onSelectDay={handleDaySelect}
-          onNavegar={navegar}
-          onAlcance={(a) => (alcance = a)}
-        />
-      </div>
       {#if currentView === 'week'}
-        <div class="stats-section">
-          {#if DonutChartsComp}
-            <DonutChartsComp
-              activities={$activitiesStore || []}
-              categories={$categoriesStore || []}
+        <div class="week-layout">
+          <div class="grid-section glass-panel">
+            <WeeklyGrid 
+              activities={$activitiesStore || []} 
+              categories={$categoriesStore || []} 
+              settings={settingsObj}
+              dayOverrides={$dayOverridesStore || []}
+              onSelectDay={handleDaySelect}
+              onEditActivity={(id) => openActivityModal(id, null)}
             />
+          </div>
+          <div class="stats-section">
+            {#if DonutChartsComp}
+              <DonutChartsComp
+                activities={$activitiesStore || []}
+                categories={$categoriesStore || []}
+              />
+            {/if}
+          </div>
+        </div>
+      {:else}
+        <div class="day-layout glass-panel">
+          {#if DailyViewComp}
+            <DailyViewComp 
+              day={selectedDay}
+              activities={$activitiesStore || []} 
+              categories={$categoriesStore || []} 
+              settings={settingsObj}
+              dayOverrides={$dayOverridesStore || []}
+              onEditActivity={(id, initialData) => openActivityModal(id, selectedDay, initialData)}
+            />
+          {:else}
+            <div class="modal-loading" role="status">Cargando vista del día…</div>
           {/if}
         </div>
       {/if}
@@ -515,17 +512,16 @@
     flex: 1;
   }
 
-  .board-wrap {
-    padding: 0.5rem;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
+  .week-layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 1.5rem;
+    height: 100%;
   }
 
-  .view-container {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
+  .grid-section {
+    padding: 1rem;
+    overflow-x: auto;
   }
 
   .stats-section {
@@ -535,6 +531,9 @@
   }
 
   @media (max-width: 1024px) {
+    .week-layout {
+      grid-template-columns: 1fr;
+    }
     /* El horario es lo primario en móvil: los donuts van después, no antes */
     .stats-section {
       flex-direction: row;
@@ -597,8 +596,8 @@
         width: auto;
       }
     }
-    .board-wrap {
-      padding: 0.25rem;
+    .grid-section {
+      padding: 0.5rem;
     }
   }
 
