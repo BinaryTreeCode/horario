@@ -36,14 +36,17 @@ describe('resolveDayCascade — hueco libre', () => {
     expect(byId(p.slots).get('r')).toEqual(s('r', 12, 13));
   });
 
-  test('hueco más chico que el bloque → inválido y el dedo manda en el ghost', () => {
-    // a 8-10, hueco 10-10:45, r 10:45-12; bloque de 1h: NO cabe.
+  test('hueco más chico que el bloque → INSERCIÓN CERCANA (nunca ⛔, F4)', () => {
+    // a 8-10, hueco 10-10:45, r 10:45-12; bloque de 1h: NO cabe → el vecino
+    // más próximo al dedo (10.5 → a dista 2.5h; r dista 0.25h) es r: mita
+    // superior → x inserta ANTES de r (10:45): tramo compacto r 11:45-13.
     const slots = [s('a', 8, 10), s('r', 10.75, 12), s('x', 15, 16)];
     const p = resolveDayCascade(slots, s('x', 10.5, 11.5), 10.5, false, 7, 22);
-    expect(p.valido).toBe(false);
-    expect(p.motivo).toBe('⛔ No cabe en este hueco');
-    // El ghost se pinta donde el dedo pide (solo clamp al día).
-    expect(p.movido.start).toBe(10.5);
+    expect(p.valido).toBe(true);
+    expect(p.accion).toBe('insertar');
+    expect(p.movido).toEqual(s('x', 10.75, 11.75));
+    expect(byId(p.slots).get('r')).toEqual(s('r', 11.75, 13));
+    expect(byId(p.slots).get('a')).toEqual(s('a', 8, 10));
   });
 
   test('hueco que ajusta exacto: el bloque se clampa dentro del hueco', () => {
@@ -54,6 +57,31 @@ describe('resolveDayCascade — hueco libre', () => {
     expect(p.valido).toBe(true);
     expect(p.movido.start).toBe(7);
     expect(p.movido.end).toBe(8);
+  });
+
+  test('F4: inserción cercana con finger en el borde superior del hueco chico (vecino = pisado de arriba)', () => {
+    // a 8-10, hueco 10-10:45, r 10:45-12; dedo en 10.1 → vecino más próximo
+    // es a (su fin 10 dista 0.1): mitad inferior (dedo tras su fin) → x
+    // inserta DESPUÉS de a (10): x 10-11 y r empujado conservando duración
+    // (11-12.25 — el empuje absorbe huecos, no encoge a nadie).
+    const slots = [s('a', 8, 10), s('r', 10.75, 12), s('x', 15, 16)];
+    const p = resolveDayCascade(slots, s('x', 10.5, 11.5), 10.1, false, 7, 22);
+    expect(p.valido).toBe(true);
+    expect(p.movido).toEqual(s('x', 10, 11));
+    expect(byId(p.slots).get('r')).toEqual(s('r', 11, 12.25));
+    expect(byId(p.slots).get('a')).toEqual(s('a', 8, 10));
+  });
+
+  test('F4: entre columnas, hueco chico → inserción cercana (vecino más próximo)', () => {
+    // Destino: b 8-9, hueco 9-9:30, r 9:30-11; x (1h) cae en 9:10 → no cabe
+    // en el hueco → vecino más próximo es b (su fin 9 dista 0.10; r dista
+    // 0.33) → x inserta DESPUÉS de b: x 9-10 y r empujado (10-11.5).
+    const slots = [s('b', 8, 9), s('r', 9.5, 11)];
+    const p = resolveDayCascade(slots, s('x', 9.1667, 10.1667), 9.1667, true, 7, 22);
+    expect(p.valido).toBe(true);
+    expect(p.movido).toEqual(s('x', 9, 10));
+    expect(byId(p.slots).get('b')).toEqual(s('b', 8, 9));
+    expect(byId(p.slots).get('r')).toEqual(s('r', 10, 11.5));
   });
 });
 
@@ -461,5 +489,19 @@ describe('capacidadResizeDay/Weekly — estirar SIEMPRE topa (nunca rechaza)', (
     const res = resolveResizeDay(slots, 'e', 'abajo', Math.min(21, tope), 7, 22);
     expect(res.valido).toBe(true);
     expect(res.movido).toEqual(s('e', 9, 20));
+  });
+
+  test('F4 limitadoPor: topa con un bloque (cadena), con el borde, o nada', () => {
+    // Con vecino r (cadena 1h): deseo 21:30 topa con r (tope 21) → 'un bloque'.
+    const slots = [s('e', 9, 10), s('r', 13, 14)];
+    expect(resolveResizeDay(slots, 'e', 'abajo', 21.5, 7, 22).limitadoPor).toBe('un bloque');
+    // Sin vecinos debajo y deseo más allá del fin del día → 'el fin del día'.
+    expect(resolveResizeDay([s('e', 20, 21)], 'e', 'abajo', 23, 16, 22).limitadoPor).toBe('el fin del día');
+    // Hacia arriba: sin vecinos y deseo antes del inicio del día → 'el inicio del día'.
+    expect(resolveResizeDay([s('e', 7, 8)], 'e', 'arriba', 6, 7, 22).limitadoPor).toBe('el inicio del día');
+    // Deseo dentro de la capacidad → nada limitó.
+    expect(resolveResizeDay(slots, 'e', 'abajo', 12, 7, 22).limitadoPor).toBe('');
+    // Encoger nunca reporta límite.
+    expect(resolveResizeDay(slots, 'e', 'abajo', 9.5, 7, 22).limitadoPor).toBe('');
   });
 });

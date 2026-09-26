@@ -4,8 +4,10 @@
  *
  *  1. HUECO LIBRE: si el dedo cae en espacio vacío, el bloque llena el hueco
  *     (el caller ya aplicó snap+clamp al inicio deseado; acá se acota al
- *     hueco). Si el hueco es más chico que el bloque → ⛔ inválido: el
- *     fantasma va rojo y al soltar el bloque vuelve a su sitio.
+ *     hueco). Si el hueco es más chico que el bloque → INSERCIÓN CERCANA
+ *     (nunca ⛔): el vecino más próximo al dedo recibe la mitad y la
+ *     rotación del tramo acomoda al arrastrado — el dedo pide, la cadena
+ *     responde.
  *  2. SOBRE OTRO BLOQUE → MITADES: mitad superior del pisado = insertar ANTES,
  *     mitad inferior = insertar DESPUÉS. El tramo afectado se REEMPAQUETA
  *     COMPACTANDO: conserva duraciones, cierra los huecos internos y el hueco
@@ -57,6 +59,9 @@ export interface DayResolution {
   accion: AccionDrop;
   /** Slot final del movido (ancla del commit / topOverride). */
   movido: Slot;
+  /** F4: al estirar, con qué topó el borde acotado por la capacidad
+   *  ('' = el puntero mandó, sin acote). Solo lo llena resolveResizeDay. */
+  limitadoPor?: '' | 'un bloque' | 'el fin del día' | 'el inicio del día';
 }
 
 const EPS = 1e-9;
@@ -168,16 +173,46 @@ export function resolveDayCascade(
 
     const j = bajo(otros, fingerM);
     if (j === -1) {
-      // 1) HUECO LIBRE: llenar el hueco alrededor del dedo; si no cabe → ⛔.
+      // 1) HUECO LIBRE: llenar el hueco alrededor del dedo. Si el hueco es
+      //    más chico que el bloque → INSERCIÓN CERCANA (F4, nunca ⛔): el
+      //    vecino más próximo al dedo recibe la mitad y la rotación del
+      //    tramo acomoda al arrastrado — el dedo pide, la cadena responde.
       const [ini, fn] = huecoAlrededor(otros, fingerM, minM, maxM);
       const cabe = fn - ini >= durM - EPS;
-      bb.inicio = cabe ? clamp(deseado, ini, fn - durM) : deseado;
+      if (cabe) {
+        bb.inicio = clamp(deseado, ini, fn - durM);
+        return {
+          slots: cerrar([...otros, bb]),
+          valido: true,
+          motivo: '',
+          accion: 'hueco',
+          movido: aHoras(bb)
+        };
+      }
+      // Vecino más próximo al dedo: distancia al bloque completo (inicio o
+      // fin, lo más cerca — no solo al inicio, que sesga hacia el de abajo).
+      const cercano = otros.reduce((mejor, o) => {
+        const dO = Math.min(Math.abs(o.inicio - fingerM), Math.abs(finDe(o) - fingerM));
+        const dMejor = Math.min(Math.abs(mejor.inicio - fingerM), Math.abs(finDe(mejor) - fingerM));
+        return dO < dMejor ? o : mejor;
+      });
+      const rel = cercano.dur > 0 ? (fingerM - cercano.inicio) / cercano.dur : 1;
+      const relC = clamp(rel, 0, 1);
+      const idx = relC < ZONA ? otros.indexOf(cercano) : otros.indexOf(cercano) + 1;
+      const N = otros.map(x => ({ ...x }));
+      // El dedo está en un HUECO (no sobre el vecino): el ancla es el borde
+      // del vecino más próximo y el empuje es con absorción de huecos — la
+      // compactación total arrastraría bloques lejanos que tienen hueco.
+      bb.inicio = relC < ZONA ? cercano.inicio : finDe(cercano);
+      N.splice(idx, 0, bb);
+      empujarAbajo(N, idx);
+      const valido = enRango(N, minM, maxM);
       return {
-        slots: cerrar([...otros, bb]),
-        valido: cabe,
-        motivo: cabe ? '' : '⛔ No cabe en este hueco',
-        accion: 'hueco',
-        movido: aHoras(bb)
+        slots: cerrar(N),
+        valido,
+        motivo: valido ? '' : '⛔ No cabe en el día',
+        accion: 'insertar',
+        movido: aHoras(N.find(x => x.id === id)!)
       };
     }
 
@@ -209,14 +244,41 @@ export function resolveDayCascade(
 
   const j = bajo(otros, fingerM);
   if (j === -1) {
+    // ENTRE COLUMNAS sobre hueco: si el hueco da, llena; si es chico →
+    // INSERCIÓN CERCANA pegado al vecino más próximo (nunca ⛔) con
+    // compactación del tramo (igual que el caso sobre bloque).
     const [ini, fn] = huecoAlrededor(otros, fingerM, minM, maxM);
     const cabe = fn - ini >= durM - EPS;
-    bb.inicio = cabe ? clamp(deseado, ini, fn - durM) : deseado;
+    if (cabe) {
+      bb.inicio = clamp(deseado, ini, fn - durM);
+      return {
+        slots: cerrar([...otros, bb]),
+        valido: true,
+        motivo: '',
+        accion: 'hueco',
+        movido: aHoras(bb)
+      };
+    }
+    const cercano = otros.reduce((mejor, o) => {
+      const dO = Math.min(Math.abs(o.inicio - fingerM), Math.abs(finDe(o) - fingerM));
+      const dMejor = Math.min(Math.abs(mejor.inicio - fingerM), Math.abs(finDe(mejor) - fingerM));
+      return dO < dMejor ? o : mejor;
+    });
+    const rel = cercano.dur > 0 ? (fingerM - cercano.inicio) / cercano.dur : 1;
+    const relC = clamp(rel, 0, 1);
+    const idx = relC < ZONA ? otros.indexOf(cercano) : otros.indexOf(cercano) + 1;
+    const N = otros.map(x => ({ ...x }));
+    // Ancla al borde del vecino más próximo + empuje con absorción de huecos
+    // (igual que el mismo día): no arrastra bloques lejanos con hueco libre.
+    bb.inicio = relC < ZONA ? cercano.inicio : finDe(cercano);
+    N.splice(idx, 0, bb);
+    empujarAbajo(N, idx);
+    const valido = enRango(N, minM, maxM);
     return {
-      slots: cerrar([...otros, bb]),
-      valido: cabe,
-      motivo: cabe ? '' : '⛔ No cabe en este hueco',
-      accion: 'hueco',
+      slots: cerrar(N),
+      valido,
+      motivo: valido ? '' : '⛔ No cabe en el día',
+      accion: 'insertar',
       movido: aHoras(bb)
     };
   }
@@ -282,19 +344,31 @@ export function resolveResizeDay(
     ? toMin(deseadoHour) <= finDe(b) + EPS
     : toMin(deseadoHour) >= b.inicio - EPS;
 
+  // F4: con qué topó el borde acotado (feedback 'limitadoPor' para la vista).
+  let limitadoPor: DayResolution['limitadoPor'] = '';
   if (lado === 'abajo') {
+    const vecinos = N.slice(i + 1).reduce((s, x) => s + x.dur, 0);
     const libre = encoge
       ? Infinity // libre ilimitado: el borde retrocede, nadie se perjudica
-      : Math.max(0, maxM - finDe(b) - N.slice(i + 1).reduce((s, x) => s + x.dur, 0));
-    const E = clamp(toMin(deseadoHour), b.inicio + paso, finDe(b) + libre);
+      : Math.max(0, maxM - finDe(b) - vecinos);
+    const topeBorde = finDe(b) + libre;
+    const E = clamp(toMin(deseadoHour), b.inicio + paso, topeBorde);
+    if (!encoge && E < toMin(deseadoHour) - EPS) {
+      limitadoPor = vecinos > 0 ? 'un bloque' : 'el fin del día';
+    }
     b.dur = E - b.inicio;
     empujarAbajo(N, i);
   } else {
+    const vecinos = N.slice(0, i).reduce((s, x) => s + x.dur, 0);
     const libre = encoge
       ? Infinity // subir el inicio = encoger: el borde baja, nadie se perjudica
-      : Math.max(0, b.inicio - minM - N.slice(0, i).reduce((s, x) => s + x.dur, 0));
+      : Math.max(0, b.inicio - minM - vecinos);
+    const pisoBorde = b.inicio - libre;
     const F = finDe(b);
-    const S = clamp(toMin(deseadoHour), b.inicio - libre, F - paso);
+    const S = clamp(toMin(deseadoHour), pisoBorde, F - paso);
+    if (!encoge && S > toMin(deseadoHour) + EPS) {
+      limitadoPor = vecinos > 0 ? 'un bloque' : 'el inicio del día';
+    }
     b.dur = F - S;
     b.inicio = S;
     let cursor = S;
@@ -312,7 +386,8 @@ export function resolveResizeDay(
     valido,
     motivo: valido ? '' : '⛔ No cabe en el día',
     accion: 'redim',
-    movido: aHoras(N.find(x => x.id === movedId)!)
+    movido: aHoras(N.find(x => x.id === movedId)!),
+    limitadoPor
   };
 }
 

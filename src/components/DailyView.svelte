@@ -9,7 +9,7 @@
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { toastOk, toastErr } from '../lib/toast';
+  import { toastOk, toastErr, toastUndo } from '../lib/toast';
   import { pushUndo, cloneAct } from '../lib/undo';
 
   interface Props {
@@ -498,6 +498,8 @@
       const res = computeResizePreview(clientY, t.activityId, t.meta as ResizeMeta);
       if (!res) return;
       dragInvalid = !res.valido;
+      // F4: feedback de por qué topó el borde (el deseo del puntero se acotó).
+      dragHint = res.limitadoPor ? `↕ Limitado por ${res.limitadoPor}` : '';
       topOverride = { id: t.activityId, start: res.movido.start, end: res.movido.end };
       dropPreview = toSlotMap(res.slots);
     },

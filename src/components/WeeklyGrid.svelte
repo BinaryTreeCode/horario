@@ -570,6 +570,8 @@
       const calc = computeWeekResize(clientY, t.activityId, m);
       if (calc) {
         dragInvalid = !calc.valido;
+        // F4: la capacidad global acotó el deseo → feedback del por qué.
+        dragHint = calc.limitadoPor ? `↕ Limitado por ${calc.limitadoPor}` : '';
         dropPreview = { day: m.day, slots: calc.slots };
       }
     },
@@ -627,7 +629,7 @@
     clientY: number,
     actId: string,
     m: WeekResizeMeta
-  ): { lado: 'arriba' | 'abajo'; newEnd?: number; newStart?: number; valido: boolean; slots: Map<string, { start: number; end: number }> } | null {
+  ): { lado: 'arriba' | 'abajo'; newEnd?: number; newStart?: number; valido: boolean; limitadoPor?: string; slots: Map<string, { start: number; end: number }> } | null {
     const col = document.querySelectorAll('.day-column .slots-grid')[m.day];
     if (!col) return null;
     const deltaSlots = (clientY - m.startY) / slotHeightPx;
@@ -646,7 +648,7 @@
       }
       newEnd = Math.max(m.origStart + 0.25, Math.min(newEnd, endHour));
       const res = resolveResizeDay(daySlots, actId, 'abajo', newEnd, startHour, endHour);
-      return { lado: m.lado, newEnd, valido: res.valido, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
+      return { lado: m.lado, newEnd, valido: res.valido, limitadoPor: res.limitadoPor, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
     }
     let newStart = Math.round((m.origStart + deltaSlots / slotsPerHour) * 4) / 4;
     // Espejo hacia arriba: acotar por la capacidad global antes de resolver.
@@ -656,7 +658,7 @@
     }
     newStart = Math.max(startHour, Math.min(newStart, m.origEnd - 0.25));
     const res = resolveResizeDay(daySlots, actId, 'arriba', newStart, startHour, endHour);
-    return { lado: m.lado, newStart, valido: res.valido, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
+    return { lado: m.lado, newStart, valido: res.valido, limitadoPor: res.limitadoPor, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
   }
 
   // Context Menu logic
