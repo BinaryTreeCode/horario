@@ -835,7 +835,6 @@
       style="left: {dragGhostXY.x - grabDX}px; top: {dragGhostXY.y - grabDY}px; width: {grabW}px; height: {grabH}px; --bg-color: {ghostColor}">
       <div class="df-title"><span>{ghostActivity.name}</span></div>
       <span class="df-hora">{dragGhostHora}</span>
-      {#if dragHint}<span class="df-accion">{dragHint}</span>{/if}
     </div>
   {/if}
 
@@ -1145,13 +1144,6 @@
     font-size: 0.62rem;
     font-weight: 700;
     opacity: 0.92;
-  }
-  .drag-float .df-accion {
-    font-size: 0.56rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    opacity: 0.85;
   }
   @keyframes shake {
     0%, 100% { margin-left: 0; }
