@@ -10,6 +10,7 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { clearUndo } from '../lib/undo';
+  import { notifyDataChange } from '../lib/dataBus';
   import Toasts from './Toasts.svelte';
 
   interface Props {
@@ -247,6 +248,54 @@
     const { INITIAL_CATEGORIES } = await import('../lib/db');
     localCategories = [...INITIAL_CATEGORIES];
     toastOk('Categorías restablecidas — pulsa Guardar Todo para aplicar');
+  }
+
+  // ── Borrar todo (zona de peligro) ──
+  let confirmWipeAll = $state(false);
+  let wipingAll = $state(false);
+
+  /**
+   * Borra TODOS los datos locales: actividades, categorías, ajustes
+   * (vuelve a 7–23) y ediciones temporales. Sync-safe: en vez de clear()
+   * marca TODOS los registros con deletedAt (tombstones) — un clear()
+   * local sería deshecho por el siguiente pull, que restauraría la nube
+   * completa; con tombstones el push propaga los borrados a la nube.
+   * Deshacer NO cubre esto (clearUndo): es la salida de emergencia.
+   */
+  async function wipeAll() {
+    if (wipingAll) return;
+    wipingAll = true;
+    try {
+      const stamp = Date.now();
+      await db.transaction('rw', db.activities, db.categories, db.settings, db.dayOverrides, db.syncState, async () => {
+        // Reemplazo total: los registros vivos pasan a tombstone (y los que
+        // ya eran tombstone se refrescan) — la tabla queda efectivamente vacía.
+        const wipe = (rows: any[]) =>
+          rows.map(r => ({ ...r, deletedAt: stamp, updatedAt: stamp }));
+        const acts = await db.activities.toArray();
+        if (acts.length) await db.activities.bulkPut(wipe(acts));
+        const cats = await db.categories.toArray();
+        if (cats.length) await db.categories.bulkPut(wipe(cats));
+        const sets = await db.settings.toArray();
+        if (sets.length) await db.settings.bulkPut(wipe(sets));
+        const ovs = await db.dayOverrides.toArray();
+        if (ovs.length) await db.dayOverrides.bulkPut(wipe(ovs));
+        // Ajustes de horario inmediatos (el panel muestra 7-23 al reabrir).
+        await db.settings.bulkPut([
+          { id: 'startHour', key: 'startHour', value: 7, updatedAt: stamp },
+          { id: 'endHour', key: 'endHour', value: 23, updatedAt: stamp }
+        ]);
+      });
+      clearUndo(); // sin historial: nada que deshacer tras el borrado
+      notifyDataChange(['activities', 'categories', 'settings', 'dayOverrides']);
+      toastOk('Todos los datos fueron borrados');
+      onClose();
+    } catch (err: any) {
+      console.error('Error al borrar todo:', err);
+      toastErr('No se pudo borrar: ' + (err?.message || err));
+    } finally {
+      wipingAll = false;
+    }
   }
 
   async function handleExport() {
@@ -496,6 +545,16 @@
               aria-hidden="true"
             />
           </div>
+          <div class="danger-zone">
+            <button
+              class="btn btn-danger btn-backup"
+              onclick={() => confirmWipeAll = true}
+              disabled={wipingAll}
+              aria-label="Borrar todos los datos: actividades, categorías y ediciones temporales"
+            >
+              <Trash2 size={18} /> Borrar todo
+            </button>
+          </div>
           <p class="backup-info">Exporta actividades, categorías, ediciones temporales e imágenes para respaldarlas o moverlas a otro navegador. Al importar se te pedirá confirmación y verás un resumen antes de reemplazar tus datos.</p>
         </div>
       </section>
@@ -528,6 +587,15 @@
   danger
   onconfirm={doImport}
   oncancel={() => pendingImport = null}
+/>
+
+<ConfirmDialog
+  bind:open={confirmWipeAll}
+  title="¿Borrar TODOS los datos?"
+  message="Se eliminarán TODAS las actividades, categorías y ediciones temporales de este dispositivo (el horario vuelve a 7:00–23:00).\n\nSi tienes sesión iniciada, el borrado también se sincronizará con la nube.\n\nEsta acción no se puede deshacer — exporta un respaldo antes si lo necesitas."
+  confirmText="Borrar todo"
+  danger
+  onconfirm={wipeAll}
 />
 
 <Toasts />
@@ -854,6 +922,29 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     width: 100%;
+  }
+
+  /* Zona de peligro: Borrar todo, separada del resto de acciones */
+  .danger-zone {
+    border-top: 1px dashed rgba(204, 0, 0, 0.35);
+    padding-top: 0.85rem;
+    margin-top: 0.25rem;
+  }
+
+  .danger-zone .btn-danger {
+    width: 100%;
+    background: rgba(204, 0, 0, 0.08);
+    color: #cc0000;
+    border: 1px solid rgba(204, 0, 0, 0.35);
+  }
+
+  .danger-zone .btn-danger:hover:not(:disabled) {
+    background: rgba(204, 0, 0, 0.16);
+  }
+
+  .danger-zone .btn-danger:disabled {
+    opacity: 0.6;
+    cursor: wait;
   }
 
   .backup-info {
