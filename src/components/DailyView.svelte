@@ -109,8 +109,6 @@
   let dragInvalid = $state(false);
   /** Rótulo del gesto dentro del fantasma: qué hará el drop. */
   let dragHint = $state('');
-  /** Mitad activa del pisado (resalte verde tipo demo). */
-  let zonaPisado = $state<{ id: string; mitad: 'antes' | 'despues' } | null>(null);
   /** Firma del último preview publicado: si no cambió por CONTENIDO, no se
    *  reasigna dropPreview (las transiciones CSS no se relanzan → cero
    *  parpadeo). Mismo patrón que la vista Semana. */
@@ -380,14 +378,8 @@
       if (!res) return;
       dragInvalid = !res.valido;
       dragHint = !res.valido ? '⛔ No cabe' : res.accion === 'insertar' ? '↕ Insertar aquí' : '';
-      // Mitad activa del pisado: el vecino ANTES del movido recibió "después".
-      if (res.valido && res.accion === 'insertar') {
-        const pos = res.slots.findIndex(s => s.id === draggedActivityId);
-        const vecino = pos > 0 ? res.slots[pos - 1] : res.slots[pos + 1];
-        zonaPisado = vecino ? { id: vecino.id, mitad: pos > 0 ? 'despues' : 'antes' } : null;
-      } else {
-        zonaPisado = null;
-      }
+      // (El resalte de mitad del pisado se retiró: el feedback de posición
+      // vive en la tarjeta flotante — hora proyectada + acción del drop.)
       // Anti-parpadeo: solo reasignar dropPreview si el layout cambió por
       // CONTENIDO (firma). Reasignar un Map idéntico en cada pointermove
       // relanza las transiciones CSS = parpadeo.
@@ -406,7 +398,6 @@
         dropPreview = null;
         dragInvalid = false;
         dragHint = '';
-        zonaPisado = null;
         firmaPreview = '';
         return;
       }
@@ -423,7 +414,7 @@
       } finally {
         // Si la store re-emitio el mismo layout, soltar el ancla es
         // inobservable; si el commit falló, esto devuelve la UI a la BD.
-        settle2(() => { dropPreview = null; topOverride = null; dragInvalid = false; dragHint = ''; zonaPisado = null; firmaPreview = ''; flashId = null; });
+        settle2(() => { dropPreview = null; topOverride = null; dragInvalid = false; dragHint = ''; firmaPreview = ''; flashId = null; });
       }
     },
     onCancel() {
@@ -434,7 +425,6 @@
       topOverride = null;
       dragInvalid = false;
       dragHint = '';
-      zonaPisado = null;
       firmaPreview = '';
     }
   };
@@ -491,7 +481,6 @@
     onActivate(t) {
       draggedActivityId = t.activityId; // excluye la tarjeta del clustering
       firmaPreview = '';
-      zonaPisado = null;
       flashId = null;
     },
     onMove(t, _x, clientY) {
@@ -511,7 +500,7 @@
       } else if (res) {
         toastErr(res.motivo);
       }
-      settle2(() => { dropPreview = null; topOverride = null; dragInvalid = false; dragHint = ''; zonaPisado = null; firmaPreview = ''; });
+      settle2(() => { dropPreview = null; topOverride = null; dragInvalid = false; dragHint = ''; firmaPreview = ''; });
     },
     onCancel() {
       draggedActivityId = null;
@@ -519,7 +508,6 @@
       topOverride = null;
       dragInvalid = false;
       dragHint = '';
-      zonaPisado = null;
       firmaPreview = '';
     }
   };
@@ -833,8 +821,6 @@
           class:is-short={activity.durationMins <= 20}
           class:dragging={draggedActivityId === activity.id}
           class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
-          class:zona-antes={zonaPisado?.id === activity.id && zonaPisado.mitad === 'antes'}
-          class:zona-despues={zonaPisado?.id === activity.id && zonaPisado.mitad === 'despues'}
           class:flash-commit={flashId === activity.id}
           role="button"
           tabindex="0"
@@ -1215,20 +1201,6 @@
   .resize-handle.top::after {
     order: -1;
   }
-
-  /* Mitad activa del pisado durante el insert (verde, como el demo). */
-  .daily-activity-card.zona-antes::before,
-  .daily-activity-card.zona-despues::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    background: rgba(47, 107, 47, 0.22);
-    pointer-events: none;
-    z-index: 3;
-  }
-  .daily-activity-card.zona-antes::before { top: 0; height: 50%; }
-  .daily-activity-card.zona-despues::before { bottom: 0; height: 50%; }
 
   /* Flash de commit: el bloque recién soltado confirma con un pulso verde. */
   .daily-activity-card.flash-commit {

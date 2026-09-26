@@ -397,15 +397,8 @@
     if (draggedActivityId !== null) {
       const mio = slots?.find(s => s.id === draggedActivityId);
       if (mio) dragGhostHora = `${format12h(formatTime(mio.start))} – ${format12h(formatTime(mio.end))}`;
-      // Mitad activa del pisado: el vecino ANTES del arrastrado recibió el
-      // drop "después" (mitad inferior); si queda después → mitad superior.
-      if (hint.startsWith('↕') && mio && slots) {
-        const pos = slots.findIndex(s => s.id === draggedActivityId);
-        const vecino = pos > 0 ? slots[pos - 1] : slots[pos + 1];
-        zonaPisado = vecino ? { id: vecino.id, mitad: pos > 0 ? 'despues' : 'antes' } : null;
-      } else {
-        zonaPisado = null;
-      }
+      // (El resalte de mitad del pisado se retiró: el feedback de posición
+      // vive en el clon flotante — hora proyectada + acción del drop.)
     }
     if (firma === firmaPreview) {
       dragInvalid = invalido; // el texto puede cambiar sin cambiar el layout
@@ -447,8 +440,6 @@
   let dragGhostXY = $state<{ x: number; y: number } | null>(null);
   /** Hora proyectada del fantasma: el slot final del arrastrado en el preview. */
   let dragGhostHora = $state('');
-  /** Mitad activa del pisado (para el resalte verde tipo demo). */
-  let zonaPisado = $state<{ id: string; mitad: 'antes' | 'despues' } | null>(null);
   /** Punto de agarre dentro del bloque (px) y tamaño real: el clon flotante
    *  se dibuja en el mismo punto relativo al cursor — cero salto al armar
    *  (patrón .bloque.flotante de la demo). Se capturan en pointerdown. */
@@ -559,7 +550,6 @@
     dragHint = '';
     dragGhostXY = null;
     dragGhostHora = '';
-    zonaPisado = null;
     firmaPreview = '';
     mitadActual.clear();
   }
@@ -785,8 +775,6 @@
               class:short={numSlots <= 1}
               class:drag-ghost={draggedActivityId === activity.id}
               class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
-              class:zona-antes={zonaPisado?.id === activity.id && zonaPisado.mitad === 'antes'}
-              class:zona-despues={zonaPisado?.id === activity.id && zonaPisado.mitad === 'despues'}
               onpointerdown={(e) => handleItemPointerDown(e, activity, i)}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
               style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
@@ -1170,20 +1158,6 @@
     25% { margin-left: -3px; }
     75% { margin-left: 3px; }
   }
-
-  /* Mitad activa del pisado durante el insert (verde, como el demo). */
-  .activity-item.zona-antes::before,
-  .activity-item.zona-despues::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    background: rgba(47, 107, 47, 0.28);
-    pointer-events: none;
-    z-index: 3;
-  }
-  .activity-item.zona-antes::before { top: 0; height: 50%; }
-  .activity-item.zona-despues::before { bottom: 0; height: 50%; }
 
   /* Inhibir el hover en pleno drag: sin scale/translate ni re-layout
      (causa de ticks y sacudidas al agarrar). */
