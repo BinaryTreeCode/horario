@@ -817,7 +817,7 @@
       {/each}
     </div>
 
-    <div class="activities-track" onclick={handleTrackTap} role="presentation">
+    <div class="activities-track" class:track-dragging={draggedActivityId !== null} onclick={handleTrackTap} role="presentation">
       {#if layoutActivities.length === 0}
         <div class="empty-state glass-panel" aria-live="polite">
           <span class="empty-icon">🌱</span>
@@ -831,6 +831,7 @@
         <div
           class="daily-activity-card glass-panel"
           class:is-short={activity.durationMins <= 20}
+          class:dragging={draggedActivityId === activity.id}
           class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
           class:zona-antes={zonaPisado?.id === activity.id && zonaPisado.mitad === 'antes'}
           class:zona-despues={zonaPisado?.id === activity.id && zonaPisado.mitad === 'despues'}
@@ -883,9 +884,6 @@
               <Edit3 size={13} />
             </button>
           </div>
-          {#if draggedActivityId === activity.id && dragHint}
-            <div class="drag-hint" aria-hidden="true">{dragHint}</div>
-          {/if}
           <div
             class="resize-handle top"
             aria-hidden="true"
@@ -1260,6 +1258,34 @@
     background: white;
   }
 
+  /* Flicker en la colisión (fix): en pleno drag el hover de TODAS las tarjetas
+     queda inhibido — la pisada es deslizada bajo el cursor por la cascada y
+     con :hover vivo alternaba transform (translateX) + overflow + z-index en
+     cada entrada/salida del puntero = parpadeo. Mismo patrón que .col-dragging
+     de la vista Semana. */
+  .track-dragging .daily-activity-card:hover,
+  .track-dragging .daily-activity-card:focus-visible {
+    transform: none;
+    overflow: hidden;
+    background: white;
+    z-index: auto;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .track-dragging .daily-activity-card:hover .edit-btn {
+    opacity: 0; /* el lápiz flotante tampoco compite durante el gesto */
+  }
+  .track-dragging .daily-activity-card:hover .resize-handle::after {
+    opacity: 0; /* las asas de estirar tampoco se encienden a mitad del gesto */
+  }
+  /* Flicker raíz en la colisión: al cambiar el orden del layout, Svelte
+     reordena los nodos del {#each} y mover un nodo en el DOM REINICIA su
+     animación CSS (fadeIn) → las tarjetas parpadean en cada reorden. Sin
+     animación durante el drag (la entrada escalonada solo importa al
+     cambiar de día, y el track no se re-monta a mitad de gesto). */
+  .track-dragging .daily-activity-card {
+    animation: none;
+  }
+
   /* Entrada escalonada al cambiar de día: se re-monta el track ({#key day})
      y nth-child reparte los delays — cero JS, cero bytes en el chunk. */
   .daily-activity-card {
@@ -1277,8 +1303,10 @@
        no por top — su top/height animan hacia el slot predicho como las
        demás, pero las tapa el fantasma que sigue al cursor). */
     transition: opacity 0.15s, box-shadow 0.15s;
-    opacity: 0.85;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+    opacity: 1; /* opaca: semi-transparente dejaba ver el texto del vecino a través ("texto duplicado") */
+    /* Sombra del bloque flotante de la demo: capa de contacto + caída suave
+       y profunda — la tarjeta se ve "levantada" de la grilla. */
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15), 0 12px 28px rgba(0, 0, 0, 0.3);
     z-index: 100;
     cursor: grabbing;
     will-change: transform;
@@ -1292,24 +1320,6 @@
   }
   .daily-activity-card.drop-invalid .activity-name {
     color: #fff;
-  }
-
-  /* Rótulo del gesto dentro del fantasma: qué hará el drop al soltar. */
-  .daily-activity-card .drag-hint {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    padding: 2px 8px;
-    font-size: 0.64rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    text-align: center;
-    background: rgba(0, 0, 0, 0.55);
-    color: #fff;
-    pointer-events: none;
-    border-radius: 0 0 8px 8px;
   }
 
   /* Accesibilidad: quien pide menos movimiento no recorre la cascada —

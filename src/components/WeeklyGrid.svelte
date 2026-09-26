@@ -422,6 +422,12 @@
     const card = e.currentTarget as HTMLElement;
     const rect = card.getBoundingClientRect();
     dragOffsetHours = ((e.clientY - rect.top) / rect.height) * (parseTime(activity.endTime) - parseTime(activity.startTime));
+    // Métricas del clon flotante estilo demo: el bloque flotará anclado al
+    // MISMO punto relativo donde se agarró (grabDX/DY) y con su tamaño real.
+    grabDX = e.clientX - rect.left;
+    grabDY = e.clientY - rect.top;
+    grabW = rect.width;
+    grabH = rect.height;
     // El motor arma: mouse por umbral (5px), táctil por long-press (260ms).
     engine.begin(e, { card, activityId: activity.id!, meta: { day: dayIndex } }, dragHooks);
   }
@@ -443,6 +449,16 @@
   let dragGhostHora = $state('');
   /** Mitad activa del pisado (para el resalte verde tipo demo). */
   let zonaPisado = $state<{ id: string; mitad: 'antes' | 'despues' } | null>(null);
+  /** Punto de agarre dentro del bloque (px) y tamaño real: el clon flotante
+   *  se dibuja en el mismo punto relativo al cursor — cero salto al armar
+   *  (patrón .bloque.flotante de la demo). Se capturan en pointerdown. */
+  let grabDX = 0;
+  let grabDY = 0;
+  let grabW = 0;
+  let grabH = 0;
+  /** Actividad y color del fantasma flotante (clon visual del bloque). */
+  const ghostActivity = $derived(activities.find(a => a.id === draggedActivityId) ?? null);
+  const ghostColor = $derived(ghostActivity ? getActivityColor(ghostActivity.categoryId, categories) : '#2d3748');
 
   /**
    * Cascada completa para el commit: TODOS los días de la actividad (incluido
@@ -804,9 +820,7 @@
                     <ListChecks size={10} />
                   </span>
                 {/if}
-              </div>                {#if draggedActivityId === activity.id && dragHint}
-                  <span class="drag-hint" aria-hidden="true">{dragHint}</span>
-                {/if}
+              </div>
                 <div
                   class="resize-handle top"
                   aria-hidden="true"
@@ -825,13 +839,15 @@
   </div>
   </div>
 
-  {#if draggedActivityId !== null && dragGhostXY}
-    <!-- Fantasma flotante estilo demo: sigue al cursor con la hora proyectada
+  {#if draggedActivityId !== null && dragGhostXY && ghostActivity}
+    <!-- Fantasma flotante estilo demo: clon del BLOQUE COMPLETO (tamaño real,
+         color de categoría) anclado al punto de agarre, con la hora proyectada
          y la acción del drop (fixed = no le afectan overflow ni scroll). -->
-    <div class="drag-float" use:portal style="left: {dragGhostXY.x + 14}px; top: {dragGhostXY.y + 14}px" class:invalido={dragInvalid} aria-hidden="true">
-      <span class="df-nombre">{activities.find(a => a.id === draggedActivityId)?.name ?? ''}</span>
+    <div class="drag-float" use:portal class:invalido={dragInvalid} aria-hidden="true"
+      style="left: {dragGhostXY.x - grabDX}px; top: {dragGhostXY.y - grabDY}px; width: {grabW}px; height: {grabH}px; --bg-color: {ghostColor}">
+      <div class="df-title"><span>{ghostActivity.name}</span></div>
       <span class="df-hora">{dragGhostHora}</span>
-      <span class="df-accion">{dragHint}</span>
+      {#if dragHint}<span class="df-accion">{dragHint}</span>{/if}
     </div>
   {/if}
 
@@ -1047,15 +1063,12 @@
     box-sizing: border-box;
     -webkit-user-select: none;
     user-select: none; /* arrastrar >5px no selecciona el texto de la grilla */
-  }  /* El fantasma arrastrado: SIN transición (con top/transform animados la
-     tarjeta original perseguía al cursor con retardo — drag entrecortado y
-     "dirección invertida" percibida) y SIEMPRE encima de los vecinos
-     (z-index mayor que el hover de .activity-item, que es 30). */
+  }  /* Tarjeta ORIGINAL durante el drag: atenuada, sin más (el bloque real
+     vuela bajo el cursor como clon). Sin transición: con top/transform
+     animados la tarjeta perseguía al cursor con retardo (drag entrecortado
+     y "dirección invertida" percibida). */
   .activity-item.drag-ghost {
-    opacity: 0.9;
-    box-shadow: 0 10px 24px rgba(0,0,0,0.3);
-    z-index: 50;
-    transform: scale(0.98);
+    opacity: 0.45;
     transition: none;
   }
 
@@ -1073,24 +1086,6 @@
   .activity-item.drop-invalid {
     background: #e0453a !important;
     color: #fff !important;
-  }
-
-  /* Rótulo del gesto dentro del fantasma: qué hará el drop al soltar. */
-  .activity-item .drag-hint {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    padding: 1px 6px;
-    font-size: 0.6rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    text-align: center;
-    background: rgba(0, 0, 0, 0.55);
-    color: #fff;
-    pointer-events: none;
-    z-index: 2;
   }
 
   /* Accesibilidad: sin deslizamientos para quien pide menos movimiento. */
@@ -1113,35 +1108,50 @@
     top: 2px;
   }
 
-  /* ── Fantasma flotante estilo demo (fixed, sigue al cursor) ── */
+  /* ── Fantasma flotante estilo demo: BLOQUE COMPLETO (fixed, clon del
+     arrastrado con su tamaño real y color de categoría) ── */
   .drag-float {
     position: fixed;
     z-index: 1000;
     pointer-events: none;
     display: flex;
     flex-direction: column;
-    gap: 1px;
-    padding: 6px 10px;
-    border-radius: 8px;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 8px;
+    border-radius: 6px;
     background: var(--bg-color, #2d3748);
-    background: #2d3748;
     color: #fff;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+    box-sizing: border-box;
+    /* Sombra del bloque flotante de la demo: capa de contacto + caída suave
+       y profunda, con la rotación característica del arrastre. */
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18), 0 12px 28px rgba(0, 0, 0, 0.32);
     transform: rotate(-1.5deg);
-    max-width: 200px;
     transition: background 0.15s, box-shadow 0.15s;
   }
   .drag-float.invalido {
-    background: #e0453a;
+    background: #e0453a !important;
     box-shadow: 0 0 0 3px rgba(224, 69, 58, 0.4), 0 12px 28px rgba(0, 0, 0, 0.35);
     animation: shake 0.3s ease;
   }
-  .drag-float .df-nombre {
-    font-size: 0.72rem;
-    font-weight: 800;
-    white-space: nowrap;
+  .drag-float .df-title {
+    font-weight: 700;
+    font-size: 0.78rem;
+    line-height: 1.25;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .drag-float .df-title span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+    white-space: normal;
+    word-break: break-word;
   }
   .drag-float .df-hora {
     font-size: 0.62rem;
