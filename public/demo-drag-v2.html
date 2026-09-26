@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demo · Drag & Drop v2 — Adelantar posiciones</title>
+<style>
+  :root{ --pxh:64px; --borde:#e6e8ec; --texto:#2b2f36; --suave:#8a93a3; --verde:#2f6b2f; --rojo:#e0453a; }
+  *{ box-sizing:border-box }
+  body{ margin:0; font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; color:var(--texto);
+    background:#f7f8fa; background-image:radial-gradient(#e3e6ea 1px,transparent 1px); background-size:22px 22px }
+  body.arrastrando, body.arrastrando *{ cursor:grabbing !important; user-select:none }
+  body.redimensionando, body.redimensionando *{ cursor:ns-resize !important; user-select:none }
+
+  .app{ max-width:1100px; margin:0 auto; padding:18px 14px 40px }
+  header{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:12px }
+  h1{ font-size:19px; margin:0 auto 0 0; color:var(--verde) }
+  .seg{ display:flex; background:#eef0f2; border-radius:10px; padding:3px }
+  .seg button{ border:0; background:transparent; padding:7px 12px; border-radius:8px; font-weight:600;
+    font-size:13px; font-family:inherit; color:var(--suave); cursor:pointer }
+  .seg button.on{ background:#fff; color:var(--verde); box-shadow:0 1px 3px rgba(0,0,0,.1) }
+
+  .card{ background:#fff; border:1px solid var(--borde); border-radius:14px; box-shadow:0 2px 10px rgba(0,0,0,.04); overflow:hidden }
+  .toolbar{ display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--borde); flex-wrap:wrap; min-height:48px }
+  .toolbar strong{ font-size:14px; min-width:150px; text-align:center }
+  .toolbar .nota{ color:var(--suave); font-size:12px }
+  .toolbar button{ border:1px solid var(--borde); background:#fff; border-radius:8px; padding:5px 10px; cursor:pointer;
+    font-weight:600; font-size:12px; font-family:inherit; color:var(--texto) }
+
+  .scroller{ height:calc(100vh - 200px); min-height:420px; overflow:auto; position:relative }
+  .grid{ display:grid; min-width:100% }
+  .head{ position:sticky; top:0; z-index:6; background:#fff; height:40px; border-bottom:1px solid var(--borde);
+    border-left:1px solid var(--borde); display:flex; align-items:center; justify-content:center; gap:6px;
+    font-weight:700; font-size:13px; cursor:pointer }
+  .head:first-child{ border-left:0; cursor:default; left:0; z-index:7 }
+  .head.hoy{ background:#f7f4f1 }
+  .head.hoy span{ color:var(--verde) }
+
+  .horas{ position:relative }
+  .hl{ position:absolute; right:10px; transform:translateY(-50%); font-size:11px; font-weight:700; color:#4a5261; white-space:nowrap }
+  .hl.m{ font-weight:500; color:#b3bac6; font-size:10px }
+
+  .col-body{ position:relative; border-left:1px solid var(--borde); overflow:hidden;
+    background-image:linear-gradient(#e9ecf0 1px,transparent 1px),linear-gradient(#f5f6f8 1px,transparent 1px);
+    background-size:100% var(--pxh),100% calc(var(--pxh) / 2) }
+
+  .bloque{ position:absolute; left:3px; right:3px; border-radius:6px; padding:3px 7px; overflow:hidden; cursor:grab;
+    user-select:none; -webkit-user-select:none; touch-action:manipulation; -webkit-touch-callout:none;
+    display:flex; flex-direction:column; justify-content:center;
+    transition:top .16s ease, height .16s ease, opacity .15s, background .15s }
+  .bloque .t{ font-weight:700; font-size:12px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .bloque .h{ font-size:10px; opacity:.8; margin-top:1px }
+  .bloque.corto{ padding:0 7px }
+  .bloque.corto .h{ display:none }
+
+  .asa{ position:absolute; left:0; right:0; height:7px; cursor:ns-resize; z-index:2 }
+  .asa.top{ top:0 } .asa.bot{ bottom:0 }
+  .asa::after{ content:""; position:absolute; left:50%; width:24px; height:3px; margin-left:-12px; border-radius:2px;
+    background:currentColor; opacity:0; transition:opacity .15s }
+  .asa.top::after{ top:2px } .asa.bot::after{ bottom:2px }
+  .bloque:hover .asa::after{ opacity:.5 }
+
+  .vista-semana .bloque{ background:var(--c); color:#fff }
+  .vista-dia .bloque{ background:#fff; color:var(--texto); border:1px solid #e1e4e8; border-left:4px solid var(--c); padding-left:11px }
+
+  /* Zonas de mitades durante el drag de la propia tarjeta */
+  .bloque.zona-antes::before, .bloque.zona-despues::before{
+    content:""; position:absolute; left:0; right:0; background:rgba(47,107,47,.18); pointer-events:none }
+  .bloque.zona-antes::before{ top:0; height:50% }
+  .bloque.zona-despues::before{ bottom:0; height:50% }
+
+  /* Estados durante el arrastre */
+  .bloque.destino{ opacity:.45; outline:2px dashed #2b2f36; outline-offset:-2px; transition:none }
+  .bloque.destino.invalido{ background:var(--rojo) !important; color:#fff !important; outline-color:var(--rojo) }
+  .bloque.redim{ z-index:5; box-shadow:0 0 0 2px #fff, 0 0 0 4px var(--c) }
+  .bloque.flotante{ position:fixed; right:auto; z-index:60; pointer-events:none; transition:none;
+    box-shadow:0 12px 28px rgba(0,0,0,.25); transform:rotate(-1.5deg); opacity:.95 }
+  .bloque.flotante .h{ display:block !important; opacity:1; font-weight:700 }
+  .bloque.flotante .accion{ font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; margin-top:2px }
+  .bloque.flotante.invalido{ box-shadow:0 0 0 3px var(--rojo), 0 12px 28px rgba(0,0,0,.25) }
+  .bloque.flotante.corto .accion{ display:none }
+
+  .ahora{ position:absolute; left:0; right:0; height:2px; background:var(--rojo); z-index:4; pointer-events:none }
+  .ahora::before{ content:""; position:absolute; left:-4px; top:-4px; width:10px; height:10px; border-radius:50%; background:var(--rojo) }
+
+  .ayuda{ color:var(--suave); font-size:12px; margin:10px 4px 0; line-height:1.7 }
+  .toast{ position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(20px); background:#2b2f36; color:#fff;
+    padding:9px 15px; border-radius:10px; font-size:13px; opacity:0; transition:.25s; pointer-events:none; z-index:100 }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0) }
+  .toast.err{ background:var(--rojo) }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>🧪 Demo · Drag v2</h1>
+    <div class="seg" id="segVista">
+      <button data-v="semana" class="on">Semana</button>
+      <button data-v="dia">Día</button>
+    </div>
+    <button class="seg" id="reset">↺ Reiniciar</button>
+  </header>
+
+  <div class="card">
+    <div class="toolbar" id="toolbar"></div>
+    <div class="scroller" id="scroller"><div class="grid" id="grid"></div></div>
+  </div>
+
+  <p class="ayuda">
+    <b>Mitad superior</b> de un bloque = insertar ANTES (adelanta) · <b>mitad inferior</b> = insertar DESPUÉS ·
+    <b>Espacio vacío</b> = llenar el hueco · <b>Reemplazos prohibidos</b> ·
+    <b>Bordes</b> = estirar (come el hueco real y empuja la cadena) · <b>Esc</b> cancela ·
+    Móvil: mantén pulsado. Sin límites de día acá (6:00–24:00 siempre libres).
+  </p>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ CONFIGURACIÓN ============ */
+const H_INI = 6, H_FIN = 24;
+const PXH = 64, PXM = PXH / 60;
+const SNAP = 15;
+const ZONA = 0.5;                      // 50/50: todo el bloque es antes o después (sin swap)
+const MIN_DIA = H_INI * 60, MAX_DIA = H_FIN * 60;
+const ALTO = (H_FIN - H_INI) * PXH;
+const NOMBRES = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+const COLORES = ['#55854f','#8d6235','#2a3752','#3e9c9a','#6cc28a','#7fb2da','#7b5ea7','#d98a3a'];
+
+/* ============ UTILIDADES ============ */
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2, '0');
+const uid = () => Math.random().toString(36).slice(2, 9);
+const clonar = o => JSON.parse(JSON.stringify(o));
+const snap = m => Math.round(m / SNAP) * SNAP;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const finDe = b => b.inicio + b.duracion;
+const ordenar = arr => [...arr].sort((a, b) => a.inicio - b.inicio);
+const escapar = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function fmt(m){ const h = Math.floor(m/60), mm = m%60; return `${h%12||12}:${pad(mm)} ${h<12||h===24?'AM':'PM'}`; }
+function hoy0(){ const d = new Date(); d.setHours(0,0,0,0); return d; }
+function lunesDe(d){ const x = new Date(d); x.setDate(x.getDate() - (x.getDay()+6)%7); return x; }
+function claveFecha(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+const mismaFecha = (a,b) => claveFecha(a) === claveFecha(b);
+
+/* ============ DATOS ============ */
+function semilla(){
+  const base = [
+    ['Rutina',420,60,0], ['Desayuno',480,30,1], ['Trabajo (b1)',510,90,2], ['Aseo 1',600,15,3],
+    ['Trabajo (b2)',615,60,2], ['Pausa',675,15,4], ['Misa',690,75,5],
+    ['Almuerzo',765,60,7], ['Trabajo (b3)',840,120,2], ['Ejercicio',990,60,6], ['Cena',1170,45,1],
+  ];
+  const plantilla = {};
+  for (let d = 0; d < 7; d++)
+    plantilla[d] = base.map(([titulo, inicio, duracion, c]) => ({ id: uid(), titulo, inicio, duracion, color: COLORES[c] }));
+  return { plantilla, excepciones: {} };
+}
+let data = semilla();
+
+const state = {
+  vista: innerWidth < 700 ? 'dia' : 'semana',
+  alcance: 'dia',
+  lunes: lunesDe(hoy0()),
+  dia: (new Date().getDay() + 6) % 7,
+};
+function fechaDe(i){ const x = new Date(state.lunes); x.setDate(x.getDate() + i); return x; }
+function getBloques(i){
+  if (state.alcance === 'plantilla') return data.plantilla[i];
+  return data.excepciones[claveFecha(fechaDe(i))] || data.plantilla[i];
+}
+function setBloques(i, arr){
+  ordenar(arr);
+  if (state.alcance === 'plantilla') data.plantilla[i] = arr;
+  else data.excepciones[claveFecha(fechaDe(i))] = arr;
+}
+const tieneExcepcion = i => state.alcance === 'dia' && !!data.excepciones[claveFecha(fechaDe(i))];
+
+/* ============ MATEMÁTICA (la misma de src/lib/cascade.ts) ============ */
+
+/** Hueco libre alrededor de `minuto`: [ini, fn). */
+function huecoAlrededor(otros, minuto){
+  const ini = Math.max(MIN_DIA, ...otros.filter(o => finDe(o) <= minuto + 1e-9).map(finDe));
+  const fn = Math.min(MAX_DIA, ...otros.filter(o => o.inicio > minuto + 1e-9).map(o => o.inicio));
+  return [ini, Math.max(ini, fn)];
+}
+
+/**
+ * Reempaqueta el tramo que cambió entre O (orden original con el arrastrado)
+ * y N (nuevo orden): conserva duraciones y el tramo queda COMPACTO (pegado);
+ * el hueco liberado aparece al final del tramo. Fuera del tramo no se mueve
+ * nada. Efecto: adelantar posiciones (igual que src/lib/cascade.ts).
+ */
+function reempaquetar(O, N){
+  let lo = 0; while (lo < O.length && O[lo].id === N[lo].id) lo++;
+  if (lo >= O.length) return;
+  let hi = O.length - 1; while (O[hi].id === N[hi].id) hi--;
+  let t = O[lo].inicio;
+  for (let k = lo; k <= hi; k++){
+    N[k].inicio = t;
+    t += N[k].duracion;
+  }
+}
+
+/** Empuje en cadena hacia abajo desde el índice i (los huecos absorben). */
+function empujarAbajo(arr, i){
+  let cursor = finDe(arr[i]);
+  for (let k = i + 1; k < arr.length; k++){
+    if (arr[k].inicio < cursor - 1e-9) arr[k].inicio = cursor;
+    cursor = Math.max(cursor, finDe(arr[k]));
+  }
+}
+
+const enRango = arr => arr.every(b => b.inicio >= MIN_DIA && finDe(b) <= MAX_DIA);
+
+/**
+ * MOVER: hueco libre llena el hueco; sobre un bloque, mitades = insertar
+ * ANTES/DESPUÉS rotando el tramo. SIN reemplazos: el día conserva sus ids.
+ */
+function calcularMover(diaDest, minuto){
+  const { id, dia, b, orig } = drag;
+  const mismo = diaDest === dia;
+  const base = mismo ? orig : clonar(getBloques(diaDest));
+  // En cross-day la actividad puede YA vivir en el día destino: esa
+  // instancia sale de la lista para no chocar consigo misma.
+  const lista = base.filter(x => x.id !== id).map(x => ({ ...x }));
+  const bb = { ...b };
+  const cambios = {};
+  const j = lista.findIndex(o => minuto >= o.inicio && minuto < finDe(o) - 1e-9);
+
+  if (j === -1){
+    // 1) HUECO LIBRE
+    const [ini, fn] = huecoAlrededor(lista, minuto);
+    const cabe = fn - ini >= bb.duracion - 1e-9;
+    const deseado = snap(minuto - drag.offsetMin);
+    bb.inicio = cabe ? clamp(deseado, ini, fn - bb.duracion) : clamp(deseado, MIN_DIA, MAX_DIA - bb.duracion);
+    cambios[diaDest] = ordenar([...lista.map(o => ({ ...o })), bb]);
+    if (!mismo) cambios[dia] = orig.filter(x => x.id !== id);
+    return { cambios, accion: 'hueco', valido: cabe, bb,
+      texto: cabe ? '' : '⛔ No cabe en este hueco' };
+  }
+
+  // 2) MITADES sobre el pisado (sin zona de swap: 50/50)
+  const o = lista[j];
+  const rel = o.duracion > 0 ? (minuto - o.inicio) / o.duracion : 1;
+  const idx = rel < ZONA ? j : j + 1;
+  const N = lista.map(x => ({ ...x }));
+  N.splice(idx, 0, bb);
+  if (mismo){
+    reempaquetar(orig, N);
+    cambios[diaDest] = ordenar(N);
+  } else {
+    // Cross-day: el arrastrado sale del origen y se ancla pegado al pisado;
+    // el resto del tramo queda CONTIGUO (compactado, sin empujar de más).
+    bb.inicio = rel < ZONA ? o.inicio : finDe(o);
+    let t = bb.inicio;
+    for (let k = idx; k < N.length; k++){ N[k].inicio = t; t += N[k].duracion; }
+    cambios[diaDest] = ordenar(N);
+    cambios[dia] = orig.filter(x => x.id !== id);
+  }
+  const valido = enRango(cambios[diaDest]);
+  return { cambios, accion: 'insertar', valido, bb,
+    texto: valido ? '↕ Insertar aquí' : '⛔ No cabe en el día' };
+}
+
+/** ESTIRAR: come el hueco libre REAL del lado y empuja la cadena. */
+function calcularResize(minuto){
+  const { orig, id, dia, modo } = drag;
+  const N = orig.map(x => ({ ...x })).sort((a, b) => a.inicio - b.inicio);
+  const i = N.findIndex(x => x.id === id), b = N[i];
+  if (modo === 'abajo'){
+    const libre = Math.max(0, MAX_DIA - finDe(b) - N.slice(i+1).reduce((s,x) => s + x.duracion, 0));
+    const E = clamp(snap(minuto), b.inicio + SNAP, finDe(b) + libre);
+    b.duracion = E - b.inicio;
+    empujarAbajo(N, i);
+  } else {
+    const libre = Math.max(0, b.inicio - MIN_DIA - N.slice(0, i).reduce((s,x) => s + x.duracion, 0));
+    const F = finDe(b);
+    const S = clamp(snap(minuto), b.inicio - libre, F - SNAP);
+    b.inicio = S; b.duracion = F - S;
+    let cursor = S;
+    for (let k = i - 1; k >= 0; k--){
+      if (finDe(N[k]) > cursor + 1e-9) N[k].inicio = cursor - N[k].duracion;
+      cursor = Math.min(cursor, N[k].inicio);
+    }
+  }
+  return { cambios: { [dia]: ordenar(N) }, accion: 'redim', valido: true, bb: b, texto: '' };
+}
+
+/* ============ DRAG (Pointer Events) ============ */
+let drag = null;
+
+const grid = $('#grid'), scroller = $('#scroller');
+
+grid.addEventListener('pointerdown', e => {
+  const el = e.target.closest('.col-body .bloque');
+  if (!el || e.button > 0 || drag) return;
+  const dia = +el.dataset.dia;
+  const orig = ordenar(clonar(getBloques(dia)));
+  const b = orig.find(x => x.id === el.dataset.id);
+  const col = el.parentElement;
+  const minPuntero = MIN_DIA + (e.clientY - col.getBoundingClientRect().top) / PXM;
+  const asa = e.target.closest('.asa');
+
+  drag = {
+    el, id: b.id, dia, diaActual: dia, orig, b,
+    modo: asa ? (asa.classList.contains('top') ? 'arriba' : 'abajo') : 'mover',
+    offsetMin: minPuntero - b.inicio,
+    grabX: e.clientX - el.getBoundingClientRect().left,
+    grabY: e.clientY - el.getBoundingClientRect().top,
+    w: el.getBoundingClientRect().width, h: el.getBoundingClientRect().height,
+    x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
+    tactil: e.pointerType === 'touch', activo: false, timer: null, raf: null, flot: null, p: null,
+  };
+  if (drag.tactil) drag.timer = setTimeout(activar, 350);
+});
+
+window.addEventListener('pointermove', e => {
+  if (!drag) return;
+  drag.x = e.clientX; drag.y = e.clientY;
+  if (!drag.activo){
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) <= 6) return;
+    if (drag.tactil){ clearTimeout(drag.timer); drag = null; return; }
+    activar();
+  }
+  actualizar();
+});
+window.addEventListener('pointerup', () => {
+  if (!drag) return;
+  if (drag.activo) aplicar();
+  limpiar();
+});
+window.addEventListener('pointercancel', () => { if (drag) limpiar(); });
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && drag){ limpiar(); toast('Arrastre cancelado'); }
+});
+document.addEventListener('touchmove', e => { if (drag && drag.activo) e.preventDefault(); }, { passive: false });
+grid.addEventListener('contextmenu', e => { if (e.target.closest('.bloque')) e.preventDefault(); });
+
+function activar(){
+  if (!drag) return;
+  drag.activo = true;
+  if (drag.modo === 'mover'){
+    const f = drag.el.cloneNode(true);
+    f.querySelectorAll('.asa').forEach(a => a.remove());
+    f.classList.add('flotante');
+    f.style.width = drag.w + 'px';
+    f.style.height = drag.h + 'px';
+    const acc = document.createElement('div'); acc.className = 'accion'; f.appendChild(acc);
+    grid.appendChild(f);
+    drag.flot = f;
+    drag.el.classList.add('destino');
+    document.body.classList.add('arrastrando');
+  } else {
+    drag.el.classList.add('redim');
+    document.body.classList.add('redimensionando');
+  }
+  if (drag.tactil && navigator.vibrate) navigator.vibrate(15);
+  actualizar();
+  autoScroll();
+}
+
+function actualizar(){
+  const { x, y } = drag;
+  let d = drag.diaActual;
+  if (drag.modo === 'mover'){
+    const cols = [...grid.querySelectorAll('.col-body')];
+    const col = cols.find(c => { const r = c.getBoundingClientRect(); return x >= r.left && x < r.right; });
+    if (col) d = +col.dataset.dia;
+  }
+  drag.diaActual = d;
+  const colEl = grid.querySelector(`.col-body[data-dia="${d}"]`);
+  const minuto = MIN_DIA + (y - colEl.getBoundingClientRect().top) / PXM;
+  const p = drag.modo === 'mover' ? calcularMover(d, minuto) : calcularResize(minuto);
+  drag.p = p;
+  pintar(p);
+
+  if (drag.flot){
+    const f = drag.flot;
+    f.style.left = x - drag.grabX + 'px';
+    f.style.top = y - drag.grabY + 'px';
+    f.querySelector('.h').textContent = `${fmt(p.bb.inicio)} – ${fmt(finDe(p.bb))}`;
+    f.querySelector('.accion').textContent = p.texto;
+    f.classList.toggle('invalido', !p.valido);
+    f.classList.toggle('corto', drag.b.duracion <= 20);
+  }
+  // Resalta la mitad objetivo (antes/después) del bloque pisado
+  grid.querySelectorAll('.bloque').forEach(el => el.classList.remove('zona-antes', 'zona-despues'));
+  if (drag.modo === 'mover' && drag.p.accion === 'insertar' && drag.diaActual === d){
+    const lista = drag.p.cambios[d];
+    const bb = drag.p.bb;
+    const pos = lista.findIndex(x => x.id === drag.id);
+    const vecino = pos > 0 ? lista[pos - 1] : lista[pos + 1]; // el pisado
+    if (vecino){
+      const el = grid.querySelector(`.col-body[data-dia="${d}"] .bloque[data-id="${vecino.id}"]`);
+      // El pisado queda antes del arrastrado → resalto su mitad inferior
+      // (el drop fue "después"); si queda después → mitad superior.
+      if (el) el.classList.add(pos > 0 ? 'zona-despues' : 'zona-antes');
+    }
+  }
+}
+
+function pintar(p){
+  for (const col of grid.querySelectorAll('.col-body')){
+    const d = +col.dataset.dia;
+    for (const x of (p.cambios[d] || getBloques(d))){
+      const el = grid.querySelector(`.col-body .bloque[data-id="${x.id}"]`);
+      if (!el) continue;
+      if (el.parentElement !== col) col.appendChild(el);
+      el.style.top = (x.inicio - MIN_DIA) * PXM + 1 + 'px';
+      el.style.height = x.duracion * PXM - 2 + 'px';
+      el.classList.toggle('corto', x.duracion <= 20);
+      el.querySelector('.h').textContent = `${fmt(x.inicio)} – ${fmt(finDe(x))}`;
+    }
+  }
+  drag.el.classList.toggle('invalido', !p.valido);
+}
+
+function autoScroll(){
+  if (!drag || !drag.activo) return;
+  const r = scroller.getBoundingClientRect(), m = 50, v = 12;
+  let dy = 0, dx = 0;
+  if (drag.y < r.top + 40 + m) dy = -v; else if (drag.y > r.bottom - m) dy = v;
+  if (drag.modo === 'mover'){ if (drag.x < r.left + m) dx = -v; else if (drag.x > r.right - m) dx = v; }
+  if (dy || dx){
+    const t = scroller.scrollTop, l = scroller.scrollLeft;
+    scroller.scrollTop += dy; scroller.scrollLeft += dx;
+    if (t !== scroller.scrollTop || l !== scroller.scrollLeft) actualizar();
+  }
+  drag.raf = requestAnimationFrame(autoScroll);
+}
+
+function aplicar(){
+  const p = drag.p;
+  if (!p) return;
+  if (!p.valido){ toast('⛔ No cabe ahí: el bloque vuelve a su sitio', true); return; }
+  const hayCambio = Object.entries(p.cambios).some(([d, arr]) =>
+    JSON.stringify(ordenar(clonar(arr))) !== JSON.stringify(getBloques(+d)));
+  if (!hayCambio) return;
+  for (const [d, arr] of Object.entries(p.cambios)) setBloques(+d, clonar(arr));
+  const txt = { hueco: 'Movido al hueco', insertar: 'Adelantado/reordenado', redim: 'Duración cambiada' }[p.accion];
+  toast(`${txt} · ${state.alcance === 'plantilla' ? 'en la plantilla' : 'solo para esta fecha'}`);
+}
+
+function limpiar(){
+  if (!drag) return;
+  cancelAnimationFrame(drag.raf);
+  clearTimeout(drag.timer);
+  drag.flot?.remove();
+  drag.el.classList.remove('destino', 'invalido', 'redim');
+  document.body.classList.remove('arrastrando', 'redimensionando');
+  grid.querySelectorAll('.bloque').forEach(el => el.classList.remove('zona-antes', 'zona-despues'));
+  drag = null;
+  render();
+}
+
+/* ============ CREAR / EDITAR ============ */
+grid.addEventListener('dblclick', e => {
+  const el = e.target.closest('.col-body .bloque');
+  const col = e.target.closest('.col-body');
+  if (!col) return;
+  const dia = +col.dataset.dia;
+  const arr = clonar(getBloques(dia));
+  const minuto = MIN_DIA + (e.clientY - col.getBoundingClientRect().top) / PXM;
+  if (el){
+    const b = arr.find(x => x.id === el.dataset.id);
+    const nombre = prompt('Nombre del bloque (vacío = eliminar):', b.titulo);
+    if (nombre === null) return;
+    if (!nombre.trim()) arr.splice(arr.indexOf(b), 1); else b.titulo = nombre.trim();
+    setBloques(dia, arr); render(); toast(nombre.trim() ? 'Renombrado' : 'Eliminado');
+    return;
+  }
+  const [ini, fn] = huecoAlrededor(arr, minuto);
+  const inicio = clamp(Math.floor(minuto / SNAP) * SNAP, ini, fn - SNAP);
+  const duracion = Math.min(60, fn - inicio);
+  if (duracion < SNAP){ toast('No hay hueco suficiente', true); return; }
+  const nombre = prompt(`Nuevo bloque a las ${fmt(inicio)}:`, '');
+  if (!nombre?.trim()) return;
+  arr.push({ id: uid(), titulo: nombre.trim(), inicio, duracion, color: COLORES[Math.floor(Math.random()*COLORES.length)] });
+  setBloques(dia, arr); render(); toast('Bloque creado');
+});
+
+/* ============ RENDER ============ */
+function render(){
+  const semana = state.vista === 'semana';
+  const dias = semana ? [0,1,2,3,4,5,6] : [state.dia];
+  grid.className = 'grid ' + (semana ? 'vista-semana' : 'vista-dia');
+  grid.style.gridTemplateColumns = `64px repeat(${dias.length}, minmax(${semana ? 110 : 220}px, 1fr))`;
+
+  let html = '<div class="head"></div>';
+  for (const d of dias){
+    const f = fechaDe(d);
+    const esHoy = state.alcance === 'dia' && mismaFecha(f, new Date());
+    html += `<div class="head${esHoy ? ' hoy' : ''}" data-dia="${d}"><span>${NOMBRES[d]}</span></div>`;
+  }
+  html += '<div class="horas" style="height:' + ALTO + 'px">';
+  for (let h = H_INI; h < H_FIN; h++){
+    const top = (h - H_INI) * PXH;
+    if (h > H_INI) html += `<div class="hl" style="top:${top}px">${h%12||12}:00<small> ${h<12?'AM':'PM'}</small></div>`;
+    html += `<div class="hl m" style="top:${top + PXH/2}px">${h%12||12}:30</div>`;
+  }
+  html += '</div>';
+
+  const ahora = new Date(), minAhora = ahora.getHours()*60 + ahora.getMinutes();
+  for (const d of dias){
+    html += `<div class="col-body" data-dia="${d}" style="height:${ALTO}px">`;
+    for (const b of getBloques(d)){
+      html += `<div class="bloque${b.duracion <= 20 ? ' corto' : ''}" data-id="${b.id}" data-dia="${d}"
+        style="top:${(b.inicio - MIN_DIA) * PXM + 1}px;height:${b.duracion * PXM - 2}px;--c:${b.color}">
+        <div class="asa top"></div>
+        <div class="t">${escapar(b.titulo)}</div>
+        <div class="h">${fmt(b.inicio)} – ${fmt(finDe(b))}</div>
+        <div class="asa bot"></div>
+      </div>`;
+    }
+    if (state.alcance === 'dia' && mismaFecha(fechaDe(d), ahora) && minAhora >= MIN_DIA && minAhora <= MAX_DIA)
+      html += `<div class="ahora" style="top:${(minAhora - MIN_DIA) * PXM}px"></div>`;
+    html += '</div>';
+  }
+  grid.innerHTML = html;
+  renderToolbar();
+  document.querySelectorAll('#segVista button').forEach(b => b.classList.toggle('on', b.dataset.v === state.vista));
+}
+
+function renderToolbar(){
+  const opts = { day: 'numeric', month: 'short' };
+  let titulo;
+  if (state.vista === 'semana'){
+    titulo = state.alcance === 'plantilla' ? 'Plantilla semanal'
+      : `${fechaDe(0).toLocaleDateString('es', opts)} – ${fechaDe(6).toLocaleDateString('es', opts)}`;
+  } else {
+    titulo = state.alcance === 'plantilla' ? `${NOMBRES[state.dia]} (plantilla)`
+      : `${NOMBRES[state.dia]} ${fechaDe(state.dia).toLocaleDateString('es', opts)}`;
+  }
+  const extra = state.vista === 'dia' && tieneExcepcion(state.dia)
+    ? '<button data-reset>↺ Volver a la plantilla</button>' : '';
+  $('#toolbar').innerHTML = `<button data-nav="-1">‹</button><strong>${titulo}</strong><button data-nav="1">›</button>
+    ${state.alcance === 'dia' ? '<button data-nav="hoy">Hoy</button>' : ''}
+    <span class="nota">⚡ día · 📅 plantilla</span>
+    <button data-alcance="dia" class="${state.alcance === 'dia' ? '' : 'off'}" style="${state.alcance === 'dia' ? 'background:#fff8ec;border-color:#f0d9b5;color:#9a5b12' : ''}">⚡ Día</button>
+    <button data-alcance="plantilla" style="${state.alcance === 'plantilla' ? 'background:#eef6ee;border-color:#cfe3cf;color:var(--verde)' : ''}">📅 Plantilla</button>
+    ${extra}`;
+}
+
+/* ============ CONTROLES ============ */
+$('#segVista').addEventListener('click', e => {
+  const v = e.target.closest('button')?.dataset.v;
+  if (v){ state.vista = v; render(); }
+});
+$('#reset').addEventListener('click', () => { data = semilla(); render(); toast('Demo reiniciada'); });
+$('#toolbar').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  if (btn.dataset.alcance){ state.alcance = btn.dataset.alcance; render(); return; }
+  if (btn.hasAttribute('data-reset')){
+    delete data.excepciones[claveFecha(fechaDe(state.dia))];
+    render(); toast('El día vuelve a la plantilla'); return;
+  }
+  const nav = btn.dataset.nav;
+  if (nav === 'hoy'){ state.lunes = lunesDe(hoy0()); state.dia = (new Date().getDay()+6)%7; }
+  else if (state.vista === 'semana'){ state.lunes.setDate(state.lunes.getDate() + 7 * +nav); }
+  else {
+    state.dia += +nav;
+    if (state.dia < 0){ state.dia = 6; state.lunes.setDate(state.lunes.getDate() - 7); }
+    if (state.dia > 6){ state.dia = 0; state.lunes.setDate(state.lunes.getDate() + 7); }
+  }
+  render();
+});
+grid.addEventListener('click', e => {
+  const h = e.target.closest('.head[data-dia]');
+  if (h && state.vista === 'semana'){ state.vista = 'dia'; state.dia = +h.dataset.dia; render(); }
+});
+
+let toastT;
+function toast(msg, err = false){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.toggle('err', err);
+  t.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+render();
+scroller.scrollTop = (8 - H_INI) * PXH;
+</script>
+</body>
+</html>

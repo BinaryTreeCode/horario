@@ -1,20 +1,36 @@
 <script lang="ts">
-  import { toasts, dismissToast } from '../lib/toast';
+  import { toasts, dismissToast, pauseToast, resumeToast } from '../lib/toast';
   import { CheckCircle2, AlertCircle, Info, X } from '@lucide/svelte';
 
   const icons = { success: CheckCircle2, error: AlertCircle, info: Info };
+
+  function enter(id: number) { pauseToast(id); }
+  function leave() { /* reanuda con 1.5s de gracia */ }
+  function runAction(t: any) { t.action?.run(); dismissToast(t.id); }
 </script>
 
 {#if $toasts.length}
   <div class="toast-container" role="status" aria-live="polite">
     {#each $toasts as t (t.id)}
-      <div class="toast glass-panel toast-{t.type}">
+      <div
+        class="toast glass-panel toast-{t.type}"
+        onmouseenter={() => t.pausable && enter(t.id)}
+        onmouseleave={() => t.pausable && resumeToast(t.id, 1500)}
+        onfocusin={() => t.pausable && enter(t.id)}
+        onfocusout={() => t.pausable && resumeToast(t.id, 1500)}
+      >
         <svelte:component this={icons[t.type]} size={18} class="toast-icon" />
         <span class="toast-msg">{t.message}</span>
+        {#if t.action}
+          <button
+            class="toast-action"
+            onclick={() => runAction(t)}
+          >{t.action.label}</button>
+        {/if}
         <button
           class="toast-close"
           aria-label="Cerrar aviso"
-          on:click={() => dismissToast(t.id)}
+          onclick={() => dismissToast(t.id)}
         ><X size={14} /></button>
       </div>
     {/each}
@@ -68,6 +84,20 @@
     cursor: pointer;
   }
   .toast-close:hover { background: rgba(255, 255, 255, 0.22); }
+  .toast-action {
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.14);
+    color: inherit;
+    font-weight: 700;
+    font-size: 0.8rem;
+    padding: 6px 12px;
+    min-height: 44px;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .toast-action:hover { background: rgba(255, 255, 255, 0.28); }
   @keyframes toast-in {
     from { opacity: 0; transform: translateY(-12px) scale(0.96); }
     to   { opacity: 1; transform: translateY(0) scale(1); }

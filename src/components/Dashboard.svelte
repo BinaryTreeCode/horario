@@ -32,16 +32,17 @@
   }
 
   function onUndoKeydown(e: KeyboardEvent) {
-    if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
+    if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
     // Guards: el modal de actividad ya tiene Ctrl+Z nativo en sus inputs, y
     // deshacer BD por debajo del form abierto sería confuso.
     if (showActivityModal || showSettings || isTextEntryTarget(e.target)) return;
-    if (stackCount === 0) return;
+    const redo = e.shiftKey;
     e.preventDefault();
     // pop del op + ejecución en chunk diferido (undoRun no va al bundle inicial)
-    import('../lib/undoRun').then(({ popAndUndo }) => popAndUndo())
-      .then(label => { if (label) toastOk(`Deshecho: ${label}`); })
-      .catch(err => toastErr('No se pudo deshacer: ' + (err?.message || err)));
+    import('../lib/undoRun')
+      .then(m => (redo ? m.popAndRedo() : m.popAndUndo()))
+      .then(label => { if (label) toastOk(redo ? `Rehecho: ${label}` : `Deshecho: ${label}`); })
+      .catch(err => toastErr('No se pudo ' + (redo ? 'rehacer' : 'deshacer') + ': ' + (err?.message || err)));
   }
 
   $effect(() => {

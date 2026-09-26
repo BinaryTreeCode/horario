@@ -285,6 +285,8 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { pushUndo, cloneAct } from '../lib/undo';
+  import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
+  import { Copy } from '@lucide/svelte';
 
   async function save() {
     try {
@@ -390,6 +392,34 @@
   }
 
   let confirmRemove = $state(false);
+  let confirmDuplicate = $state(false);
+
+  /**
+   * Duplica la actividad como bloque independiente (primer hueco libre).
+   * Antes vivía SOLO en el menú contextual táctil, que se eliminó en F3 del
+   * plan v2 (quiet-hold trababa el arrastre) — ahora el modal es la única vía.
+   */
+  async function duplicate() {
+    if (id === null) return;
+    try {
+      const clone = await duplicateActivityOp(id, {
+        startHour: settings.startHour,
+        endHour: settings.endHour,
+        days: [...daysOfWeek]
+      });
+      if (clone) {
+        toastOk(`Creada "${clone.name}" en el primer hueco libre ✓`);
+        pushUndo({
+          label: `Duplicar ${clone.name}`,
+          rows: [{ before: null, after: cloneAct(clone) }]
+        });
+      } else {
+        toastErr('No hay hueco libre para duplicar');
+      }
+    } catch (error: any) {
+      toastErr('Error al duplicar: ' + (error.message || 'Error desconocido'));
+    }
+  }
 
   function toggleDay(index: number) {
     if (daysOfWeek.includes(index)) {
@@ -630,6 +660,9 @@
 
       <footer class="modal-footer">
         {#if id !== null}
+          <button type="button" class="btn btn-danger" onclick={() => confirmDuplicate = true}>
+            <Copy size={18} /> Duplicar
+          </button>
           <button type="button" class="btn btn-danger" onclick={() => confirmRemove = true}>
             <Trash2 size={18} /> Eliminar
           </button>
@@ -652,6 +685,14 @@
   confirmText="Eliminar"
   danger
   onconfirm={remove}
+/>
+
+<ConfirmDialog
+  bind:open={confirmDuplicate}
+  title="Duplicar actividad"
+  message={`Se creará "${name} (copia)" en el primer hueco libre de sus días (${daysOfWeek.length} día${daysOfWeek.length === 1 ? '' : 's'}).`}
+  confirmText="Duplicar"
+  onconfirm={duplicate}
 />
 
 {#if showImagePreview && previewActivity}

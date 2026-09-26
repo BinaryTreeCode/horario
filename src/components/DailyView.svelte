@@ -109,25 +109,39 @@
   let dragInvalid = $state(false);
   /** Rótulo del gesto dentro del fantasma: qué hará el drop. */
   let dragHint = $state('');
+  /** Mitad activa del pisado (resalte verde tipo demo). */
+  let zonaPisado = $state<{ id: string; mitad: 'antes' | 'despues' } | null>(null);
+  /** Firma del último preview publicado: si no cambió por CONTENIDO, no se
+   *  reasigna dropPreview (las transiciones CSS no se relanzan → cero
+   *  parpadeo). Mismo patrón que la vista Semana. */
+  let firmaPreview = '';
   /**
    * Ancla temporal de la tarjeta recién soltada/estirada: mientras la store
    * re-emite, su layout viene de aquí (slot final) — así la transición CSS
    * la lleva desde el fantasma hasta su slot, sin teletransporte.
    */
   let topOverride = $state<{ id: string; start: number; end: number } | null>(null);
+  /** Pulso verde de confirmación (flash-commit) sobre el bloque recién soltado. */
+  let flashId = $state<string | null>(null);
   type Slot = { id: string; start: number; end: number };
   const toSlotMap = (slots: Slot[]) => new Map(slots.map(s => [s.id, { start: s.start, end: s.end }]));
-  /** Doble rAF: la store re-emite y el navegador pinta antes de soltar el ancla. */
-  const settle2 = (fn: () => void) => requestAnimationFrame(() => requestAnimationFrame(fn));
+  /** Doble rAF con fallback por timeout: la store re-emite y el navegador
+   *  pinta antes de soltar el ancla. En navegadores embebidos el rAF puede
+   *  venir throttled (no corre en absoluto) y el ancla/zona verde quedarían
+   *  pegadas para siempre — el timeout garantiza la limpieza. */
+  const settle2 = (fn: () => void) => {
+    let done = false;
+    const run = () => { if (!done) { done = true; fn(); } };
+    requestAnimationFrame(() => requestAnimationFrame(run));
+    setTimeout(run, 160);
+  };
 
   const engine = createDragEngine({
     ghostClass: 'dragging',
     scrollAxis: 'y',
-    scrollContainer: () => document.querySelector('.daily-container'),
-    quietHold: {
-      ms: 550,
-      onQuiet: (t, x, y) => openContextMenuAt(t.activityId, x, y)
-    }
+    scrollContainer: () => document.querySelector('.daily-container')
+    // quiet-hold (G6) eliminado en F3: el dedo quieto ya no cancela el drag
+    // ni abre menú — era la causa de arrastres "trabados".
   });
 
   const currentMinutes = $derived(now.getHours() * 60 + now.getMinutes());
@@ -339,8 +353,9 @@
     return ((clientY - cardRect.top) / cardRect.height) * durH;
   }
 
-  /** Ancla del gesto de estirado: origen/fin originales + punto de agarre. */
+  /** Ancla del gesto de estirado: lado, origen/fin originales + punto de agarre. */
   interface ResizeMeta {
+    lado: 'arriba' | 'abajo';
     origStart: number;
     origEnd: number;
     startY: number;
@@ -354,17 +369,33 @@
       // El layout (y el preview) leen este id: excluye la tarjeta del
       // clustering mientras es fantasma.
       draggedActivityId = t.activityId;
+      firmaPreview = '';
     },
     onMove(_t, _x, clientY) {
       if (draggedActivityId === null || !engine.active()) return;
-      // Publica el layout predicho: las vecinas se deslizan en vivo vía su
-      // transition CSS de top/height. Inválido → SIN preview (nada se desliza):
-      // la tarjeta va roja y al soltar el bloque vuelve a su sitio.
+      // Layout predicho: las vecinas se deslizan en vivo vía su transition CSS
+      // de top/height. Inválido → SIN preview (nada se desliza): la tarjeta va
+      // roja y al soltar el bloque vuelve a su sitio.
       const res = computeLayoutForDrop(clientY, draggedActivityId);
       if (!res) return;
       dragInvalid = !res.valido;
-      dragHint = !res.valido ? '⛔ No cabe' : res.accion === 'insertar' ? '↕ Insertar aquí' : '↳ Mover al hueco';
-      dropPreview = res.valido ? toSlotMap(res.slots) : null;
+      dragHint = !res.valido ? '⛔ No cabe' : res.accion === 'insertar' ? '↕ Insertar aquí' : '';
+      // Mitad activa del pisado: el vecino ANTES del movido recibió "después".
+      if (res.valido && res.accion === 'insertar') {
+        const pos = res.slots.findIndex(s => s.id === draggedActivityId);
+        const vecino = pos > 0 ? res.slots[pos - 1] : res.slots[pos + 1];
+        zonaPisado = vecino ? { id: vecino.id, mitad: pos > 0 ? 'despues' : 'antes' } : null;
+      } else {
+        zonaPisado = null;
+      }
+      // Anti-parpadeo: solo reasignar dropPreview si el layout cambió por
+      // CONTENIDO (firma). Reasignar un Map idéntico en cada pointermove
+      // relanza las transiciones CSS = parpadeo.
+      const firma = res.valido ? res.slots.map(s => `${s.id}@${s.start}-${s.end}`).join('|') : 'null';
+      if (firma !== firmaPreview) {
+        firmaPreview = firma;
+        dropPreview = res.valido ? toSlotMap(res.slots) : null;
+      }
     },
     async onDrop(t, _x, clientY) {
       const res = computeLayoutForDrop(clientY, t.activityId);
@@ -375,6 +406,8 @@
         dropPreview = null;
         dragInvalid = false;
         dragHint = '';
+        zonaPisado = null;
+        firmaPreview = '';
         return;
       }
       // El preview muere ANTES de limpiar draggedActivityId: las vecinas
@@ -384,12 +417,13 @@
       // transición CSS desde donde estaba el fantasma, sin teletransporte.
       draggedActivityId = t.activityId;
       topOverride = { id: t.activityId, start: res.movido.start, end: res.movido.end };
+      flashId = t.activityId;
       try {
         await commitDropAt(dropPreview);
       } finally {
         // Si la store re-emitio el mismo layout, soltar el ancla es
         // inobservable; si el commit falló, esto devuelve la UI a la BD.
-        settle2(() => { dropPreview = null; topOverride = null; dragInvalid = false; dragHint = ''; });
+        settle2(() => { dropPreview = null; topOverride = null; dragInvalid = false; dragHint = ''; zonaPisado = null; firmaPreview = ''; flashId = null; });
       }
     },
     onCancel() {
@@ -400,6 +434,8 @@
       topOverride = null;
       dragInvalid = false;
       dragHint = '';
+      zonaPisado = null;
+      firmaPreview = '';
     }
   };
 
@@ -454,6 +490,9 @@
   const resizeHooks: DragHooks = {
     onActivate(t) {
       draggedActivityId = t.activityId; // excluye la tarjeta del clustering
+      firmaPreview = '';
+      zonaPisado = null;
+      flashId = null;
     },
     onMove(t, _x, clientY) {
       const res = computeResizePreview(clientY, t.activityId, t.meta as ResizeMeta);
@@ -470,38 +509,47 @@
       } else if (res) {
         toastErr(res.motivo);
       }
-      settle2(() => { dropPreview = null; topOverride = null; dragInvalid = false; });
+      settle2(() => { dropPreview = null; topOverride = null; dragInvalid = false; dragHint = ''; zonaPisado = null; firmaPreview = ''; });
     },
     onCancel() {
       draggedActivityId = null;
       dropPreview = null;
       topOverride = null;
       dragInvalid = false;
+      dragHint = '';
+      zonaPisado = null;
+      firmaPreview = '';
     }
   };
 
-  function startResize(e: PointerEvent, activity: Activity) {
+  function startResize(e: PointerEvent, activity: Activity, lado: 'arriba' | 'abajo') {
     e.stopPropagation(); // no iniciar drag de la tarjeta ni su click
     engine.beginImmediate(
       e,
-      { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { origStart: parseTime(activity.startTime), origEnd: parseTime(activity.endTime), startY: e.clientY } satisfies ResizeMeta },
+      { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { lado, origStart: parseTime(activity.startTime), origEnd: parseTime(activity.endTime), startY: e.clientY } satisfies ResizeMeta },
       resizeHooks,
       { ghost: false }
     );
   }
 
-  /** Slots del día tras estirar hasta clientY (cascada compartida, snap 15min). */
+  /** Slots del día tras estirar hasta clientY (cascada compartida, snap 15min).
+   *  'abajo' conserva el inicio; 'arriba' conserva el fin. */
   function computeResizePreview(clientY: number, actId: string, meta: ResizeMeta) {
     const track = document.querySelector('.activities-track');
     if (!track) return null;
     const rect = track.getBoundingClientRect();
     const deltaH = ((clientY - meta.startY) / rect.height) * totalHours;
-    let newEnd = Math.round((meta.origEnd + deltaH) * 4) / 4;
-    newEnd = Math.max(meta.origStart + 0.25, Math.min(newEnd, endHour)); // mín 15min
     const slots = dayActivities.map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-    // El resize conserva el inicio y empuja en cadena acotado por el hueco
-    // libre REAL del lado (resolveResizeDay): nunca trunca vecinos.
-    return resolveResizeDay(slots, actId, 'abajo', newEnd, startHour, endHour);
+    if (meta.lado === 'abajo') {
+      let newEnd = Math.round((meta.origEnd + deltaH) * 4) / 4;
+      newEnd = Math.max(meta.origStart + 0.25, Math.min(newEnd, endHour)); // mín 15min
+      // El resize conserva el inicio y empuja en cadena acotado por el hueco
+      // libre REAL del lado (resolveResizeDay): nunca trunca vecinos.
+      return resolveResizeDay(slots, actId, 'abajo', newEnd, startHour, endHour);
+    }
+    let newStart = Math.round((meta.origStart + deltaH) * 4) / 4;
+    newStart = Math.max(startHour, Math.min(newStart, meta.origEnd - 0.25));
+    return resolveResizeDay(slots, actId, 'arriba', newStart, startHour, endHour);
   }
 
   /** Aplica el drop: el mapa resuelto del preview ES lo que se guarda
@@ -528,34 +576,52 @@
     newStart = Math.max(startHour, Math.min(newStart, endHour - dur));
     const slots = dayActivities.map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
     // ±15 min es un deseo exacto: pared anclada que empuja lo que pisa.
+    // Si el empuje en cadena desborda el día → ⛔ y NADA se escribe.
     const res = resolveNudgeDay(slots, activity.id!, newStart, startHour, endHour);
+    if (!res.valido) { toastErr('⛔ No cabe en el día'); return; }
     await commitResolved(toSlotMap(res.slots));
   }
 
-  /** Escribe un layout resuelto (id → slot) al override del día visible. */
+  /**
+   * Escribe un layout resuelto (id → slot) al override del día visible.
+   * Fase 1 del plan v2: delega en commitCambios (transacción atómica +
+   * undo/redo de un paso) y muestra el toast con [Deshacer]. El snapshot
+   * del override captura el día completo — nunca toca filas master.
+   */
   async function commitResolved(resolved: Map<string, { start: number; end: number }>) {
     const overrideActs = await ensureOverride();
+    let cambio = false;
     for (const [id, slot] of resolved) {
       const act = overrideActs.find(a => a.id === id);
       if (act) {
-        act.startTime = formatTime(slot.start);
-        act.endTime = formatTime(slot.end);
+        const t0 = formatTime(slot.start);
+        const t1 = formatTime(slot.end);
+        if (act.startTime !== t0 || act.endTime !== t1) {
+          act.startTime = t0;
+          act.endTime = t1;
+          cambio = true;
+        }
       }
     }
-    const stamp = Date.now();
-    const ovBefore = await db.dayOverrides.get(day) ?? null;
-    await db.dayOverrides.put({
-      day,
-      activities: $state.snapshot(overrideActs),
-      updatedAt: stamp
-    });
-    // Undo: el snapshot del override captura el día completo (actividades
-    // incluidas) — commitResolved nunca toca filas master.
-    pushUndo({
-      label: `Mover en ${DAY_NAMES[day]}`,
-      rows: [],
-      overrides: [{ day, before: ovBefore, after: await db.dayOverrides.get(day) ?? null }]
-    });
+    if (!cambio) return;
+    try {
+      const { commitCambios } = await import('../lib/commit');
+      const label = `Mover en ${DAY_NAMES[day]}`;
+      const r = await commitCambios({
+        label,
+        ovs: [{ day, activities: $state.snapshot(overrideActs) as Activity[] }]
+      });
+      if (r.overrides.length > 0) toastUndo(label, undoLast);
+    } catch (err: any) {
+      toastErr('No se pudo mover: ' + (err?.message || err));
+    }
+  }
+
+  /** Deshace el último paso (acción del toast [Deshacer]). */
+  function undoLast() {
+    import('../lib/undoRun').then(m => m.popAndUndo())
+      .then(l => { if (l) toastOk(`Deshecho: ${l}`); })
+      .catch(e => toastErr('No se pudo deshacer: ' + (e?.message || e)));
   }
 
   // Context Menu logic
@@ -576,7 +642,8 @@
   }
 
   /** Abre el menú contextual con clamp para que no se salga de la ventana.
-   *  Común al click derecho (G5) y al long-press táctil quieto (G6). */
+   *  Solo mouse (click derecho); el long-press táctil quieto (G6) se eliminó
+   *  en F3 del plan v2. */
   function openContextMenuAt(activityId: string, x: number, y: number) {
     const MENU_W = 220;
     const MENU_H = 130;
@@ -763,6 +830,9 @@
           class="daily-activity-card glass-panel"
           class:is-short={activity.durationMins <= 20}
           class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
+          class:zona-antes={zonaPisado?.id === activity.id && zonaPisado.mitad === 'antes'}
+          class:zona-despues={zonaPisado?.id === activity.id && zonaPisado.mitad === 'despues'}
+          class:flash-commit={flashId === activity.id}
           role="button"
           tabindex="0"
           aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{totalSteps ? `, ${doneSteps} de ${totalSteps} pasos` : ''}. Arrastrar o tocar para editar"
@@ -815,9 +885,14 @@
             <div class="drag-hint" aria-hidden="true">{dragHint}</div>
           {/if}
           <div
+            class="resize-handle top"
+            aria-hidden="true"
+            onpointerdown={(e) => startResize(e, activity, 'arriba')}
+          ></div>
+          <div
             class="resize-handle"
             aria-hidden="true"
-            onpointerdown={(e) => startResize(e, activity)}
+            onpointerdown={(e) => startResize(e, activity, 'abajo')}
           ></div>
         </div>
       {/each}
@@ -1131,6 +1206,58 @@
     opacity: 1;
   }
 
+  /* Asa superior: espejo de la inferior (resize bidireccional). */
+  .resize-handle.top {
+    top: 0;
+    bottom: auto;
+    align-items: flex-start;
+  }
+  .resize-handle.top::after {
+    order: -1;
+  }
+
+  /* Mitad activa del pisado durante el insert (verde, como el demo). */
+  .daily-activity-card.zona-antes::before,
+  .daily-activity-card.zona-despues::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    background: rgba(47, 107, 47, 0.22);
+    pointer-events: none;
+    z-index: 3;
+  }
+  .daily-activity-card.zona-antes::before { top: 0; height: 50%; }
+  .daily-activity-card.zona-despues::before { bottom: 0; height: 50%; }
+
+  /* Flash de commit: el bloque recién soltado confirma con un pulso verde. */
+  .daily-activity-card.flash-commit {
+    animation: flash-commit 0.5s ease-out;
+  }
+  @keyframes flash-commit {
+    0% { box-shadow: 0 0 0 3px rgba(47, 107, 47, 0.55); }
+    100% { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05); }
+  }
+
+  /* Micro-shake del fantasma inválido (respeta reduced-motion vía el bloque
+     general de abajo). */
+  .daily-activity-card.drop-invalid {
+    animation: shake-x 0.3s ease;
+  }
+  @keyframes shake-x {
+    0%, 100% { margin-left: 0; }
+    25% { margin-left: -3px; }
+    75% { margin-left: 3px; }
+  }
+
+  /* En pleno drag se inhibe el hover (sin scale/translate ni overflow visible):
+     era la causa de los ticks y sacudidas al agarrar. */
+  .daily-activity-card.dragging:hover {
+    transform: none;
+    overflow: hidden;
+    background: white;
+  }
+
   /* Entrada escalonada al cambiar de día: se re-monta el track ({#key day})
      y nth-child reparte los delays — cero JS, cero bytes en el chunk. */
   .daily-activity-card {
@@ -1188,6 +1315,8 @@
   @media (prefers-reduced-motion: reduce) {
     .daily-activity-card,
     .daily-activity-card.dragging,
+    .daily-activity-card.drop-invalid,
+    .daily-activity-card.flash-commit,
     .resize-handle::after {
       transition: none !important;
       animation: none !important;

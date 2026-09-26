@@ -44,11 +44,11 @@ export interface DragEngineOptions {
   scrollAxis?: 'x' | 'y';
   scrollContainer?: () => HTMLElement | null;
   /**
-   * Patrón iOS (G6): dedo TÁCTIL quieto `ms` desde el pointerdown → el drag
-   * se cancela limpio y `onQuiet` abre el menú contextual. Si el dedo se
-   * alejó en algún momento más de TOUCH_CANCEL_PX, es drag, no menú.
-   * Requiere `ms > LONG_PRESS_MS` (solo actúa sobre un drag ya armado).
-   * Solo táctil: el mouse ya tiene click derecho.
+   * Patrón iOS (G6, ELIMINADO en F3 del plan v2): antes, dedo TÁCTIL quieto
+   * `ms` desde el pointerdown cancelaba el drag y abría el menú contextual.
+   * Trababa el arrastre (el dedo se detiene un instante y pierde el gesto).
+   * El menú táctil desapareció: click derecho sigue abriéndolo (mouse).
+   * Opción conservada por compatibilidad; las vistas ya NO la pasan.
    */
   quietHold?: { ms: number; onQuiet: (t: DragTarget, x: number, y: number) => void };
 }
@@ -81,7 +81,10 @@ interface Gesture {
 
 const THRESHOLD_PX = 5;      // mouse: distancia para armar
 const TOUCH_CANCEL_PX = 10;  // táctil: movimiento pre-armado = scroll
-const LONG_PRESS_MS = 260;
+/** Umbral de mitades: el táctil arma el drag tras mantener quieto este tiempo.
+ *  400ms = plan v2 (F3): más margen que 260ms, SIN quiet-hold (menú táctil
+ *  eliminado — "Duplicar" vive en el modal de edición). */
+const LONG_PRESS_MS = 400;
 const EDGE_ZONE = 56;        // franja activa de auto-scroll
 const EDGE_SPEED = 12;       // px por frame
 

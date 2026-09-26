@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly } from './cascade';
+import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeDay, capacidadResizeWeekly } from './cascade';
 import type { Activity } from './types';
 
 const codec = {
@@ -58,31 +58,30 @@ describe('resolveDayCascade — hueco libre', () => {
 });
 
 describe('resolveDayCascade — mitades: insertar ANTES/DESPUÉS (adelantamiento)', () => {
-  test('dedo en la mitad SUPERIOR del pisado → inserta ANTES (rotación del tramo)', () => {
+  test('dedo en la mitad SUPERIOR del pisado → inserta ANTES (tramo compactado)', () => {
     // x (15-16, al final del día) suelta con el dedo a las 8.2 (mitad superior
-    // de b 8-9) → x ADELANTA al tope: x 8-9, b 9-10 y r toma el slot viejo
-    // de x (15-16) — el hueco 10-15 queda intacto entre b y r.
+    // de b 8-9) → x ADELANTA al tope y el tramo queda COMPACTO: x 8-9,
+    // b 9-10, r 10-11; el hueco liberado (11-16) queda al final.
     const slots = [s('b', 8, 9), s('r', 9, 10), s('x', 15, 16)];
     const p = resolveDayCascade(slots, s('x', 15, 16), 8.2, false, 7, 22);
     expect(p.valido).toBe(true);
     expect(p.accion).toBe('insertar');
     expect(byId(p.slots).get('x')).toEqual(s('x', 8, 9));
     expect(byId(p.slots).get('b')).toEqual(s('b', 9, 10));
-    expect(byId(p.slots).get('r')).toEqual(s('r', 15, 16));
+    expect(byId(p.slots).get('r')).toEqual(s('r', 10, 11));
   });
 
-  test('dedo en la mitad INFERIOR del pisado → inserta DESPUÉS (retroceso)', () => {
+  test('dedo en la mitad INFERIOR del pisado → inserta DESPUÉS (retroceso compacto)', () => {
     // x (8-9, primero del día) suelta con dedo 11.8 (mitad inferior de r
-    // 11-12) → x retrocede al final del tramo: b sube a 8-9, r a 9-10, el
-    // hueco 10-11 queda entre r y x, y x cierra el tramo en 11-12 (span
-    // original 8-12 conservado).
+    // 11-12) → x retrocede al final del tramo COMPACTADO: b 8-9, r 9-10 y
+    // x 10-11 — el hueco 10-11 se CIERRA y el liberado (11-12) queda al final.
     const slots = [s('x', 8, 9), s('b', 9, 10), s('r', 11, 12)];
     const p = resolveDayCascade(slots, s('x', 8, 9), 11.8, false, 7, 22);
     expect(p.valido).toBe(true);
     const m = byId(p.slots);
     expect(m.get('b')).toEqual(s('b', 8, 9));
     expect(m.get('r')).toEqual(s('r', 9, 10));
-    expect(m.get('x')).toEqual(s('x', 11, 12));
+    expect(m.get('x')).toEqual(s('x', 10, 11));
   });
 
   test('SIN REEMPLAZOS: el día conserva exactamente los mismos ids', () => {
@@ -92,10 +91,10 @@ describe('resolveDayCascade — mitades: insertar ANTES/DESPUÉS (adelantamiento
     expect(ids).toEqual(['a', 'b', 'x']);
   });
 
-  test('adelantamiento en el medio: los intermedios rotan y los huecos externos quedan', () => {
+  test('adelantamiento en el medio: el tramo se compacta y lo externo queda intacto', () => {
     // Orden: a 7-8, b 8-9, c 9-10, hueco 10-12, d 12-13. x=c suelta sobre b
-    // (dedo 8.2, mitad superior) → orden a, c, b, d: c 8-9, b 9-10 (rotación
-    // del tramo), d INTACTO (fuera del tramo) y el hueco 10-12 se conserva.
+    // (dedo 8.2, mitad superior) → orden a, c, b, d: c 8-9, b 9-10 y d
+    // INTACTO (fuera del tramo) — el hueco liberado 10-13 queda entre b y d.
     const slots = [s('a', 7, 8), s('b', 8, 9), s('c', 9, 10), s('d', 12, 13)];
     const p = resolveDayCascade(slots, s('c', 9, 10), 8.2, false, 7, 22);
     expect(p.valido).toBe(true);
@@ -119,28 +118,28 @@ describe('resolveDayCascade — mitades: insertar ANTES/DESPUÉS (adelantamiento
     expect(m.get('x')).toEqual(s('x', 9, 10));
   });
 
-  test('insertar ANTES con hueco intermedio: el hueco se conserva tras la rotación', () => {
+  test('insertar ANTES con hueco intermedio: la compactación cierra el hueco del tramo', () => {
     // a 11-12, r 12-13, LIBRE 13-15, x 15-16. x suelta mitad superior de r
-    // (12.2) → orden a, x, r: x 12-13, el hueco 13-15 queda entre x y r,
-    // y r aterriza en 15-16 (el slot que dejó x). El tramo permuta dentro
-    // de su propio rango: nada desborda el día.
+    // (12.2) → orden a, x, r: el tramo (x, r) se compacta desde 12 → x 12-13,
+    // r 13-14; a intacto y el hueco liberado (14-16) al final. La compactación
+    // nunca extiende el span → nada desborda el día.
     const slots = [s('a', 11, 12), s('r', 12, 13), s('x', 15, 16)];
     const p = resolveDayCascade(slots, s('x', 15, 16), 12.2, false, 7, 22);
     expect(p.valido).toBe(true);
     const m = byId(p.slots);
     expect(m.get('a')).toEqual(s('a', 11, 12));
     expect(m.get('x')).toEqual(s('x', 12, 13));
-    expect(m.get('r')).toEqual(s('r', 15, 16));
+    expect(m.get('r')).toEqual(s('r', 13, 14));
   });
 
-  test('la rotación NUNCA desborda el día: permuta dentro del rango del tramo', () => {
-    // x (15-16) inserta ANTES de r (7-8, al límite del día): x toma el 7-8
-    // de r y r el 15-16 de x. El span total 7-16 se conserva → siempre válido.
+  test('la compactación NUNCA desborda el día: solo contrae el span', () => {
+    // x (15-16) inserta ANTES de r (7-8, al límite del día): el tramo se
+    // compacta desde 7 → x 7-8, r 8-9 (span encogido, jamás extendido).
     const slots = [s('r', 7, 8), s('x', 15, 16)];
     const p = resolveDayCascade(slots, s('x', 15, 16), 7.2, false, 7, 22);
     expect(p.valido).toBe(true);
     expect(byId(p.slots).get('x')).toEqual(s('x', 7, 8));
-    expect(byId(p.slots).get('r')).toEqual(s('r', 15, 16));
+    expect(byId(p.slots).get('r')).toEqual(s('r', 8, 9));
   });
 });
 
@@ -157,15 +156,15 @@ describe('resolveDayCascade — entre columnas (crossInto)', () => {
     expect(m.get('r')).toEqual(s('r', 10, 11));
   });
 
-  test('mitad inferior: ancla al fin del pisado; el hueco absorbe el empuje', () => {
+  test('mitad inferior: ancla al fin del pisado y el resto queda CONTIGUO (compactado)', () => {
     // Destino: b 8-9, r 9-10, hueco 10-12, d 12-13. x (1h) dedo 9.8 →
-    // x 10-11, d intacto (el hueco absorbe).
+    // x 10-11 y d se compacta pegado: 11-12 (el hueco se cierra).
     const slots = [s('b', 8, 9), s('r', 9, 10), s('d', 12, 13)];
     const p = resolveDayCascade(slots, s('x', 10, 11), 9.8, true, 7, 22);
     expect(p.valido).toBe(true);
     const m = byId(p.slots);
     expect(m.get('x')).toEqual(s('x', 10, 11));
-    expect(m.get('d')).toEqual(s('d', 12, 13));
+    expect(m.get('d')).toEqual(s('d', 11, 12));
   });
 
   test('cadena que desborda el día → inválido (⛔)', () => {
@@ -282,10 +281,10 @@ describe('propagateWeekly — cierre transitivo', () => {
     expect(res.times.get('z')!.start).toBe(9);
   });
 
-  test('ex-C3: el empuje de un vecino no puede pisar en otro de SUS días', () => {
-    // n vive lunes y martes (9-10); w martes 9-10; m lunes 8-9 se mueve a 8:30
-    // pisando a n en lunes → n debería empujarse a 9:30, pero en martes
-    // chocaría con w → rechazado: n queda solapado en lunes (9-10 original).
+  test('choque en otro día → EMPUJE EN CADENA (semántica demo, sin rechazo)', () => {
+    // n vive lunes y martes (9-10); w martes 9-10; m lunes 8-9 se mueve a
+    // 8:30 → el preview adelanta a n (9:30-10:30). n actúa como PARED: el
+    // martes empuja a w a 10-11 (sin rechazo — el choque se CIERRA).
     const acts = [
       act('m', '08:00', '09:00', [0]),
       act('n', '09:00', '10:00', [0, 1]),
@@ -295,10 +294,30 @@ describe('propagateWeekly — cierre transitivo', () => {
       day: 0,
       slots: [s('m', 8.5, 9.5), s('n', 9.5, 10.5)]
     });
-    // El slot exacto del preview pisa a n en martes (n debe 9:30-10:30 →
-    // w 9-10 pisa) → n rechazado y por extensión el día cae a la pared.
-    expect(res.times.get('n')!.start).toBe(9);
-    expect(res.times.get('w')!.start).toBe(9);
+    expect(res.valido).toBe(true);
+    expect(res.times.get('n')!.start).toBe(9.5);
+    // Martes: n (pared 9.5-10.5) empuja a w → 10.5-11.5.
+    expect(res.times.get('w')!.start).toBe(10.5);
+  });
+
+  test('cadena multi-día que desborda el rango de un día → rechazo con nombre del día', () => {
+    // Día 7-22. n vive lunes y martes (9-10); martes además p 10-21 y q
+    // 21-22 (día lleno hasta el borde). m lunes 8-9 se mueve a 8:30 → n
+    // adelanta a 9:30-10:30 y su pared martes empuja p → q → 21:30-22:30:
+    // desborda el límite (22) → ⛔ con el nombre del día.
+    const acts = [
+      act('m', '08:00', '09:00', [0]),
+      act('n', '09:00', '10:00', [0, 1]),
+      act('p', '10:00', '21:00', [1]),
+      act('q', '21:00', '22:00', [1])
+    ];
+    const res = propagateWeekly(acts, 'm', 8.5, 22, codec, [0], undefined, 7, false, {
+      day: 0,
+      slots: [s('m', 8.5, 9.5), s('n', 9.5, 10.5)]
+    });
+    expect(res.valido).toBe(false);
+    expect(res.motivo).toContain('Martes');
+    expect(res.times.size).toBe(0);
   });
 
   test('resize multi-día: la pared conserva el inicio y usa la nueva duración', () => {
@@ -311,14 +330,136 @@ describe('propagateWeekly — cierre transitivo', () => {
     expect(res.times.get('z')!.start).toBe(11);
   });
 
-  test('drag entre columnas: mineDays del destino incluye el día nuevo', () => {
+  test('resize hacia ARRIBA: lo pisado sube en cadena (no traspasa la pared)', () => {
+    // x 9-12 (pared anclada por su FIN en 12); w 10-11 pisa → sube a 8-9.
+    const acts = [
+      act('x', '09:00', '10:00', [1]),
+      act('w', '10:00', '11:00', [1])
+    ];
+    const res = propagateWeekly(acts, 'x', 9, 22, codec, [1], 3, 0, true, undefined, 'arriba');
+    expect(res.valido).toBe(true);
+    expect(res.times.get('x')).toEqual(s('x', 9, 12));
+    // w conservó su 1h y quedó CONTIGUO arriba de la pared: nunca 10-11 pisando.
+    expect(res.times.get('w')).toEqual(s('w', 8, 9));
+  });
+
+  test('resize hacia ARRIBA: si la cadena sube del inicio del día → rechazo completo', () => {
+    // Día 7-23. x 7:30-9:30 estira arriba a 7-9:30 (2.5h): w 8-8:30 no tiene
+    // lugar (necesitaría 6:30-7) → candado del límite: nada se escribe.
+    const acts = [
+      act('x', '07:30', '09:30', [1]),
+      act('w', '08:00', '08:30', [1])
+    ];
+    const res = propagateWeekly(acts, 'x', 7, 23, codec, [1], 2.5, 7, true, undefined, 'arriba');
+    expect(res.valido).toBe(false);
+    expect(res.times.size).toBe(0);
+  });
+
+  test('ENCOGER siempre está permitido, incluso en un día ya desbordado (daily)', () => {
+    // Día 7-23. La BD vino envenenada: x 22:45-23:15 cruza el límite. Encoger
+    // a 22:45-23:00 (o menos) DEBE funcionar: libera espacio, no agranda nada.
+    const slots = [s('x', 22.75, 23.25)];
+    const res = resolveResizeDay(slots, 'x', 'abajo', 23, 7, 23);
+    expect(res.valido).toBe(true);
+    expect(res.movido).toEqual(s('x', 22.75, 23));
+  });
+
+  test('ENCOGER semanal siempre está permitido aunque otro día quede desbordado', () => {
+    // Lunes OK (x 9-10 solo ahí encoge); Martes venía desbordado (z cruza 22).
+    // El encogimiento de x no agranda el desborde de z → permitido.
+    const acts = [
+      act('x', '20:00', '22:00', [0, 1]),
+      act('z', '22:00', '22:30', [1])
+    ];
+    const res = propagateWeekly(acts, 'x', 20, 23, codec, [0, 1], 1, 7, true, undefined, 'abajo');
+    expect(res.valido).toBe(true);
+    expect(res.times.get('x')).toEqual(s('x', 20, 21));
+    // z (no tocado) conserva su horario cruzado — se arregla a mano.
+    expect(res.times.get('z')).toEqual(s('z', 22, 22.5));
+  });
+
+  test('drag entre columnas: el preview compacta al pisado y el commit lo siembra exacto', () => {
     const acts = [
       act('x', '09:00', '10:00', [0]),
       act('k', '09:30', '10:30', [4])
     ];
-    const res = propagateWeekly(acts, 'x', 10, 22, codec, [4]);
+    // Viernes: x llega 10-11 y k (pisado, compactado) queda contiguo 11-12.
+    const res = propagateWeekly(acts, 'x', 10, 22, codec, [4], undefined, 0, false, {
+      day: 4,
+      slots: [s('x', 10, 11), s('k', 11, 12)]
+    });
+    expect(res.valido).toBe(true);
     expect(res.times.get('x')!.start).toBe(10);
-    // k (9:30-10:30) pisa la pared 10-11 → empujado a 11-12.
-    expect(res.times.get('k')!.start).toBe(11);
+    expect(res.times.get('k')).toEqual(s('k', 11, 12));
+  });
+
+  test('drag entre columnas sin preview: si el slot pisa en el destino → empuja en cadena', () => {
+    const acts = [
+      act('x', '09:00', '10:00', [0]),
+      act('k', '09:30', '10:30', [4])
+    ];
+    // x anclado 10-11 pisa a k (9:30-10:30) en viernes → k empujado a 11-12.
+    const res = propagateWeekly(acts, 'x', 10, 22, codec, [4]);
+    expect(res.valido).toBe(true);
+    expect(res.times.get('x')).toEqual(s('x', 10, 11));
+    expect(res.times.get('k')).toEqual(s('k', 11, 12));
+  });
+});
+
+describe('capacidadResizeDay/Weekly — estirar SIEMPRE topa (nunca rechaza)', () => {
+  const s = (id: string, start: number, end: number) => ({ id, start, end });
+  const act = (id: string, start: string, end: string, days: number[]): Activity => ({
+    id, name: id, categoryId: 'c', startTime: start, endTime: end, daysOfWeek: days,
+    updatedAt: 0
+  });
+  test('capacidad = crecer empujando la cadena hasta el borde del día', () => {
+    // e 9-10, r 13-14, día 7-22. La cadena corre a r (1h) hasta el borde:
+    // e puede crecer 22h - 1h(r) - 10h = 660min → e 10-21, r 21-22.
+    const slots = [s('e', 9, 10), s('r', 13, 14)];
+    expect(capacidadResizeDay(slots, 'e', 'abajo', 7, 22)).toBe(660);
+  });
+
+  test('capacidad con dos vecinos: la suma de sus duraciones come el margen', () => {
+    // e 9-10, r 13-14, c 14-15, día 7-16: 16h - 10h - 1h(r) - 1h(c) = 4h = 240min.
+    const slots = [s('e', 9, 10), s('r', 13, 14), s('c', 14, 15)];
+    expect(capacidadResizeDay(slots, 'e', 'abajo', 7, 16)).toBe(240);
+  });
+
+  test('capacidad hacia arriba: hueco libre + cadena hasta el inicio del día', () => {
+    // r 9-10, e 13-14, día 7-22: e sube hasta 8:30 → 780-420-60 = 300min.
+    const slots = [s('r', 9, 10), s('e', 13, 14)];
+    expect(capacidadResizeDay(slots, 'e', 'arriba', 7, 22)).toBe(300);
+  });
+
+  test('capacidad 0 cuando la cadena ya llega al borde (día lleno)', () => {
+    // Día 9-11 con e 9-10 y r 10-11: no hay margen → 0 en ambos lados.
+    const slots = [s('e', 9, 10), s('r', 10, 11)];
+    expect(capacidadResizeDay(slots, 'e', 'abajo', 9, 11)).toBe(0);
+    expect(capacidadResizeDay(slots, 'r', 'arriba', 9, 11)).toBe(0);
+  });
+
+  test('capacidad semanal = MÍNIMO entre los días de la actividad', () => {
+    // Lunes: e 9-10 con 1 vecino → 660. Martes: 2 vecinos (120min) → 600.
+    // El estirar global se acota por el día más apretado → 600.
+    const acts = [
+      act('e', '09:00', '10:00', [0, 1]),
+      act('r', '13:00', '14:00', [0]),
+      act('w', '10:00', '11:00', [1]),
+      act('v', '11:00', '12:00', [1])
+    ];
+    const cap = capacidadResizeWeekly(acts, 'e', 'abajo', codec, 7, 22);
+    expect(cap).toBe(600);
+  });
+
+  test('estirar acotado por capacidad → resolveResizeDay siempre válido (sin ⛔)', () => {
+    // Día 7-22, e 9-10, r 13-14, c 14-15: deseo 21h (más allá del tope de
+    // 20h) → acotado a 9-20 (capacidad 600min) → válido, r/c corridos al borde.
+    const slots = [s('e', 9, 10), s('r', 13, 14), s('c', 14, 15)];
+    const cap = capacidadResizeDay(slots, 'e', 'abajo', 7, 22); // 600
+    expect(cap).toBe(600);
+    const tope = 10 + cap / 60; // 20
+    const res = resolveResizeDay(slots, 'e', 'abajo', Math.min(21, tope), 7, 22);
+    expect(res.valido).toBe(true);
+    expect(res.movido).toEqual(s('e', 9, 20));
   });
 });

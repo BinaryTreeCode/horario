@@ -2,14 +2,21 @@
   import { onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types';
   import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
-  import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly } from '../lib/cascade';
+  import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeWeekly } from '../lib/cascade';
+  import type { WeeklyResolution } from '../lib/cascade';
   import { db } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import { Copy, Trash2, ListChecks, ImageIcon } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { toastOk, toastErr } from '../lib/toast';
-  import { pushUndo, cloneAct } from '../lib/undo';
+  import { toastOk, toastErr, toastUndo } from '../lib/toast';
+  import { cloneAct } from '../lib/undo';
+  /** Deshace el último paso (acción del toast [Deshacer]). */
+  function undoLast() {
+    import('../lib/undoRun').then(m => m.popAndUndo())
+      .then(l => { if (l) toastOk(`Deshecho: ${l}`); })
+      .catch(e => toastErr('No se pudo deshacer: ' + (e?.message || e)));
+  }
   import { portal } from '../lib/portal';
   import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
 
@@ -25,13 +32,16 @@
   let { activities, categories, settings, dayOverrides = [], onSelectDay, onEditActivity }: Props = $props();
 
   // ── Drag & Drop: la mecánica vive en src/lib/dragEngine.ts (dueño único,
-  // compartida con la vista Día). El quiet-hold táctil de 550ms (G6: iOS no
-  // dispara contextmenu) abre el menú: dedo quieto = menú, mover = drag.
+  // compartida con la vista Día). El quiet-hold táctil (G6) se ELIMINÓ (F3
+  // del plan v2): el dedo quieto ya no cancela el drag — era la causa de
+  // arrastres "trabados". El menú contextual queda solo para mouse (click
+  // derecho); "Duplicar" vive en el modal de edición.
   // (La supresión del click sintético post-drag vive en el motor.)
 
   function openContextMenu(activityId: string, x: number, y: number) {
-    // Clamp para que el menú no se salga de la ventana
-    // (MENU_H: 2-3 items × 44px + padding — con 130 el menú quedaba fuera en landscape)
+    // Solo mouse (click derecho). Clamp para que el menú no se salga de la
+    // ventana (MENU_H: 2 items × 44px + padding — con 130 quedaba fuera en
+    // landscape; ya no cuenta "Duplicar", que vive en el modal).
     const MENU_W = 220;
     const MENU_H = 160;
     const cx = Math.min(x, window.innerWidth - MENU_W - 8);
@@ -45,11 +55,7 @@
     // El scroller real del eje x es el CONTENEDOR (.grid-scroll es flex,
     // overflow visible): el auto-scroll de bordes necesita el que tiene
     // overflow-x:auto.
-    scrollContainer: () => document.querySelector('.weekly-grid-container'),
-    quietHold: {
-      ms: 550,
-      onQuiet: (t, x, y) => openContextMenu(t.activityId, x, y)
-    }
+    scrollContainer: () => document.querySelector('.weekly-grid-container')
   });
 
   onDestroy(() => engine.destroy());
@@ -215,7 +221,21 @@
   let draggedActivityId = $state<string | null>(null);
   let dragSourceDay = $state<number | null>(null);
   let dragOffsetHours = 0;
-  let lastPreviewKey = -1;
+  /** Última mitad elegida por pisado: histéresis ±10% — cruzar el centro no
+   *  alterna antes/después hasta alejarse del umbral (mata la vibración). */
+  let mitadActual = new Map<string, 'antes' | 'despues'>();
+  /** Firma del último preview publicado: si no cambió por CONTENIDO, no se
+   *  reasigna (las transiciones CSS no se relanzan → cero parpadeo). */
+  let firmaPreview = '';
+
+  /** Histéresis del umbral de mitades: ZONA 0.5 con banda muerta ±0.1. */
+  function decidirMitad(pisadoId: string, rel: number): 'antes' | 'despues' {
+    const previa = mitadActual.get(pisadoId) ?? 'antes';
+    const zona = previa === 'antes' ? 0.5 + 0.1 : 0.5 - 0.1;
+    const nueva = rel < zona ? 'antes' : 'despues';
+    mitadActual.set(pisadoId, nueva);
+    return nueva;
+  }
 
   /** Columna + grid bajo el puntero (null = fuera de la grilla). */
   function dropTargetAt(x: number, y: number): { day: number; grid: HTMLElement } | null {
@@ -239,40 +259,17 @@
     onActivate(t) {
       draggedActivityId = t.activityId;
       dragSourceDay = (t.meta as { day: number }).day;
+      mitadActual.clear();
+      firmaPreview = '';
     },
-    onMove(_t, x, y) {
+    onMove(t, x, y) {
+      // Sincrónico a propósito: la protección anti-jitter NO es el throttle
+      // (los rAF pueden venir throttled) sino la doble barrera determinista
+      // de publicarPreview: histéresis en la mitad + firma por contenido que
+      // evita reescribir el layout si el resultado no cambió.
+      dragGhostXY = { x, y };
       if (draggedActivityId === null) return;
-      const activity = activities.find(a => a.id === draggedActivityId);
-      if (!activity) return;
-      const target = dropTargetAt(x, y);
-      if (!target) return;
-      const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
-      // Hora CRUDA del dedo en la columna destino (sin snap ni offset):
-      // decide hueco vs mitades (antes/después) y el snap va en el ancla.
-      const rect = target.grid.getBoundingClientRect();
-      const fingerHour = startHour + (y - rect.top) / (slotHeightPx * slotsPerHour);
-      const start = Math.round((startHour + (y - rect.top) / (slotHeightPx * slotsPerHour) - dragOffsetHours) * 4) / 4;
-      const snapped = Math.max(startHour, Math.min(start, endHour - duration));
-      const key = target.day * 400 + start * 4; // recalcula solo al cambiar de slot
-      if (key === lastPreviewKey) return;
-      lastPreviewKey = key;
-      // Misma matemática que el commit: la columna destino ya incluye al
-      // arrastrado si vive allí (crossInto=false) o no (rotación vs cadena).
-      const targetSlots = activities
-        .filter(a => a.daysOfWeek.includes(target.day))
-        .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-      const crossInto = !activity.daysOfWeek.includes(target.day);
-      const res = resolveDayCascade(
-        targetSlots,
-        { id: activity.id!, start: snapped, end: snapped + duration },
-        fingerHour,
-        crossInto,
-        startHour,
-        endHour
-      );
-      dragInvalid = !res.valido;
-      dragHint = !res.valido ? '⛔ No cabe' : res.accion === 'insertar' ? '↕ Insertar aquí' : '↳ Mover al hueco';
-      dropPreview = res.valido ? { day: target.day, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) } : null;
+      actualizarPreview(x, y);
     },
     async onDrop(t, x, y) {
       const sourceDay = (t.meta as { day: number }).day;
@@ -305,8 +302,17 @@
           clearDragPreview();
           return;
         }
+        // ── Cascada completa con RECHAZO multi-día: si el movimiento choca
+        // en otro día, NO se escribe nada y el bloque vuelve (antes la
+        // "pared" empujaba ajenos sin permiso).
         dragSourceDay = sourceDay;
-        const cascada = computeFullCascade(t.activityId, day, newStart, res);
+        const cascada = computeFullCascade(t.activityId, day, res.movido.start, res);
+        if (!cascada.valido) {
+          toastErr(cascada.motivo);
+          clearDragPreview();
+          return;
+        }
+        dropPreview = { day, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
         let newDays = [...activity.daysOfWeek];
         const idx = newDays.indexOf(sourceDay);
         if (idx !== -1) {
@@ -315,9 +321,14 @@
           newDays.push(day);
         }
         newDays = [...new Set(newDays)].sort((a, b) => a - b);
-        // M1: una sola transacción — un fallo a mitad no deja escrituras parciales.
-        await commitWeeklyTimes(cascada, `Mover ${activity.name} a ${days[day]}`, { id: t.activityId, days: newDays });
-        clearDragPreview();
+        // Asentado suave: el dropPreview ya posiciona la tarjeta en su slot
+        // final; el commit corre debajo y el doble rAF suelta el ancla sin
+        // salto (igual que la vista Día).
+        try {
+          await commitWeeklyTimes(cascada.times, `Mover ${activity.name} a ${days[day]}`, { id: t.activityId, days: newDays });
+        } finally {
+          settle2(() => clearDragPreview());
+        }
         return;
       }
       // Soltar FUERA de la grilla = cancelar (el bloque vuelve a su sitio):
@@ -327,14 +338,85 @@
     onCancel() {
       // C2: soltar fuera de la grilla, Esc o cancel — sin reset la tarjeta
       // queda con opacidad y fuera del layout hasta el próximo arrastre.
-      draggedActivityId = null;
-      dragSourceDay = null;
-      dropPreview = null;
-      lastPreviewKey = -1;
-      dragInvalid = false;
-      dragHint = '';
+      clearDragPreview();
     }
   };
+
+  /** Doble rAF: la store re-emite y el navegador pinta antes de soltar el ancla. */
+  /** Doble rAF con fallback por timeout: ver settle2 de la vista Día
+   *  (rAF throttled en navegadores embebidos → la limpieza nunca correría). */
+  const settle2 = (fn: () => void) => {
+    let done = false;
+    const run = () => { if (!done) { done = true; fn(); } };
+    requestAnimationFrame(() => requestAnimationFrame(run));
+    setTimeout(run, 160);
+  };
+
+  /**
+   * Recalcula el preview del drop (throttled por rAF desde onMove). Hora
+   * CRUDA del dedo decide hueco vs mitades; histéresis en el umbral; el
+   * resultado solo se publica si difiere por CONTENIDO del anterior.
+   */
+  function actualizarPreview(x: number, y: number) {
+    if (draggedActivityId === null) return;
+    const activity = activities.find(a => a.id === draggedActivityId);
+    if (!activity) return;
+    const target = dropTargetAt(x, y);
+    if (!target) {
+      publicarPreview(null, null, false, '');
+      return;
+    }
+    const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
+    const rect = target.grid.getBoundingClientRect();
+    const fingerHour = startHour + (y - rect.top) / (slotHeightPx * slotsPerHour);
+    const start = Math.round((startHour + (y - rect.top) / (slotHeightPx * slotsPerHour) - dragOffsetHours) * 4) / 4;
+    const snapped = Math.max(startHour, Math.min(start, endHour - duration));
+    const targetSlots = activities
+      .filter(a => a.daysOfWeek.includes(target.day))
+      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
+    const crossInto = !activity.daysOfWeek.includes(target.day);
+    const res = resolveDayCascade(
+      targetSlots,
+      { id: activity.id!, start: snapped, end: snapped + duration },
+      fingerHour,
+      crossInto,
+      startHour,
+      endHour
+    );
+    publicarPreview(
+      target.day,
+      res.valido ? res.slots : null,
+      !res.valido,
+      !res.valido ? '⛔ No cabe' : res.accion === 'insertar' ? '↕ Insertar aquí' : ''
+    );
+  }
+
+  /** Publica el preview solo si el contenido cambió (anti-parpadeo). */
+  function publicarPreview(day: number | null, slots: { id: string; start: number; end: number }[] | null, invalido: boolean, hint: string) {
+    const firma = slots ? `${day}:${slots.map(s => `${s.id}@${s.start}-${s.end}`).join('|')}` : 'null';
+    if (draggedActivityId !== null) {
+      const mio = slots?.find(s => s.id === draggedActivityId);
+      if (mio) dragGhostHora = `${format12h(formatTime(mio.start))} – ${format12h(formatTime(mio.end))}`;
+      // Mitad activa del pisado: el vecino ANTES del arrastrado recibió el
+      // drop "después" (mitad inferior); si queda después → mitad superior.
+      if (hint.startsWith('↕') && mio && slots) {
+        const pos = slots.findIndex(s => s.id === draggedActivityId);
+        const vecino = pos > 0 ? slots[pos - 1] : slots[pos + 1];
+        zonaPisado = vecino ? { id: vecino.id, mitad: pos > 0 ? 'despues' : 'antes' } : null;
+      } else {
+        zonaPisado = null;
+      }
+    }
+    if (firma === firmaPreview) {
+      dragInvalid = invalido; // el texto puede cambiar sin cambiar el layout
+      dragHint = hint;
+      return;
+    }
+    firmaPreview = firma;
+    dragInvalid = invalido;
+    dragHint = hint;
+    dropPreview = slots ? { day: day!, slots: new Map(slots.map(s => [s.id, { start: s.start, end: s.end }])) } : null;
+  }
 
   function handleItemPointerDown(e: PointerEvent, activity: Activity, dayIndex: number) {
     const card = e.currentTarget as HTMLElement;
@@ -355,102 +437,95 @@
   let dragInvalid = $state(false);
   /** Rótulo del gesto dentro del fantasma: qué hará el drop. */
   let dragHint = $state('');
+  /** Posición del cursor para el fantasma flotante (null = sin drag). */
+  let dragGhostXY = $state<{ x: number; y: number } | null>(null);
+  /** Hora proyectada del fantasma: el slot final del arrastrado en el preview. */
+  let dragGhostHora = $state('');
+  /** Mitad activa del pisado (para el resalte verde tipo demo). */
+  let zonaPisado = $state<{ id: string; mitad: 'antes' | 'despues' } | null>(null);
 
   /**
-   * Preview del drop en un día: usa la cascada multi-día (src/lib/cascade.ts).
-   * Lo que se ve es lo que se guarda — el preview de la columna destino es
-   * exactamente el mapa que persistirá dragHooks.onDrop. (inline en onMove)
-   */
-  /**
    * Cascada completa para el commit: TODOS los días de la actividad (incluido
-   * el destino si el drag cruza columnas). La arrastrada queda ANCLADA al slot
-   * que el usuario vio (pin) y la propagación corre hasta estabilizar, para
-   * que ningún día herede solapes no resueltos — la causa de la corrupción.
-   * Devuelve los horarios GLOBALES finales (una fila = un horario).
+   * el destino si el drag cruza columnas). Devuelve la resolución COMPLETA:
+   * si el movimiento choca en otro día (o algún día desborda) → valido=false
+   * y NO se escribe nada (el bloque vuelve). Es la regla del usuario: mover
+   * jamás empuja fuera del día del drop.
    */
   function computeFullCascade(
     actId: string,
     targetDay: number,
     anchorStart: number,
     resDestino?: { slots: { id: string; start: number; end: number }[] }
-  ): Map<string, { start: number; end: number }> {
+  ): WeeklyResolution {
     const activity = activities.find(a => a.id === actId);
-    if (!activity) return new Map();
+    if (!activity) return { byDay: new Map(), times: new Map(), valido: false, motivo: '⛔ Actividad no encontrada' };
     const origDays = activity.daysOfWeek;
     const finalDays = dragSourceDay !== null && origDays.includes(dragSourceDay)
       ? [...origDays.filter(d => d !== dragSourceDay), targetDay]
       : [...origDays];
     // Con resDestino el día del drop se siembra EXACTO (lo que se vio);
-    // los demás días tratan al arrastrado como pared anclada al ancla.
+    // los demás días se validan contra el slot anclado (sin empujar a nadie).
     return propagateWeekly(
       activities, actId, anchorStart, endHour, CODEC, [...new Set(finalDays)],
       undefined, 0, false,
       resDestino ? { day: targetDay, slots: resDestino.slots } : undefined
-    ).times;
+    );
   }
 
 
 
-  // M6 (WCAG 2.5.7): mover sin puntero. Reusa la cascada del drop: la
-  // actividad ancla en ±15 min y las vecinas se resuelven en TODOS sus días.
-  // Misma transacción y reset de estado que dragHooks.onDrop.
+  // M6 (WCAG 2.5.7): mover sin puntero. ±15 min es un deseo EXACTO: la
+  // actividad ancla como pared y empuja en cadena en TODOS sus días (el
+  // teclado no tiene dedo ni mitades). Si algún día desborda → ⛔ y nada
+  // se escribe.
   async function nudgeWeekly(activity: Activity, deltaH: number) {
     if (draggedActivityId !== null) return;
     const dur = parseTime(activity.endTime) - parseTime(activity.startTime);
     let newStart = Math.round((parseTime(activity.startTime) + deltaH) * 4) / 4;
     newStart = Math.max(startHour, Math.min(newStart, endHour - dur));
-    // ±15 min es un deseo exacto: pared anclada que empuja en cadena en TODOS
-    // los días de la actividad (sin mitades).
     const times = new Map<string, { start: number; end: number }>();
+    let invalido = false;
     for (const d of activity.daysOfWeek) {
       const daySlots = activities
         .filter(a => a.daysOfWeek.includes(d))
         .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-      for (const s of resolveNudgeDay(daySlots, activity.id!, newStart, startHour, endHour).slots) {
+      const res = resolveNudgeDay(daySlots, activity.id!, newStart, startHour, endHour);
+      if (!res.valido) invalido = true;
+      for (const s of res.slots) {
         times.set(s.id, { start: s.start, end: s.end });
       }
     }
+    if (invalido) { toastErr('⛔ No cabe en el día'); return; }
     await commitWeeklyTimes(times, `${activity.name} → ${format12h(formatTime(newStart))}`);
   }
 
   /**
-   * Único punto de escritura de horarios globales (drop, teclado y resize lo
-   * reusan): escribe en transacción las filas cuyo slot cambió y registra el
-   * undo (los snapshots "antes" se toman de la store, que aún es el estado
-   * previo). Devuelve el label del undo o null si nada cambió.
+   * Punto de escritura de horarios globales (drop, teclado y resize lo
+   * reusan): delega en commitCambios (transacción atómica + undo/redo de un
+   * paso, fase 1 del plan v2) y muestra el toast con [Deshacer].
    */
   async function commitWeeklyTimes(
     times: Map<string, { start: number; end: number }>,
     label: string,
     daysChange?: { id: string; days: number[] }
   ): Promise<string | null> {
-    const stamp = Date.now();
-    const updates: Promise<unknown>[] = [];
-    const rows: { before: Activity; after: Activity }[] = [];
+    const acts: Activity[] = [];
     for (const [id, slot] of times) {
       const before = activities.find(a => a.id === id);
       if (!before) continue;
       const t0 = formatTime(slot.start);
       const t1 = formatTime(slot.end);
       const days = daysChange?.id === id ? daysChange.days : before.daysOfWeek;
-      // Comparación por CONTENIDO (no por referencia): un daysChange con días
-      // idénticos no debe escribir una fila no-op (churn de updatedAt → ruido
-      // en el sync LWW).
-      const daysChanged = days.join(',') !== before.daysOfWeek.join(',');
-      if (t0 !== before.startTime || t1 !== before.endTime || daysChanged) {
-        rows.push({
-          before: cloneAct(before),
-          after: { ...cloneAct(before), startTime: t0, endTime: t1, daysOfWeek: days, updatedAt: stamp }
-        });
-        updates.push(db.activities.put(rows[rows.length - 1].after));
+      // Comparación por CONTENIDO: no escribir filas no-op (churn de updatedAt → ruido en el sync LWW).
+      if (t0 !== before.startTime || t1 !== before.endTime || days.join(',') !== before.daysOfWeek.join(',')) {
+        acts.push({ ...cloneAct(before), startTime: t0, endTime: t1, daysOfWeek: days });
       }
     }
-    if (updates.length === 0) return null;
+    if (acts.length === 0) return null;
     try {
-      await db.transaction('rw', db.activities, async () => {
-        await Promise.all(updates);
-      });
-      pushUndo({ label, rows });
+      const { commitCambios } = await import('../lib/commit');
+      const r = await commitCambios({ label, acts });
+      if (r.rows.length > 0) toastUndo(label, undoLast);
       return label;
     } catch {
       toastErr('No se pudo mover');
@@ -464,16 +539,23 @@
     draggedActivityId = null;
     dragSourceDay = null;
     dropPreview = null;
-    lastPreviewKey = -1;
     dragInvalid = false;
     dragHint = '';
+    dragGhostXY = null;
+    dragGhostHora = '';
+    zonaPisado = null;
+    firmaPreview = '';
+    mitadActual.clear();
   }
 
-  // ── Resize (estirar borde inferior) en la grilla semanal ─────────────
+  // ── Resize bidireccional (estirar arriba/abajo) en la grilla semanal ──
   // Mismo motor, gesto inmediato y sin fantasma. Semántica acordada: la
-  // duración cambia en TODOS los días (global); keepPlace conserva el inicio.
+  // duración cambia en TODOS los días (global); keepPlace conserva el lado
+  // fijo ('abajo' conserva inicio, 'arriba' conserva fin). Único gesto que
+  // empuja en cadena — con candado: si un día desborda → ⛔ y nada se escribe.
   interface WeekResizeMeta {
     day: number;
+    lado: 'arriba' | 'abajo';
     origStart: number;
     origEnd: number;
     startY: number;
@@ -500,13 +582,21 @@
       dragHint = '';
       if (!calc) { dropPreview = null; return; }
       if (!calc.valido) { toastErr('⛔ No cabe en el día'); dropPreview = null; return; }
-      // Commit global: la duración viene del PUNTERO (newEnd), no del mapa
-      // resuelto — el reacomodo de cascada no debe redefinir el estirado.
+      // Commit global: el borde del PUNTERO manda. Con lado 'arriba' el fin
+      // queda fijo (ancla = nuevo inicio) y la nueva duración viaja a todos
+      // los días; el rechazo multi-día del candado protege el límite.
       const act = activities.find(a => a.id === t.activityId);
-      const times = propagateWeekly(activities, t.activityId, m.origStart, endHour, CODEC, act?.daysOfWeek ?? [], calc.newEnd - m.origStart, 0, true).times;
-      await commitWeeklyTimes(times, `Estirar ${act?.name ?? 'actividad'}`);
+      const nuevaDur = m.lado === 'abajo'
+        ? calc.newEnd! - m.origStart
+        : m.origEnd - calc.newStart!;
+      const ancla = m.lado === 'abajo' ? m.origStart : calc.newStart!;
+      // Lado del estirar: 'arriba' ancla el FIN y lo pisado sube en cadena
+      // (igual que el preview de resolveResizeDay) — antes el commit
+      // re-derivaba con pared anclada al inicio y los vecinos traspasaban.
+      const sem = propagateWeekly(activities, t.activityId, ancla, endHour, CODEC, act?.daysOfWeek ?? [], nuevaDur, 0, true, undefined, m.lado);
+      if (!sem.valido) { toastErr(sem.motivo); dropPreview = null; return; }
+      await commitWeeklyTimes(sem.times, `Estirar ${act?.name ?? 'actividad'}`);
       dropPreview = null;
-      lastPreviewKey = -1;
     },
     onCancel() {
       draggedActivityId = null;
@@ -516,12 +606,12 @@
     }
   };
 
-  function startResize(e: PointerEvent, activity: Activity, dayIndex: number) {
+  function startResize(e: PointerEvent, activity: Activity, dayIndex: number, lado: 'arriba' | 'abajo') {
     e.stopPropagation(); // no disparar long-press/click/drag del ítem
     e.preventDefault();
     engine.beginImmediate(
       e,
-      { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { day: dayIndex, origStart: parseTime(activity.startTime), origEnd: parseTime(activity.endTime), startY: e.clientY } satisfies WeekResizeMeta },
+      { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { day: dayIndex, lado, origStart: parseTime(activity.startTime), origEnd: parseTime(activity.endTime), startY: e.clientY } satisfies WeekResizeMeta },
       weekResizeHooks,
       { ghost: false }
     );
@@ -529,22 +619,44 @@
 
   /**
    * Cálculo COMPARTIDO por preview y commit del resize (una sola matemática):
-   * newEnd desde el puntero (snap 15min, clamp) y el mapa resuelto con
-   * keepPlace=true — al estirar, el INICIO queda anclado: la cascada empuja
-   * hacia abajo, nunca reacomoda la tarjeta que se estira.
+   * el borde del puntero (snap 15min, clamp) y el mapa resuelto. 'abajo'
+   * conserva el inicio (cascada empuja hacia abajo); 'arriba' conserva el fin
+   * (cascada empuja hacia arriba). Nunca reacomoda la tarjeta que se estira.
    */
-  function computeWeekResize(clientY: number, actId: string, m: WeekResizeMeta) {
+  function computeWeekResize(
+    clientY: number,
+    actId: string,
+    m: WeekResizeMeta
+  ): { lado: 'arriba' | 'abajo'; newEnd?: number; newStart?: number; valido: boolean; slots: Map<string, { start: number; end: number }> } | null {
     const col = document.querySelectorAll('.day-column .slots-grid')[m.day];
     if (!col) return null;
     const deltaSlots = (clientY - m.startY) / slotHeightPx;
-    let newEnd = Math.round((m.origEnd + deltaSlots / slotsPerHour) * 4) / 4;
-    newEnd = Math.max(m.origStart + 0.25, Math.min(newEnd, endHour));
-    // Hueco libre real del lado + cadena, acotado al día (sin truncar vecinos).
     const daySlots = activities
       .filter(a => a.daysOfWeek.includes(m.day))
       .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-    const res = resolveResizeDay(daySlots, actId, 'abajo', newEnd, startHour, endHour);
-    return { newEnd, valido: res.valido, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
+    if (m.lado === 'abajo') {
+      let newEnd = Math.round((m.origEnd + deltaSlots / slotsPerHour) * 4) / 4;
+      // Regla del usuario: estirar SIEMPRE topa, nunca se rechaza. El deseo
+      // del puntero se acota por la capacidad GLOBAL (mínima entre los días
+      // de la actividad): la duración viaja a todos sus días, así el commit
+      // jamás desborda → sin candado ni ⛔ (el encoger no se acota).
+      if (newEnd > m.origEnd) {
+        const capMin = capacidadResizeWeekly(activities, actId, 'abajo', CODEC, startHour, endHour);
+        newEnd = Math.min(newEnd, m.origEnd + capMin / 60);
+      }
+      newEnd = Math.max(m.origStart + 0.25, Math.min(newEnd, endHour));
+      const res = resolveResizeDay(daySlots, actId, 'abajo', newEnd, startHour, endHour);
+      return { lado: m.lado, newEnd, valido: res.valido, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
+    }
+    let newStart = Math.round((m.origStart + deltaSlots / slotsPerHour) * 4) / 4;
+    // Espejo hacia arriba: acotar por la capacidad global antes de resolver.
+    if (newStart < m.origStart) {
+      const capMin = capacidadResizeWeekly(activities, actId, 'arriba', CODEC, startHour, endHour);
+      newStart = Math.max(newStart, m.origStart - capMin / 60);
+    }
+    newStart = Math.max(startHour, Math.min(newStart, m.origEnd - 0.25));
+    const res = resolveResizeDay(daySlots, actId, 'arriba', newStart, startHour, endHour);
+    return { lado: m.lado, newStart, valido: res.valido, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
   }
 
   // Context Menu logic
@@ -638,7 +750,7 @@
   <div class="days-columns">
     {#each days as day, i}
       {@const dayData = getDayActivitiesWithLayout(i, dropPreview?.day === i ? dropPreview.slots : undefined, draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i) ? draggedActivityId : null)}
-      <div class="day-column">
+      <div class="day-column" class:col-dragging={draggedActivityId !== null}>
         <button class="day-header" onclick={() => onSelectDay(i)} aria-label="Ver {day} en vista de día">
           <span class="day-name">{day}</span>
           {#if dayOverrides.some(o => o.day === i && o.activities?.length >= 0)}
@@ -655,6 +767,8 @@
               class:short={numSlots <= 1}
               class:drag-ghost={draggedActivityId === activity.id}
               class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
+              class:zona-antes={zonaPisado?.id === activity.id && zonaPisado.mitad === 'antes'}
+              class:zona-despues={zonaPisado?.id === activity.id && zonaPisado.mitad === 'despues'}
               onpointerdown={(e) => handleItemPointerDown(e, activity, i)}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
               style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
@@ -692,9 +806,14 @@
                   <span class="drag-hint" aria-hidden="true">{dragHint}</span>
                 {/if}
                 <div
+                  class="resize-handle top"
+                  aria-hidden="true"
+                  onpointerdown={(e) => startResize(e, activity, i, 'arriba')}
+                ></div>
+                <div
                   class="resize-handle"
                   aria-hidden="true"
-                  onpointerdown={(e) => startResize(e, activity, i)}
+                  onpointerdown={(e) => startResize(e, activity, i, 'abajo')}
                 ></div>
             </button>
           {/each}
@@ -703,6 +822,16 @@
     {/each}
   </div>
   </div>
+
+  {#if draggedActivityId !== null && dragGhostXY}
+    <!-- Fantasma flotante estilo demo: sigue al cursor con la hora proyectada
+         y la acción del drop (fixed = no le afectan overflow ni scroll). -->
+    <div class="drag-float" use:portal style="left: {dragGhostXY.x + 14}px; top: {dragGhostXY.y + 14}px" class:invalido={dragInvalid} aria-hidden="true">
+      <span class="df-nombre">{activities.find(a => a.id === draggedActivityId)?.name ?? ''}</span>
+      <span class="df-hora">{dragGhostHora}</span>
+      <span class="df-accion">{dragHint}</span>
+    </div>
+  {/if}
 
   {#if contextMenu.show}
     <!-- Portal a body: backdrop-filter de .glass-panel ancestro crea containing block y rompe el position:fixed -->
@@ -916,16 +1045,26 @@
     box-sizing: border-box;
     -webkit-user-select: none;
     user-select: none; /* arrastrar >5px no selecciona el texto de la grilla */
+  }  /* El fantasma arrastrado: SIN transición (con top/transform animados la
+     tarjeta original perseguía al cursor con retardo — drag entrecortado y
+     "dirección invertida" percibida) y SIEMPRE encima de los vecinos
+     (z-index mayor que el hover de .activity-item, que es 30). */
+  .activity-item.drag-ghost {
+    opacity: 0.9;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.3);
+    z-index: 50;
+    transform: scale(0.98);
+    transition: none;
   }
 
-  /* El fantasma arrastrado: sin transición de top (el HTML5 DnD no mueve la
-     tarjeta, solo la imagen del cursor) pero elevado, semi-transparente y
-     con una presión sutil (98%) — feedback de agarre minimalista. */
-  .activity-item.drag-ghost {
-    opacity: 0.55;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
-    z-index: 40;
-    transform: scale(0.98);
+  /* En pleno drag los vecinos no compiten: sin hover (scale/outline/z-index)
+     ni focus ring — el plano superior es SOLO del arrastrado. */
+  .col-dragging .activity-item:hover,
+  .col-dragging .activity-item:focus-visible {
+    transform: none;
+    outline: none;
+    z-index: auto;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
   }
 
   /* Drop inválido: no cabe — rojo y al soltar el bloque vuelve. */
@@ -955,10 +1094,89 @@
   /* Accesibilidad: sin deslizamientos para quien pide menos movimiento. */
   @media (prefers-reduced-motion: reduce) {
     .activity-item,
-    .activity-item.drag-ghost {
+    .activity-item.drag-ghost,
+    .drag-float {
       transition: none !important;
       animation: none !important;
     }
+  }
+
+  /* ── Resize bidireccional: asa superior (espejo de la inferior) ── */
+  .resize-handle.top {
+    top: 0;
+    bottom: auto;
+  }
+  .resize-handle.top::after {
+    bottom: auto;
+    top: 2px;
+  }
+
+  /* ── Fantasma flotante estilo demo (fixed, sigue al cursor) ── */
+  .drag-float {
+    position: fixed;
+    z-index: 1000;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--bg-color, #2d3748);
+    background: #2d3748;
+    color: #fff;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+    transform: rotate(-1.5deg);
+    max-width: 200px;
+    transition: background 0.15s, box-shadow 0.15s;
+  }
+  .drag-float.invalido {
+    background: #e0453a;
+    box-shadow: 0 0 0 3px rgba(224, 69, 58, 0.4), 0 12px 28px rgba(0, 0, 0, 0.35);
+    animation: shake 0.3s ease;
+  }
+  .drag-float .df-nombre {
+    font-size: 0.72rem;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .drag-float .df-hora {
+    font-size: 0.62rem;
+    font-weight: 700;
+    opacity: 0.92;
+  }
+  .drag-float .df-accion {
+    font-size: 0.56rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.85;
+  }
+  @keyframes shake {
+    0%, 100% { margin-left: 0; }
+    25% { margin-left: -3px; }
+    75% { margin-left: 3px; }
+  }
+
+  /* Mitad activa del pisado durante el insert (verde, como el demo). */
+  .activity-item.zona-antes::before,
+  .activity-item.zona-despues::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    background: rgba(47, 107, 47, 0.28);
+    pointer-events: none;
+    z-index: 3;
+  }
+  .activity-item.zona-antes::before { top: 0; height: 50%; }
+  .activity-item.zona-despues::before { bottom: 0; height: 50%; }
+
+  /* Inhibir el hover en pleno drag: sin scale/translate ni re-layout
+     (causa de ticks y sacudidas al agarrar). */
+  .activity-item:active.drag-ghost {
+    transform: scale(0.98);
   }
   .activity-item:hover,
   .activity-item:focus-visible {

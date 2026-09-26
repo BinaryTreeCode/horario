@@ -34,6 +34,8 @@ export interface UndoOp {
 const MAX = 20;
 
 export const undoStack = writable<UndoOp[]>([]);
+/** Pasos ya deshechos, listos para rehacer (se vacía con cada nueva op). */
+export const redoStack = writable<UndoOp[]>([]);
 
 /** Clon plano (structured clone no clona Proxies de $state). */
 export function cloneAct(a: Activity): Activity {
@@ -42,8 +44,10 @@ export function cloneAct(a: Activity): Activity {
 
 export function pushUndo(op: UndoOp) {
   undoStack.update(s => [...s.slice(-(MAX - 1)), op]);
+  redoStack.set([]); // una operación nueva invalida el hilo de rehacer
 }
 
 export function clearUndo() {
   undoStack.set([]);
+  redoStack.set([]);
 }
