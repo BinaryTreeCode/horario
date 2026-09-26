@@ -109,6 +109,17 @@
   let dragInvalid = $state(false);
   /** Rótulo del gesto dentro del fantasma: qué hará el drop. */
   let dragHint = $state('');
+  /** Ventana de la entrada escalonada: SOLO al cambiar de día (el {#key day}
+   *  re-monta las tarjetas). Sin esta gate, alternar animation via la clase
+   *  track-dragging reinicia fadeIn en cada drop/cancel = flash de entrada
+   *  en toda la columna (cambiar animation-name relanza la animación). */
+  let entradaDia = $state(false);
+  $effect(() => {
+    void day; // dependencia: re-corre en cada cambio de día
+    entradaDia = true;
+    const t = setTimeout(() => { entradaDia = false; }, 600); // cubre delays hasta 100ms + 250ms de fadeIn
+    return () => clearTimeout(t);
+  });
   /** Firma del último preview publicado: si no cambió por CONTENIDO, no se
    *  reasigna dropPreview (las transiciones CSS no se relanzan → cero
    *  parpadeo). Mismo patrón que la vista Semana. */
@@ -805,7 +816,7 @@
       {/each}
     </div>
 
-    <div class="activities-track" class:track-dragging={draggedActivityId !== null} onclick={handleTrackTap} role="presentation">
+    <div class="activities-track" class:track-dragging={draggedActivityId !== null} class:track-entrada={entradaDia} onclick={handleTrackTap} role="presentation">
       {#if layoutActivities.length === 0}
         <div class="empty-state glass-panel" aria-live="polite">
           <span class="empty-icon">🌱</span>
@@ -1249,25 +1260,21 @@
   .track-dragging .daily-activity-card:hover .resize-handle::after {
     opacity: 0; /* las asas de estirar tampoco se encienden a mitad del gesto */
   }
-  /* Flicker raíz en la colisión: al cambiar el orden del layout, Svelte
-     reordena los nodos del {#each} y mover un nodo en el DOM REINICIA su
-     animación CSS (fadeIn) → las tarjetas parpadean en cada reorden. Sin
-     animación durante el drag (la entrada escalonada solo importa al
-     cambiar de día, y el track no se re-monta a mitad de gesto). */
-  .track-dragging .daily-activity-card {
-    animation: none;
-  }
+  /* (La entrada escalonada vive SOLO en .track-entrada, abajo: alternar
+     animation-name a mitad de gesto reinicia la animación = flash en cada
+     drop/cancel. La gate entradaDia la enciende únicamente al cambiar de
+     día, cuando el {#key day} re-monta las tarjetas.) */
 
   /* Entrada escalonada al cambiar de día: se re-monta el track ({#key day})
-     y nth-child reparte los delays — cero JS, cero bytes en el chunk. */
-  .daily-activity-card {
+     y nth-child reparte los delays — cero bytes extra en el chunk. */
+  .track-entrada .daily-activity-card {
     animation: fadeIn .25s ease-out backwards;
   }
-  .daily-activity-card:nth-child(2) { animation-delay: 20ms }
-  .daily-activity-card:nth-child(3) { animation-delay: 40ms }
-  .daily-activity-card:nth-child(4) { animation-delay: 60ms }
-  .daily-activity-card:nth-child(5) { animation-delay: 80ms }
-  .daily-activity-card:nth-child(n+6) { animation-delay: 100ms }
+  .track-entrada .daily-activity-card:nth-child(2) { animation-delay: 20ms }
+  .track-entrada .daily-activity-card:nth-child(3) { animation-delay: 40ms }
+  .track-entrada .daily-activity-card:nth-child(4) { animation-delay: 60ms }
+  .track-entrada .daily-activity-card:nth-child(5) { animation-delay: 80ms }
+  .track-entrada .daily-activity-card:nth-child(n+6) { animation-delay: 100ms }
 
   /* Estado de arrastre activo (pointer drag) */
   .daily-activity-card.dragging {
