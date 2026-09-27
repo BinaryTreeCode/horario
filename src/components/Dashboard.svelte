@@ -335,16 +335,9 @@
     {/await}
   {/if}
 
-  <!-- FAB móvil (G5): nueva actividad siempre al alcance del pulgar -->
-  {#if !showSettings && !showActivityModal}
-    <button
-      class="fab"
-      onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)}
-      aria-label="Nueva Actividad"
-    >
-      <Plus size={26} />
-    </button>
-  {/if}
+  <!-- (FAB móvil retirado a pedido del usuario: tapaba la última columna de
+       la grilla semanal. La creación vive en el botón del header y en el
+       tap sobre un hueco de la vista Día.) -->
 
   <Toasts />
 </div>
@@ -622,33 +615,7 @@
     }
   }
 
-  /* G5: FAB flotante — creación de actividades al alcance del pulgar.
-     Solo móvil (desktop tiene el botón del header siempre visible). */
-  .fab {
-    display: none;
-  }
-  @media (max-width: 768px) {
-    .fab {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      position: fixed;
-      right: calc(1rem + env(safe-area-inset-right, 0px));
-      bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      border: none;
-      background: var(--color-green-dark);
-      color: white;
-      box-shadow: 0 6px 20px rgba(45, 90, 39, 0.4);
-      cursor: pointer;
-      z-index: 50; /* bajo modales (100/200) y toasts (3000) */
-      transition: transform 0.15s, background 0.2s;
-    }
-    .fab:active {
-      transform: scale(0.92);
-      background: var(--color-green-moss);
-    }
-  }
+  /* (G5: FAB flotante retirado a pedido del usuario — tapaba la última
+     columna de la grilla. Sin reemplazo: el botón "Nueva Actividad" del
+     header y el tap en hueco de la vista Día cubren la creación.) */
 </style>
