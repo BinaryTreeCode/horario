@@ -75,6 +75,10 @@ interface Gesture {
   quietTimer: number;
   /** scrollTop del contenedor al empezar: compensa el fantasma en auto-scroll. */
   scrollTop0: number;
+  /** scrollY de la PÁGINA al empezar: el fantasma (tarjeta in-flow en la vista
+   *  Día) se desliza con el documento si la página scrollea a mitad del gesto
+   *  — sin compensar, la sombra/transform queda "atrás" del cursor. */
+  pageY0: number;
   /** Todos los listeners del gesto cuelgan de esta señal. */
   listeners: AbortController;
 }
@@ -122,11 +126,13 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
   function paintGhost() {
     if (!g?.ghost) return;
     const el = container();
-    // Si el contenedor se desplazó, la tarjeta se movió con el contenido:
-    // compensamos para que el fantasma siga bajo el dedo.
+    // Compensar AMBOS scrolls: el del contenedor (auto-scroll del motor) y el
+    // de la PÁGINA (rueda del usuario a mitad del gesto) — la tarjeta fantasma
+    // vive en el flujo del documento y ambos la deslizan bajo el cursor.
     const scrollDy = el ? el.scrollTop - g.scrollTop0 : 0;
+    const pageDy = window.scrollY - g.pageY0;
     g.target.card.style.transform =
-      `translateY(${g.lastY - g.startY + scrollDy}px) scale(1.03)`;
+      `translateY(${g.lastY - g.startY + scrollDy + pageDy}px) scale(1.03)`;
   }
 
   // ── Auto-scroll (M5) ────────────────────────────────────────────────
@@ -331,6 +337,7 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
       armTimer: 0,
       quietTimer: 0,
       scrollTop0: container()?.scrollTop ?? 0,
+      pageY0: window.scrollY,
       listeners: new AbortController()
     };
     g = cur;
