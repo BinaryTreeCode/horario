@@ -1141,9 +1141,12 @@
     overflow: hidden;
     box-sizing: border-box;
     /* Sombra del bloque flotante de la demo: capa de contacto + caída suave
-       y profunda, con la rotación característica del arrastre. */
+       y profunda, con la rotación característica del arrastre. will-change
+       promueve el clon a su propia capa: el scroll no re-rasteriza la sombra
+       (se "perdía" al scrollear con el bloque agarrado). */
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18), 0 12px 28px rgba(0, 0, 0, 0.32);
     transform: rotate(-1.5deg);
+    will-change: transform, box-shadow;
     transition: background 0.15s, box-shadow 0.15s;
   }
   /* Shake ONE-SHOT: la clase .shake solo se enciende en la transición

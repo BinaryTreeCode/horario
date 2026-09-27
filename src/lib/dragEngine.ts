@@ -273,6 +273,17 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
     if (isOurs(e)) end(null);
   }
 
+  /** Scroll a mitad del gesto (rueda, barra, auto-scroll ajeno): el contenido
+   *  se movió bajo el puntero → re-pintar fantasma y re-emitir onMove para que
+   *  el preview se recalcule con rects frescos (si no, queda congelado con la
+   *  geometría previa al scroll y el feedback "se pierde" al deslizar). */
+  function onScroll() {
+    const cur = g;
+    if (!cur?.started) return;
+    paintGhost();
+    em(cur);
+  }
+
   function onTouchMove(e: TouchEvent) {
     if (!isArmed()) return;
     if (e.cancelable) e.preventDefault(); // C1
@@ -328,6 +339,9 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
     window.addEventListener('pointermove', onPointerMove, { signal });
     window.addEventListener('pointerup', onPointerUp, { signal });
     window.addEventListener('pointercancel', onPointerCancel, { signal });
+    // Captura en fase de captura: el scroll de CUALQUIER contenedor (página,
+    // grilla, track) re-ancla el gesto a la geometría nueva.
+    window.addEventListener('scroll', onScroll, { capture: true, passive: true, signal });
     // C1: no pasivo es lo que permite preventDefault del scroll en el drag.
     window.addEventListener('touchmove', onTouchMove, { passive: false, signal });
     window.addEventListener('keydown', onKey, { signal });
