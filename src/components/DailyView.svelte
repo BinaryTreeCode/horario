@@ -1588,6 +1588,10 @@
     background: #fff5f5;
   }
 
+  /* ── Cobertura móvil escalonada (misma escala que la grilla Semana) ──
+     768px: header/banner compactos y track con menos margen.
+     480px: todo al mínimo legible — time-track 48px (igual que Semana),
+     tarjetas y banner apretados sin romper los touch targets de 44px. */
   @media (max-width: 768px) {
     .daily-header {
       padding: 1rem;
@@ -1603,7 +1607,7 @@
       margin: 1rem 0.5rem;
     }
     .time-track {
-      width: 55px;
+      width: 56px; /* misma escala que la columna de horas de Semana @768 */
     }
     .hour-marker {
       font-size: 0.7rem;
@@ -1629,13 +1633,34 @@
     .time-bar {
       left: -0.5rem;
     }
+    /* Banner apilado pero con acciones a ancho completo y 44px táctiles */
     .override-banner {
       flex-direction: column;
-      align-items: flex-start;
+      align-items: stretch;
+      gap: 0.5rem;
+    }
+    .banner-actions {
+      justify-content: flex-end;
     }
   }
 
   @media (max-width: 480px) {
+    .daily-header h2 {
+      font-size: 1.1rem;
+    }
+    .daily-container {
+      margin: 0.75rem 0.25rem;
+    }
+    .time-track {
+      width: 48px; /* igual que la columna de horas de Semana @480 */
+    }
+    .hour-marker {
+      font-size: 0.62rem;
+      padding-right: 0.2rem;
+    }
+    .activities-track {
+      margin-left: 0.25rem;
+    }
     .daily-activity-card {
       padding: 0.3rem 0.5rem;
     }
@@ -1645,16 +1670,34 @@
     }
     .activity-name {
       font-size: 0.82rem;
-    }    .time-track {
-      width: 48px;
-    }
-    .hour-marker {
-      font-size: 0.65rem;
-      padding-right: 0.2rem;
     }
     .mode-btn {
       font-size: 0.72rem;
       padding: 0.35rem 0.6rem;
+    }
+    /* Banner: texto y acciones en columna, botones flexionan sin romper
+       los 44px de altura táctil (regla dura #5). */
+    .override-banner {
+      padding: 0.5rem 0.6rem;
+    }
+    .banner-text {
+      font-size: 0.75rem;
+    }
+    .banner-actions {
+      flex-wrap: wrap;
+    }
+    .btn-banner {
+      padding: 0.45rem 0.7rem;
+      min-height: 44px;
+      font-size: 0.7rem;
+    }
+    .time-bar-dot {
+      width: 8px;
+      height: 8px;
+    }
+    .time-bar-label {
+      font-size: 0.6rem;
+      right: 12px;
     }
   }
 </style>
