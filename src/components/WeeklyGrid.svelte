@@ -898,10 +898,16 @@
   }
 
   /* El scroll es del CONTENIDO (no del contenedor): así la columna de horas
-     puede quedar pegajosa y los días no arrastran la página entera. */
+     puede quedar pegajosa y los días no arrastran la página entera.
+     Piso total: columna de horas (68px) + 7 días al mínimo legible (88px).
+     Bajo ese ancho el scroll horizontal toma el relevo sin aplastar días. */
   .grid-scroll {
     display: flex;
-    min-width: 720px;
+    /* Llena el ancho disponible (flex:1) PERO sin bajar del piso: bajo
+       68px + 7×88px (+ 6px de gaps entre columnas) el scroll horizontal
+       toma el relevo sin aplastar días. */
+    flex: 1;
+    min-width: calc(68px + 7 * 88px + 6px);
   }
 
   .time-column {
@@ -964,7 +970,11 @@
   .days-columns {
     flex: 1;
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+    /* Ajuste dinámico con piso y tope (pedido del usuario): reparte el ancho
+       sin aplastar los días (piso 88px) ni dejarlos gigantes (tope 220px).
+       % y NO fr dentro de clamp (fr invalida la declaración entera): 14.2857%
+       = 1/7 del contenedor ≈ 1fr — mismo reparto fluido, clamp válido. */
+    grid-template-columns: repeat(7, clamp(88px, 14.2857%, 220px));
     gap: 1px;
     background: rgba(0,0,0,0.06);
   }
