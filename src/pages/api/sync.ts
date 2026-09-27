@@ -57,12 +57,18 @@ function normActivity(a: any): {
     id: a.id.slice(0, 64),
     categoryId: String(a.categoryId ?? 'rutina').slice(0, 64),
     name: a.name.trim().slice(0, 255),
-    description: typeof a.description === 'string' ? a.description.slice(0, 2000) : null,
+    // description/image: texto plano O blob E2E "np1:..." (el servidor no lo lee:
+    // solo acota longitud). El blob de description puede exceder los 2000 del
+    // plano por el overhead base64+IV — tope mayor para el cifrado.
+    description: typeof a.description === 'string' ? a.description.slice(0, a.description.startsWith('np1:') ? 6000 : 2000) : null,
     image: typeof a.image === 'string' ? a.image.slice(0, 3_000_000) : null,
     startTime: a.startTime,
     endTime: a.endTime,
     daysOfWeek: days,
-    steps: Array.isArray(a.steps) ? a.steps.filter((s: any) => typeof s?.title === 'string') : null,
+    // steps: array plano legacy O string cifrado np1 (blob ilegible)
+    steps: Array.isArray(a.steps)
+      ? a.steps.filter((s: any) => typeof s?.title === 'string')
+      : (typeof a.steps === 'string' && a.steps.startsWith('np1:') ? a.steps : null),
     updatedAt,
     deletedAt: null,
   };

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { db, exportData, validateImport, importValidatedData, type ValidationResult } from '../lib/db';
   import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange } from '../lib/sync';
+  import { establecerClave, olvidarClave } from '../lib/crypto';
   import type { SyncStatus } from '../lib/types';
   import { Cloud, CloudUpload, LogIn, LogOut, RefreshCw, UserPlus } from '@lucide/svelte';
   import type { Category } from '../lib/types';
@@ -73,10 +74,13 @@
         return;
       }
       loggedIn = true;
+      // E2E: derivar la clave del password ANTES de limpiar el formulario —
+      // vive solo en memoria; la nube recibe blobs que no puede leer.
+      await establecerClave(authEmail, authPassword);
       authPassword = '';
       syncMessage = 'Sincronizando…';
       await initialSyncAfterLogin();
-      syncMessage = '✅ Sincronizado con la nube';
+      syncMessage = '✅ Sincronizado con la nube (cifrado E2E)';
     } catch (err: any) {
       authError = err?.message ?? 'Error de red';
     } finally {
@@ -88,6 +92,7 @@
     await fetch('/api/auth?op=logout', { method: 'POST', credentials: 'same-origin' });
     loggedIn = false;
     authEmail = '';
+    olvidarClave(); // la clave E2E muere con la sesión
     resetSyncAfterLogout();
     syncMessage = '';
   }

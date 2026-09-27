@@ -1,5 +1,76 @@
 import { db, now } from './db';
 import type { Activity, Category, AppSettings, DayOverride, SyncState, SyncStatus } from './types';
+import { cifrarCampo, descifrarCampo, esCifrado, tieneClave } from './crypto';
+
+// ── Cifrado E2E de campos sensibles ─────────────────────────────────────
+// description, steps e image se cifran en el dispositivo (AES-GCM, clave
+// derivada del password con PBKDF2 — ver crypto.ts) ANTES del push. La nube
+// guarda blobs "np1:..." que no puede leer. En el pull se descifran para la
+// UI. Sin clave en memoria (sesión restaurada por cookie tras recargar),
+// los blobs se dejan como están: la UI muestra el marcador y el próximo
+// login con password los vuelve legibles.
+
+/** Campos de una actividad que viajan cifrados. */
+async function cifrarActividad(a: Activity): Promise<Activity> {
+  if (!tieneClave()) return a;
+  try {
+    return {
+      ...a,
+      description: a.description ? await cifrarCampo(a.description) : a.description,
+      image: a.image ? await cifrarCampo(a.image) : a.image,
+      steps: a.steps ? ((await cifrarCampo(JSON.stringify(a.steps))) as unknown as typeof a.steps) : a.steps,
+    };
+  } catch {
+    return a; // sin clave o error: envía plano (el pull legacy ya lo entiende)
+  }
+}
+
+/** Descifra los campos E2E de una actividad entrante (o los deja si son legacy). */
+async function descifrarActividad(a: any): Promise<Activity> {
+  if (!esCifrado(a.description) && !esCifrado(a.image) && !esCifrado(a.steps)) return a as Activity;
+  if (!tieneClave()) {
+    // Sin clave: reemplazar blobs por marcador neutro (la UI no debe mostrar "np1:0:...")
+    return {
+      ...a,
+      description: esCifrado(a.description) ? '🔒 Contenido cifrado — inicia sesión de nuevo' : a.description,
+      image: esCifrado(a.image) ? null : a.image,
+      steps: esCifrado(a.steps) ? [] : a.steps,
+    } as Activity;
+  }
+  try {
+    return {
+      ...a,
+      description: esCifrado(a.description) ? await descifrarCampo(a.description) : a.description,
+      image: esCifrado(a.image) ? await descifrarCampo(a.image) : a.image,
+      steps: esCifrado(a.steps) ? JSON.parse(await descifrarCampo(a.steps)) : a.steps,
+    } as Activity;
+  } catch {
+    return a as Activity; // blob corrupto/otra clave: no romper el pull
+  }
+}
+
+/** Cifra los steps de las actividades dentro de un dayOverride. */
+async function cifrarOverride(o: DayOverride): Promise<DayOverride> {
+  if (!tieneClave() || !o.activities?.length) return o;
+  try {
+    return {
+      ...o,
+      activities: await Promise.all(o.activities.map(a => cifrarActividad(a))),
+    };
+  } catch {
+    return o;
+  }
+}
+
+/** Descifra los steps de las actividades de un dayOverride entrante. */
+async function descifrarOverride(o: any): Promise<DayOverride> {
+  if (!o?.activities?.length) return o as DayOverride;
+  try {
+    return { ...o, activities: await Promise.all(o.activities.map((a: any) => descifrarActividad(a))) } as DayOverride;
+  } catch {
+    return o as DayOverride;
+  }
+}
 
 // ── Estado global de sincronización (para la UI) ─────────────────────────────
 
@@ -74,7 +145,12 @@ export async function pushChanges(full = false): Promise<number> {
     db.dayOverrides.where('updatedAt').above(cursor).toArray(),
   ]);
 
-  const payload = { activities, categories, settings, dayOverrides };
+  // E2E: cifrar los campos sensibles ANTES de salir del dispositivo. Solo si
+  // hay clave en memoria (login reciente). Con sesión restaurada por cookie,
+  // los datos viajan planos legacy hasta el próximo login con password.
+  const actsCifradas = await Promise.all(activities.map(a => cifrarActividad(a)));
+  const ovsCifrados = await Promise.all(dayOverrides.map(o => cifrarOverride(o)));
+  const payload = { activities: actsCifradas, categories, settings, dayOverrides: ovsCifrados };
   const total = activities.length + categories.length + settings.length + dayOverrides.length;
   if (total === 0) return 0;
 
@@ -124,7 +200,8 @@ export async function pullChanges(): Promise<{ applied: number }> {
       for (const a of res.activities) {
         const local = await db.activities.get(a.id);
         if (!local || local.updatedAt <= a.updatedAt) {
-          await db.activities.put({ ...a } as Activity);
+          const aPlano = await descifrarActividad(a);
+          await db.activities.put({ ...aPlano } as Activity);
           applied++;
         }
       }
@@ -138,7 +215,8 @@ export async function pullChanges(): Promise<{ applied: number }> {
       for (const o of res.dayOverrides) {
         const local = await db.dayOverrides.get(o.day);
         if (!local || local.updatedAt <= o.updatedAt) {
-          await db.dayOverrides.put({ ...o } as DayOverride);
+          const oPlano = await descifrarOverride(o);
+          await db.dayOverrides.put({ ...oPlano } as DayOverride);
           applied++;
         }
       }
