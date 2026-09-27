@@ -775,8 +775,14 @@
     {#each days as day, i}
       {@const dayData = getDayActivitiesWithLayout(i, dropPreview?.day === i ? dropPreview.slots : undefined, draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i) ? draggedActivityId : null)}
       <div class="day-column" class:col-dragging={draggedActivityId !== null}>
-        <button class="day-header" onclick={() => onSelectDay(i)} aria-label="Ver {day} en vista de día">
-          <span class="day-name">{day}</span>
+        <!-- Nombre completo SIEMPRE accesible: en columna angosta el header muestra
+             la abreviatura (Mié/Sáb) y el title lleva el nombre entero. Sin
+             nombres cortados a medias jamás. -->
+        <button class="day-header" onclick={() => onSelectDay(i)} aria-label="Ver {day} en vista de día" title="{day}">
+          <span class="day-name">
+            <span class="day-name-completo">{day}</span>
+            <span class="day-name-corto" aria-hidden="true">{day.slice(0, 3)}</span>
+          </span>
           {#if dayOverrides.some(o => o.day === i && o.activities?.length >= 0)}
             <span class="day-temp-badge" title="Tiene edición temporal activa en la vista diaria">⚡</span>
           {/if}
@@ -1045,6 +1051,31 @@
     border: none;
     cursor: pointer;
     transition: background 0.2s;
+    overflow: hidden; /* el nombre largo nunca desborda la columna */
+  }
+
+  /* Nombre completo SIEMPRE legible (nada cortado a medias):
+     .day-name-completo manda mientras el ancho de columna lo permite; debajo
+     de ~76px de columna, la abreviatura de 3 letras toma el relevo y el
+     nombre entero queda en title del botón. El flip es por contenedor,
+     no por viewport: igual que los pisos de columnas. */
+  .day-name {
+    display: inline-flex;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  .day-name-corto {
+    display: none;
+  }
+  @container weekly-grid (width < 590px) {
+    /* 7 columnas: <590px de grilla = columnas de <~76px → 'Miércoles' (10
+       caracteres a 0.85rem ≈ 71px) no cabe completo → abreviatura. */
+    .day-name-completo {
+      display: none;
+    }
+    .day-name-corto {
+      display: inline;
+    }
   }
 
   .day-header:hover {
