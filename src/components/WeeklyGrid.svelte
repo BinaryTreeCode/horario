@@ -9,14 +9,8 @@
   import { Copy, Trash2, ListChecks, ImageIcon } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { toastOk, toastErr, toastUndo } from '../lib/toast';
+  import { toastOk, toastErr } from '../lib/toast';
   import { cloneAct } from '../lib/undo';
-  /** Deshace el último paso (acción del toast [Deshacer]). */
-  function undoLast() {
-    import('../lib/undoRun').then(m => m.popAndUndo())
-      .then(l => { if (l) toastOk(`Deshecho: ${l}`); })
-      .catch(e => toastErr('No se pudo deshacer: ' + (e?.message || e)));
-  }
   import { portal } from '../lib/portal';
   import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
 
@@ -546,8 +540,10 @@
     if (acts.length === 0) return null;
     try {
       const { commitCambios } = await import('../lib/commit');
-      const r = await commitCambios({ label, acts });
-      if (r.rows.length > 0) toastUndo(label, undoLast);
+      // Sin toast de éxito (pedido del usuario): el movimiento confirmado no
+      // avisa nada; los errores sí (toastErr). El paso queda en el stack de
+      // undo por si se reviviera la acción.
+      await commitCambios({ label, acts });
       return label;
     } catch {
       toastErr('No se pudo mover');

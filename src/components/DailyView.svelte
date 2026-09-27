@@ -9,7 +9,7 @@
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { toastOk, toastErr, toastUndo } from '../lib/toast';
+  import { toastOk, toastErr } from '../lib/toast';
   import { pushUndo, cloneAct } from '../lib/undo';
 
   interface Props {
@@ -625,21 +625,16 @@
     try {
       const { commitCambios } = await import('../lib/commit');
       const label = `Mover en ${DAY_NAMES[day]}`;
-      const r = await commitCambios({
+      // Sin toast de éxito (pedido del usuario): el movimiento confirmado no
+      // avisa nada; los errores sí (toastErr). El paso queda en el stack de
+      // undo por si se reviviera la acción.
+      await commitCambios({
         label,
         ovs: [{ day, activities: $state.snapshot(overrideActs) as Activity[] }]
       });
-      if (r.overrides.length > 0) toastUndo(label, undoLast);
     } catch (err: any) {
       toastErr('No se pudo mover: ' + (err?.message || err));
     }
-  }
-
-  /** Deshace el último paso (acción del toast [Deshacer]). */
-  function undoLast() {
-    import('../lib/undoRun').then(m => m.popAndUndo())
-      .then(l => { if (l) toastOk(`Deshecho: ${l}`); })
-      .catch(e => toastErr('No se pudo deshacer: ' + (e?.message || e)));
   }
 
   // Context Menu logic
