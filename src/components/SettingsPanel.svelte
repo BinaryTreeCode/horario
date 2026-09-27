@@ -749,11 +749,6 @@
     opacity: 0.8;
   }
 
-  .form-row {
-    display: flex;
-    gap: 1rem;
-  }
-
   .form-group {
     flex: 1;
     display: flex;
@@ -788,15 +783,6 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1rem;
-  }
-
-  .btn-small {
-    padding: 0.5rem 0.85rem;
-    min-height: 44px;
-    font-size: 0.8rem;
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
   }
 
   .categories-list {
