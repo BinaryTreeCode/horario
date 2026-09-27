@@ -53,9 +53,16 @@ const { title } = Astro.props;
     grid-template-columns: 1fr;
   }
 
-  /* Reserva de scrollbar: el contenido que aparece al hidratar no reacomoda la página (CLS) */
+  /* Scrollbar de la página invisible (pedido del usuario): el scroll queda
+     (rueda del mouse + touch), pero sin la barra flotando sobre el contenido.
+     scrollbar-gutter: stable se conserva para no reacomodar la página al
+     hidratar (CLS), pero la barra ya no se pinta. */
   html {
     scrollbar-gutter: stable;
+    scrollbar-width: none;
+  }
+  html::-webkit-scrollbar {
+    display: none;
   }
 
   /* Métricas de fuentes: whileEmpty usa fallback con métricas similares, loading aplica las reales.

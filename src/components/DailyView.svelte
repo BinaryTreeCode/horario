@@ -1112,6 +1112,12 @@
     margin: 1.5rem;
     overflow-y: auto;
     min-height: 1600px; /* Scale so 15-min tasks have ~25px and don't crowd */
+    /* Scrollbar invisible: el scroll queda (rueda del mouse + touch), pero sin
+       la barra pegada al borde de las tarjetas. */
+    scrollbar-width: none;
+  }
+  .daily-container::-webkit-scrollbar {
+    display: none;
   }
 
   .time-track {
