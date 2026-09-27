@@ -401,12 +401,12 @@
       // vive en el clon flotante — hora proyectada + acción del drop.)
     }
     if (firma === firmaPreview) {
-      dragInvalid = invalido; // el texto puede cambiar sin cambiar el layout
+      setInvalid(invalido); // el texto puede cambiar sin cambiar el layout
       dragHint = hint;
       return;
     }
     firmaPreview = firma;
-    dragInvalid = invalido;
+    setInvalid(invalido);
     dragHint = hint;
     dropPreview = slots ? { day: day!, slots: new Map(slots.map(s => [s.id, { start: s.start, end: s.end }])) } : null;
   }
@@ -434,6 +434,21 @@
   let dropPreview = $state<{ day: number; slots: Map<string, { start: number; end: number }> } | null>(null);
   /** Drop inválido: no cabe / pisaría — tarjeta roja y al soltar vuelve. */
   let dragInvalid = $state(false);
+  /** Shake one-shot del clon flotante: solo en la transición válido→inválido;
+   *  pegado a .invalido se reiniciaría en cada pointermove = zumbido. */
+  let shakeInvalid = $state(false);
+  let shakeTimer: ReturnType<typeof setTimeout> | null = null;
+  function setInvalid(v: boolean) {
+    if (v && !dragInvalid) {
+      shakeInvalid = true;
+      if (shakeTimer) clearTimeout(shakeTimer);
+      shakeTimer = setTimeout(() => { shakeInvalid = false; }, 350);
+    } else if (!v) {
+      shakeInvalid = false;
+      if (shakeTimer) { clearTimeout(shakeTimer); shakeTimer = null; }
+    }
+    dragInvalid = v;
+  }
   /** Rótulo del gesto dentro del fantasma: qué hará el drop. */
   let dragHint = $state('');
   /** Posición del cursor para el fantasma flotante (null = sin drag). */
@@ -546,7 +561,8 @@
     draggedActivityId = null;
     dragSourceDay = null;
     dropPreview = null;
-    dragInvalid = false;
+    setInvalid(false);
+    shakeInvalid = false;
     dragHint = '';
     dragGhostXY = null;
     dragGhostHora = '';
@@ -575,7 +591,7 @@
       const m = t.meta as WeekResizeMeta;
       const calc = computeWeekResize(clientY, t.activityId, m);
       if (calc) {
-        dragInvalid = !calc.valido;
+        setInvalid(!calc.valido);
         // F4: la capacidad global acotó el deseo → feedback del por qué.
         dragHint = calc.limitadoPor ? `↕ Limitado por ${calc.limitadoPor}` : '';
         dropPreview = { day: m.day, slots: calc.slots };
@@ -586,7 +602,8 @@
       const calc = computeWeekResize(clientY, t.activityId, m);
       draggedActivityId = null;
       dragSourceDay = null;
-      dragInvalid = false;
+      setInvalid(false);
+      shakeInvalid = false;
       dragHint = '';
       if (!calc) { dropPreview = null; return; }
       if (!calc.valido) { toastErr('⛔ No cabe en el día'); dropPreview = null; return; }
@@ -610,7 +627,8 @@
       draggedActivityId = null;
       dragSourceDay = null;
       dropPreview = null;
-      dragInvalid = false;
+      setInvalid(false);
+      shakeInvalid = false;
     }
   };
 
@@ -831,7 +849,8 @@
     <!-- Fantasma flotante estilo demo: clon del BLOQUE COMPLETO (tamaño real,
          color de categoría) anclado al punto de agarre, con la hora proyectada
          y la acción del drop (fixed = no le afectan overflow ni scroll). -->
-    <div class="drag-float" use:portal class:invalido={dragInvalid} aria-hidden="true"
+    <div class="drag-float" use:portal class:invalido={dragInvalid} class:shake={shakeInvalid} aria-hidden="true"
+      onanimationend={(e) => { if (e.animationName === 'shake') shakeInvalid = false; }}
       style="left: {dragGhostXY.x - grabDX}px; top: {dragGhostXY.y - grabDY}px; width: {grabW}px; height: {grabH}px; --bg-color: {ghostColor}">
       <div class="df-title"><span>{ghostActivity.name}</span></div>
       <span class="df-hora">{dragGhostHora}</span>
@@ -1057,6 +1076,17 @@
   .activity-item.drag-ghost {
     opacity: 0.45;
     transition: none;
+    /* Parpadeo de z-index (fix): la tarjeta original vive bajo el cursor y
+       el :hover le dispara sin parar (con el shake del clon, alterna
+       hover/no-hover = salto frenético de índices z con el vecino pisado).
+       z-index fijo alto durante TODO el gesto. */
+    z-index: 100;
+  }
+  .col-dragging .activity-item.drag-ghost:hover,
+  .col-dragging .activity-item.drag-ghost:focus-visible {
+    z-index: 100;
+    transform: none;
+    outline: none;
   }
 
   /* En pleno drag los vecinos no compiten: sin hover (scale/outline/z-index)
@@ -1079,7 +1109,8 @@
   @media (prefers-reduced-motion: reduce) {
     .activity-item,
     .activity-item.drag-ghost,
-    .drag-float {
+    .drag-float,
+    .drag-float.shake {
       transition: none !important;
       animation: none !important;
     }
@@ -1117,9 +1148,15 @@
     transform: rotate(-1.5deg);
     transition: background 0.15s, box-shadow 0.15s;
   }
+  /* Shake ONE-SHOT: la clase .shake solo se enciende en la transición
+     válido→inválido (setInvalid del script) y se limpia en animationend —
+     pegarla a .invalido (re-aplicada en cada pointermove cerca del límite)
+     reinicia la animación en cada movimiento = zumbido frenético. */
   .drag-float.invalido {
     background: #e0453a !important;
     box-shadow: 0 0 0 3px rgba(224, 69, 58, 0.4), 0 12px 28px rgba(0, 0, 0, 0.35);
+  }
+  .drag-float.shake {
     animation: shake 0.3s ease;
   }
   .drag-float .df-title {

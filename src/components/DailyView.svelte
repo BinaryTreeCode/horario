@@ -107,6 +107,23 @@
   let dropPreview = $state<Map<string, { start: number; end: number }> | null>(null);
   /** Drop inválido: no cabe / pisaría — tarjeta roja y al soltar vuelve. */
   let dragInvalid = $state(false);
+  /** Shake one-shot: se enciende SOLO en la transición válido→inválido y se
+   *  limpia en animationend. Pegarlo a .drop-invalid reiniciaría la anima-
+   *  ción en cada pointermove cerca del límite = zumbido frenético (y con
+   *  el shake moviendo el bloque, el :hover titila = salto de z-index). */
+  let shakeInvalid = $state(false);
+  let shakeTimer: ReturnType<typeof setTimeout> | null = null;
+  function setInvalid(v: boolean) {
+    if (v && !dragInvalid) {
+      shakeInvalid = true;
+      if (shakeTimer) clearTimeout(shakeTimer);
+      shakeTimer = setTimeout(() => { shakeInvalid = false; }, 350); // respaldo si animationend no corre
+    } else if (!v) {
+      shakeInvalid = false;
+      if (shakeTimer) { clearTimeout(shakeTimer); shakeTimer = null; }
+    }
+    dragInvalid = v;
+  }
   /** Rótulo del gesto dentro del fantasma: qué hará el drop. */
   let dragHint = $state('');
   /** Ventana de la entrada escalonada: SOLO al cambiar de día (el {#key day}
@@ -387,7 +404,7 @@
       // roja y al soltar el bloque vuelve a su sitio.
       const res = computeLayoutForDrop(clientY, draggedActivityId);
       if (!res) return;
-      dragInvalid = !res.valido;
+      setInvalid(!res.valido);
       dragHint = !res.valido ? '⛔ No cabe' : res.accion === 'insertar' ? '↕ Insertar aquí' : '';
       // (El resalte de mitad del pisado se retiró: el feedback de posición
       // vive en la tarjeta flotante — hora proyectada + acción del drop.)
@@ -407,7 +424,7 @@
         if (res) toastErr(res.motivo);
         draggedActivityId = null;
         dropPreview = null;
-        dragInvalid = false;
+        setInvalid(false);
         dragHint = '';
         firmaPreview = '';
         return;
@@ -425,7 +442,7 @@
       } finally {
         // Si la store re-emitio el mismo layout, soltar el ancla es
         // inobservable; si el commit falló, esto devuelve la UI a la BD.
-        settle2(() => { dropPreview = null; topOverride = null; dragInvalid = false; dragHint = ''; firmaPreview = ''; flashId = null; });
+        settle2(() => { dropPreview = null; topOverride = null; setInvalid(false); dragHint = ''; firmaPreview = ''; flashId = null; });
       }
     },
     onCancel() {
@@ -434,7 +451,7 @@
       draggedActivityId = null;
       dropPreview = null;
       topOverride = null;
-      dragInvalid = false;
+      setInvalid(false);
       dragHint = '';
       firmaPreview = '';
     }
@@ -497,7 +514,7 @@
     onMove(t, _x, clientY) {
       const res = computeResizePreview(clientY, t.activityId, t.meta as ResizeMeta);
       if (!res) return;
-      dragInvalid = !res.valido;
+      setInvalid(!res.valido);
       // F4: feedback de por qué topó el borde (el deseo del puntero se acotó).
       dragHint = res.limitadoPor ? `↕ Limitado por ${res.limitadoPor}` : '';
       topOverride = { id: t.activityId, start: res.movido.start, end: res.movido.end };
@@ -511,13 +528,13 @@
       } else if (res) {
         toastErr(res.motivo);
       }
-      settle2(() => { dropPreview = null; topOverride = null; dragInvalid = false; dragHint = ''; firmaPreview = ''; });
+      settle2(() => { dropPreview = null; topOverride = null; setInvalid(false); dragHint = ''; firmaPreview = ''; });
     },
     onCancel() {
       draggedActivityId = null;
       dropPreview = null;
       topOverride = null;
-      dragInvalid = false;
+      setInvalid(false);
       dragHint = '';
       firmaPreview = '';
     }
@@ -832,7 +849,9 @@
           class:is-short={activity.durationMins <= 20}
           class:dragging={draggedActivityId === activity.id}
           class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
+          class:shake-invalid={draggedActivityId === activity.id && shakeInvalid}
           class:flash-commit={flashId === activity.id}
+          onanimationend={(e) => { if (e.animationName === 'shake-x') shakeInvalid = false; }}
           role="button"
           tabindex="0"
           aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{totalSteps ? `, ${doneSteps} de ${totalSteps} pasos` : ''}. Arrastrar o tocar para editar"
@@ -1223,8 +1242,11 @@
   }
 
   /* Micro-shake del fantasma inválido (respeta reduced-motion vía el bloque
-     general de abajo). */
-  .daily-activity-card.drop-invalid {
+     general de abajo). CLASE ONE-SHOT (.shake-invalid): se dispara UNA vez
+     al pasar de válido→inválido y se limpia en animationend — si la anima-
+     ción viviera en .drop-invalid (clase re-aplicada en cada pointermove
+     cerca del límite), cada re-aplicación reinicia la animación = zumbido. */
+  .daily-activity-card.shake-invalid {
     animation: shake-x 0.3s ease;
   }
   @keyframes shake-x {
@@ -1246,13 +1268,23 @@
      con :hover vivo alternaba transform (translateX) + overflow + z-index en
      cada entrada/salida del puntero = parpadeo. Mismo patrón que .col-dragging
      de la vista Semana. */
-  .track-dragging .daily-activity-card:hover,
-  .track-dragging .daily-activity-card:focus-visible {
+  /* Parpadeo de z-index (fix): el bloque arrastrado vive BAJO el cursor, así
+     que :hover le dispara sin parar y (con el shake moviéndolo ±3px) alterna
+     hover/no-hover = intercambio frenético de z-index con el vecino pisado.
+     El arrastrado queda OPACO a los cambios de hover: z-index fijo 100 y el
+     inhibidor global de hover NO lo incluye (solo afecta a los vecinos). */
+  .track-dragging .daily-activity-card:hover:not(.dragging),
+  .track-dragging .daily-activity-card:focus-visible:not(.dragging) {
     transform: none;
     overflow: hidden;
     background: white;
     z-index: auto;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .daily-activity-card.dragging,
+  .daily-activity-card.dragging:hover,
+  .daily-activity-card.dragging:focus-visible {
+    z-index: 100; /* se queda arriba del vecino pisado durante TODO el gesto */
   }
   .track-dragging .daily-activity-card:hover .edit-btn {
     opacity: 0; /* el lápiz flotante tampoco compite durante el gesto */
@@ -1307,6 +1339,7 @@
     .daily-activity-card,
     .daily-activity-card.dragging,
     .daily-activity-card.drop-invalid,
+    .daily-activity-card.shake-invalid,
     .daily-activity-card.flash-commit,
     .resize-handle::after {
       transition: none !important;
