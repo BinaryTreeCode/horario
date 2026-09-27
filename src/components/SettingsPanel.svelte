@@ -4,7 +4,7 @@
   import type { SyncStatus } from '../lib/types';
   import { Cloud, CloudUpload, LogIn, LogOut, RefreshCw, UserPlus } from '@lucide/svelte';
   import type { Category } from '../lib/types';
-  import { X, Save, Plus, Trash2, Download, Upload, GripVertical } from '@lucide/svelte';
+  import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck } from '@lucide/svelte';
   import { dndzone } from 'svelte-dnd-action';
   import { flip } from 'svelte/animate';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -558,6 +558,35 @@
           <p class="backup-info">Exporta actividades, categorías, ediciones temporales e imágenes para respaldarlas o moverlas a otro navegador. Al importar se te pedirá confirmación y verás un resumen antes de reemplazar tus datos.</p>
         </div>
       </section>
+
+      <!-- ── Tus datos: transparencia sobre el tratamiento (pedido del usuario) ── -->
+      <section class="settings-section data-transparency">
+        <h3><ShieldCheck size={16} /> Tus datos, en claro</h3>
+        <ul class="data-points">
+          <li>
+            <strong>Sin cuenta:</strong> todo vive <strong>solo en este navegador</strong> (IndexedDB).
+            Nunca sale de tu dispositivo — funciona igual con o sin internet.
+          </li>
+          <li>
+            <strong>Con cuenta:</strong> tu horario se respalda en la nube para sincronizar
+            dispositivos. Se transmite cifrado en tránsito (HTTPS) y se guarda por cuenta
+            en una base de datos propia — <strong>no se comparte con terceros, no hay
+            analítica ni rastreadores</strong>.
+          </li>
+          <li>
+            <strong>Lo que se guarda:</strong> actividades, horarios, pasos, categorías,
+            ediciones temporales y las imágenes que tú subas. <strong>Nada más.</strong>
+          </li>
+          <li>
+            <strong>Tú tienes el control:</strong> exporta todo cuando quieras (JSON arriba),
+            y "Borrar todo" elimina local + nube de verdad (borrado sincronizado).
+          </li>
+          <li>
+            <strong>Sin letra chica:</strong> no vendemos datos, no hay publicidad, no hay
+            perfiles de usuario. La app vive de ser tuya.
+          </li>
+        </ul>
+      </section>
     </div>
 
     <footer class="modal-footer">
@@ -926,6 +955,53 @@
 
   .danger-zone .btn-danger:hover:not(:disabled) {
     background: rgba(204, 0, 0, 0.16);
+  }
+
+  /* ── Tus datos, en claro: transparencia sobre el tratamiento ── */
+  .data-transparency {
+    background: rgba(45, 90, 39, 0.04);
+    border: 1px solid rgba(45, 90, 39, 0.15);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+  }
+  .data-transparency h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-green-dark);
+  }
+  .data-points {
+    margin: 0.5rem 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .data-points li {
+    position: relative;
+    padding-left: 1.1rem;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: var(--color-brown-bark);
+  }
+  .data-points li::before {
+    content: '✓';
+    position: absolute;
+    left: 0;
+    color: var(--color-green-dark);
+    font-weight: 700;
+  }
+  .data-points strong {
+    color: var(--color-green-dark);
+  }
+  @media (max-width: 480px) {
+    .data-transparency {
+      padding: 0.7rem 0.75rem;
+    }
+    .data-points li {
+      font-size: 0.78rem;
+    }
   }
 
   .danger-zone .btn-danger:disabled {
