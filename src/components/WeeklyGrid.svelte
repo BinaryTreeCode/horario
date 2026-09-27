@@ -895,6 +895,12 @@
     padding-top: 10px;
     position: relative;
     scrollbar-width: thin;
+    /* Contenedor de consulta (CQ): los breakpoints de la grilla reaccionan al
+       ANCHO REAL DEL CONTENEDOR y no al viewport. Ventaja práctica: si mañana
+       la grilla vive en un panel lateral o en pantalla dividida, su layout se
+       adapta solo — sin tocar una sola regla. inline-size = solo el eje
+       horizontal participa (el alto no crea contención, no rompe el track). */
+    container: weekly-grid / inline-size;
   }
 
   /* El scroll es del CONTENIDO (no del contenedor): así la columna de horas
@@ -910,12 +916,12 @@
     flex: 1;
     min-width: calc(68px + 7 * 88px + 6px);
   }
-  @media (max-width: 768px) {
+  @container weekly-grid (width < 768px) {
     .grid-scroll {
       min-width: calc(48px + 7 * 66px + 6px);
     }
   }
-  @media (max-width: 480px) {
+  @container weekly-grid (width < 480px) {
     .grid-scroll {
       min-width: calc(48px + 7 * 56px + 6px);
     }
@@ -937,14 +943,14 @@
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
   }
-  /* En móvil angosto la columna de horas se compacta igual que los días
+  /* En contenedor angosto la columna de horas se compacta igual que los días
      (misma escala que los breakpoints del piso de columnas). */
-  @media (max-width: 768px) {
+  @container weekly-grid (width < 768px) {
     .time-column {
       width: 56px;
     }
   }
-  @media (max-width: 480px) {
+  @container weekly-grid (width < 480px) {
     .time-column {
       width: 48px;
     }
@@ -1007,12 +1013,12 @@
     gap: 1px;
     background: rgba(0,0,0,0.06);
   }
-  @media (max-width: 768px) {
+  @container weekly-grid (width < 768px) {
     .days-columns {
       grid-template-columns: repeat(7, clamp(66px, calc(14.2857% - 1px), 220px));
     }
   }
-  @media (max-width: 480px) {
+  @container weekly-grid (width < 480px) {
     .days-columns {
       grid-template-columns: repeat(7, clamp(56px, calc(14.2857% - 1px), 220px));
     }
@@ -1337,7 +1343,7 @@
   }
   /* Con las columnas compactas de móvil (piso 56px) el título normal baja
      un punto: "Miércoles" completo entra en 56px sin recortes agresivos. */
-  @media (max-width: 480px) {
+  @container weekly-grid (width < 480px) {
     .activity-title {
       font-size: 0.7rem;
     }
@@ -1346,11 +1352,11 @@
     }
   }
 
-  /* Hint de scroll horizontal solo en pantallas angostas */
+  /* Hint de scroll horizontal solo cuando el contenedor es angosto */
   .scroll-hint {
     display: none;
   }
-  @media (max-width: 768px) {
+  @container weekly-grid (width < 768px) {
     .scroll-hint {
       display: block;
       font-size: 0.75rem;
