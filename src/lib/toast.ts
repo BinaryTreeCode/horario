@@ -19,10 +19,13 @@ export const toasts = writable<Toast[]>([]);
 let seq = 0;
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
 
+/** Duración estándar de los avisos auto-cerrables (pedido del usuario: 2s). */
+export const TOAST_DURACION = 2000;
+
 /** Muestra un toast. duration=0 → persistente (devuelve id para dismiss).
  *  Los toasts NUEVOS REEMPLAZAN a los anteriores (nunca se acumulan en
  *  ráfaga: el último manda — plan v2 fase 1). */
-export function toast(message: string, type: ToastType = 'info', duration = 3200, action?: Toast['action'], pausable = false): number {
+export function toast(message: string, type: ToastType = 'info', duration = TOAST_DURACION, action?: Toast['action'], pausable = false): number {
   const id = ++seq;
   toasts.update((list) => {
     // Cerrar los anteriores del mismo tipo: el nuevo reemplaza, no apila.
@@ -55,7 +58,7 @@ export function dismissToast(id: number) {
 }
 
 /** Toast de éxito con el check estándar. */
-export const toastOk = (msg: string, duration?: number) => toast(msg, 'success', duration);
+export const toastOk = (msg: string, duration?: number) => toast(msg, 'success', duration ?? TOAST_DURACION);
 /**
  * Toast de éxito con botón [Deshacer] (6s, pausable con hover): el estándar
  * del plan v2 para toda mutación confirmada. La acción la provee el llamador
@@ -69,7 +72,7 @@ export const toastUndo = (msg: string, run: () => void) =>
  * pantalla tapando la grilla. Para errores críticos que exijan lectura
  * tranquila (import/sync), pasar duration=0 explícito.
  */
-export const toastErr = (msg: string, duration = 3200) => toast(msg, 'error', duration);
+export const toastErr = (msg: string, duration = TOAST_DURACION) => toast(msg, 'error', duration);
 
 // ── Puerta de repetición (pedido del usuario): el PRIMER fallo de un gesto
 // solo muestra feedback visual (rojo/shake); el toast SOLO aparece si el
