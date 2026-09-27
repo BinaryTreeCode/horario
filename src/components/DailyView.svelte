@@ -10,6 +10,7 @@
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr, toastErrRepetido } from '../lib/toast';
+  import { portal } from '../lib/portal';
   import { pushUndo, cloneAct } from '../lib/undo';
 
   interface Props {
@@ -926,7 +927,9 @@
   </div>
 
   {#if contextMenu.show}
-    <div class="custom-context-menu glass-panel" style="top: {contextMenu.y}px; left: {contextMenu.x}px">
+    <!-- Portal a body: el backdrop-filter de .glass-panel ancestro crea containing block
+         y ancla el position:fixed al PANEL (menú lejos del cursor). Mismo fix que Semana. -->
+    <div class="custom-context-menu glass-panel" use:portal style="top: {contextMenu.y}px; left: {contextMenu.x}px">
       <button onclick={duplicateActivity}>
         <Copy size={16} /> Duplicar (Independiente)
       </button>
