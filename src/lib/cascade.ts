@@ -210,7 +210,7 @@ export function resolveDayCascade(
       return {
         slots: cerrar(N),
         valido,
-        motivo: valido ? '' : '⛔ No cabe en el día',
+        motivo: valido ? '' : '⛔ No cabe: el empuje desbordaría el día',
         accion: 'insertar',
         movido: aHoras(N.find(x => x.id === id)!)
       };
@@ -229,7 +229,7 @@ export function resolveDayCascade(
     return {
       slots: cerrar(N),
       valido,
-      motivo: valido ? '' : '⛔ No cabe en el día',
+      motivo: valido ? '' : '⛔ No cabe: el empuje desbordaría el día',
       accion: 'insertar',
       movido: aHoras(N.find(x => x.id === id)!)
     };
@@ -277,7 +277,7 @@ export function resolveDayCascade(
     return {
       slots: cerrar(N),
       valido,
-      motivo: valido ? '' : '⛔ No cabe en el día',
+      motivo: valido ? '' : '⛔ No cabe: el empuje desbordaría el día',
       accion: 'insertar',
       movido: aHoras(bb)
     };
@@ -300,7 +300,7 @@ export function resolveDayCascade(
   return {
     slots: cerrar(N),
     valido,
-    motivo: valido ? '' : '⛔ No cabe en el día',
+    motivo: valido ? '' : '⛔ No cabe: el empuje desbordaría el día',
     accion: 'insertar',
     movido: aHoras(bb)
   };
@@ -329,7 +329,7 @@ export function resolveResizeDay(
     return {
       slots: cerrar(N),
       valido: false,
-      motivo: '⛔ Bloque no encontrado',
+      motivo: '⛔ No se encontró el bloque a mover',
       accion: 'redim',
       movido: { id: movedId, start: startHour, end: startHour }
     };
@@ -384,7 +384,7 @@ export function resolveResizeDay(
   return {
     slots: cerrar(N),
     valido,
-    motivo: valido ? '' : '⛔ No cabe en el día',
+    motivo: valido ? '' : '⛔ No cabe: el empuje desbordaría el día',
     accion: 'redim',
     movido: aHoras(N.find(x => x.id === movedId)!),
     limitadoPor
@@ -532,7 +532,7 @@ export function propagateWeekly(
   });
   const byId = new Map(activities.map(a => [a.id!, a]));
   const act = byId.get(actId);
-  if (!act) return rechazar('⛔ Actividad no encontrada');
+  if (!act) return rechazar('⛔ No se encontró la actividad');
   const duration = newDuration ?? codec.parse(act.endTime) - codec.parse(act.startTime);
 
   const times = new Map<string, Slot>();
@@ -569,7 +569,7 @@ export function propagateWeekly(
     // — transitivo: un empujado que pisa a otro se vuelve pared (MAX_PASSES).
     for (const s of exacto.values()) {
       // En HORAS (exacto son Slots; minM/maxM son minutos).
-      if (s.start < startHour - EPS || s.end > endHour + EPS) return rechazar('⛔ No cabe en el día');
+      if (s.start < startHour - EPS || s.end > endHour + EPS) return rechazar('⛔ No cabe: queda fuera del rango del día');
       times.set(s.id, s);
     }
     // Paredes = bloques cuyo horario global cambió respecto a la BD (crece
@@ -608,10 +608,10 @@ export function propagateWeekly(
       const nombreDia = DIAS_SEMANA[day] ?? `día ${day}`;
       const slotsDia = slotsOn(day);
       const fuera = slotsDia.find(s => s.start < startHour - EPS || s.end > endHour + EPS);
-      if (fuera) return rechazar(`⛔ No cabe en el día (en ${nombreDia})`);
+      if (fuera) return rechazar(`⛔ No cabe: la cadena desbordaría ${nombreDia}`);
       for (let i = 0; i < slotsDia.length; i++) {
         for (let j = i + 1; j < slotsDia.length; j++) {
-          if (overlaps(slotsDia[i], slotsDia[j])) return rechazar(`⛔ No cabe en el día (en ${nombreDia})`);
+          if (overlaps(slotsDia[i], slotsDia[j])) return rechazar(`⛔ No cabe: chocaría en ${nombreDia}`);
         }
       }
     }
@@ -650,10 +650,10 @@ export function propagateWeekly(
       const nombreDia = DIAS_SEMANA[day] ?? `día ${day}`;
       const slotsDia = slotsOn(day);
       const fuera = slotsDia.find(s => s.start < startHour - EPS || s.end > endHour + EPS);
-      if (fuera) return rechazar(`⛔ No cabe en el día (en ${nombreDia})`);
+      if (fuera) return rechazar(`⛔ No cabe: la cadena desbordaría ${nombreDia}`);
       for (let i = 0; i < slotsDia.length; i++) {
         for (let j = i + 1; j < slotsDia.length; j++) {
-          if (overlaps(slotsDia[i], slotsDia[j])) return rechazar(`⛔ No cabe en el día (en ${nombreDia})`);
+          if (overlaps(slotsDia[i], slotsDia[j])) return rechazar(`⛔ No cabe: chocaría en ${nombreDia}`);
         }
       }
     }
@@ -687,7 +687,7 @@ export function propagateWeekly(
     if (!encogeRedim) {
       for (const day of daySet) {
         const fuera = slotsOn(day).some(s => s.start < startHour - EPS || s.end > endHour + EPS);
-        if (fuera) return rechazar('⛔ No cabe en el día');
+        if (fuera) return rechazar('⛔ No cabe: estirar desbordaría el día');
       }
     }
   }

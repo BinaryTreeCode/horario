@@ -9,7 +9,7 @@
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { toastOk, toastErr } from '../lib/toast';
+  import { toastOk, toastErr, toastErrRepetido } from '../lib/toast';
   import { pushUndo, cloneAct } from '../lib/undo';
 
   interface Props {
@@ -421,7 +421,9 @@
       const res = computeLayoutForDrop(clientY, t.activityId);
       if (!res || !res.valido) {
         // ⛔ Sin reemplazos ni huecos imposibles: el bloque vuelve a su sitio.
-        if (res) toastErr(res.motivo);
+        // 1er fallo → silencioso (el rojo ya avisó); al insistir → toast con
+        // el motivo (puerta de repetición, pedido del usuario).
+        if (res) toastErrRepetido(`mover-dia:${day}`, res.motivo);
         draggedActivityId = null;
         dropPreview = null;
         setInvalid(false);
@@ -526,7 +528,8 @@
       if (res && res.valido) {
         await commitResolved(toSlotMap(res.slots));
       } else if (res) {
-        toastErr(res.motivo);
+        // Puerta de repetición: 1er fallo silencioso, al insistir → toast.
+        toastErrRepetido(`estirar-dia:${day}`, res.motivo);
       }
       settle2(() => { dropPreview = null; topOverride = null; setInvalid(false); dragHint = ''; firmaPreview = ''; });
     },
@@ -596,7 +599,7 @@
     // ±15 min es un deseo exacto: pared anclada que empuja lo que pisa.
     // Si el empuje en cadena desborda el día → ⛔ y NADA se escribe.
     const res = resolveNudgeDay(slots, activity.id!, newStart, startHour, endHour);
-    if (!res.valido) { toastErr('⛔ No cabe en el día'); return; }
+    if (!res.valido) { toastErrRepetido(`teclado:${activity.id}`, '⛔ No cabe: el empuje desbordaría el día'); return; }
     await commitResolved(toSlotMap(res.slots));
   }
 

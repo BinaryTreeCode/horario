@@ -201,7 +201,7 @@ describe('resolveDayCascade — entre columnas (crossInto)', () => {
     const slots = [s('b', 8, 9), s('r', 9, 10), s('d', 10, 11)];
     const p = resolveDayCascade(slots, s('x', 11, 12), 8.2, true, 7, 11.5);
     expect(p.valido).toBe(false);
-    expect(p.motivo).toBe('⛔ No cabe en el día');
+    expect(p.motivo).toBe('⛔ No cabe: el empuje desbordaría el día');
   });
 });
 

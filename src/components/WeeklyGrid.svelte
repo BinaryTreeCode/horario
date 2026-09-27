@@ -9,7 +9,7 @@
   import { Copy, Trash2, ListChecks, ImageIcon } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { toastOk, toastErr } from '../lib/toast';
+  import { toastOk, toastErr, toastErrRepetido } from '../lib/toast';
   import { cloneAct } from '../lib/undo';
   import { portal } from '../lib/portal';
   import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
@@ -292,7 +292,8 @@
           endHour
         );
         if (!res.valido) {
-          toastErr(res.motivo);
+          // Puerta de repetición: 1er fallo silencioso, al insistir → toast.
+          toastErrRepetido(`mover-semana:${day}`, res.motivo);
           clearDragPreview();
           return;
         }
@@ -302,7 +303,8 @@
         dragSourceDay = sourceDay;
         const cascada = computeFullCascade(t.activityId, day, res.movido.start, res);
         if (!cascada.valido) {
-          toastErr(cascada.motivo);
+          // Puerta de repetición: 1er fallo silencioso, al insistir → toast.
+          toastErrRepetido(`mover-semana:${day}`, cascada.motivo);
           clearDragPreview();
           return;
         }
@@ -511,7 +513,7 @@
         times.set(s.id, { start: s.start, end: s.end });
       }
     }
-    if (invalido) { toastErr('⛔ No cabe en el día'); return; }
+    if (invalido) { toastErrRepetido(`teclado-sem:${activity.id}`, '⛔ No cabe: el empuje desbordaría el día'); return; }
     await commitWeeklyTimes(times, `${activity.name} → ${format12h(formatTime(newStart))}`);
   }
 
@@ -602,7 +604,7 @@
       shakeInvalid = false;
       dragHint = '';
       if (!calc) { dropPreview = null; return; }
-      if (!calc.valido) { toastErr('⛔ No cabe en el día'); dropPreview = null; return; }
+      if (!calc.valido) { toastErrRepetido(`estirar-sem:${m.day}`, '⛔ No cabe: estirar desbordaría el día'); dropPreview = null; return; }
       // Commit global: el borde del PUNTERO manda. Con lado 'arriba' el fin
       // queda fijo (ancla = nuevo inicio) y la nueva duración viaja a todos
       // los días; el rechazo multi-día del candado protege el límite.
@@ -615,7 +617,7 @@
       // (igual que el preview de resolveResizeDay) — antes el commit
       // re-derivaba con pared anclada al inicio y los vecinos traspasaban.
       const sem = propagateWeekly(activities, t.activityId, ancla, endHour, CODEC, act?.daysOfWeek ?? [], nuevaDur, 0, true, undefined, m.lado);
-      if (!sem.valido) { toastErr(sem.motivo); dropPreview = null; return; }
+      if (!sem.valido) { toastErrRepetido(`estirar-sem:${m.day}`, sem.motivo); dropPreview = null; return; }
       await commitWeeklyTimes(sem.times, `Estirar ${act?.name ?? 'actividad'}`);
       dropPreview = null;
     },

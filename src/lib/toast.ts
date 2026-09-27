@@ -70,3 +70,27 @@ export const toastUndo = (msg: string, run: () => void) =>
  * tranquila (import/sync), pasar duration=0 explícito.
  */
 export const toastErr = (msg: string, duration = 3200) => toast(msg, 'error', duration);
+
+// ── Puerta de repetición (pedido del usuario): el PRIMER fallo de un gesto
+// solo muestra feedback visual (rojo/shake); el toast SOLO aparece si el
+// usuario insiste y vuelve a fallar la MISMA acción (2º intento). ──
+/** Firma del último error avisado + marca de repetido, con ventana de 4s
+ *  (si pasaron más de 4s entre intentos, cuenta como primera vez de nuevo). */
+let lastErrFirma = '';
+let lastErrTime = 0;
+const VENTANA_REINTENTO_MS = 4000;
+
+/**
+ * Error de gesto con puerta de repetición: 1er fallo → silencioso (el rojo
+ * del fantasma ya avisa); 2º fallo CONSECUTIVO de la misma acción (misma
+ * firma dentro de 4s) → toast con la descripción del motivo.
+ * @param firma  identidad de la acción fallida (p. ej. `mover:Lunes`)
+ * @param motivo descripción clara de por qué no se pudo
+ */
+export function toastErrRepetido(firma: string, motivo: string) {
+  const now = Date.now();
+  const esReintento = firma === lastErrFirma && now - lastErrTime <= VENTANA_REINTENTO_MS;
+  lastErrFirma = firma;
+  lastErrTime = now;
+  if (esReintento) toastErr(motivo);
+}
