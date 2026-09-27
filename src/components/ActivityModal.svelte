@@ -4,6 +4,7 @@
   import type { Activity, Category, ActivityStep } from '../lib/types';
   import { X, Trash2, CheckCircle, Plus, CheckSquare, Square, ListChecks, Sparkles, Zap, Calendar, ImageIcon, Link2 } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
+  import { t, tNow } from '../lib/i18n';
 
   interface Props {
     id: string | null;
@@ -155,11 +156,11 @@
     const file = input.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      toastErr('El archivo seleccionado no es una imagen.');
+      toastErr(tNow('modal.notImage'));
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      toastErr('La imagen es muy grande (máximo 2 MB) para guardarla en la base de datos local.');
+      toastErr(tNow('modal.imageTooBig'));
       return;
     }
     const reader = new FileReader();
@@ -222,30 +223,17 @@
   }
 
   function applyRoutinePresets() {
-    const defaultRoutineSteps = [
-      'Beber vaso con agua y estirar',
-      'Aseo personal / Ducha',
-      'Desayuno nutritivo',
-      'Revisar objetivos del día'
-    ];
+    const defaultRoutineSteps = [0, 1, 2, 3].map(i => tNow(`modal.preset.${i}`));
     const newSteps = defaultRoutineSteps.map(t => ({
       id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       title: t,
       completed: false
     }));
     steps = [...steps, ...newSteps];
-    toastOk('4 pasos sugeridos agregados');
+    toastOk(tNow('modal.stepsAdded', { n: 4 }));
   }
 
-  const days = [
-    { label: 'L', index: 0 },
-    { label: 'M', index: 1 },
-    { label: 'M', index: 2 },
-    { label: 'J', index: 3 },
-    { label: 'V', index: 4 },
-    { label: 'S', index: 5 },
-    { label: 'D', index: 6 },
-  ];
+  const days = $derived([0, 1, 2, 3, 4, 5, 6].map(i => ({ label: $t(`modal.dayLetter.${i}`), index: i })));
 
   onMount(async () => {
     // If initialData is provided (from dayOverride), use it
@@ -291,7 +279,7 @@
   async function save() {
     try {
       if (!categoryId) {
-        toastErr('Por favor selecciona una categoría');
+        toastErr(tNow('modal.nameRequired'));
         return;
       }
 
@@ -349,19 +337,19 @@
           const before = await db.activities.get(id);
           activity.id = id;
           await db.activities.put(activity);
-          if (before) pushUndo({ label: `Editar ${activity.name}`, rows: [{ before, after: cloneAct(activity) }] });
+          if (before) pushUndo({ label: `${tNow('toast.saved')} — ${activity.name}`, rows: [{ before, after: cloneAct(activity) }] });
         } else {
           activity.id = newId();
           await db.activities.add(activity);
-          pushUndo({ label: `Crear ${activity.name}`, rows: [{ before: null, after: cloneAct(activity) }] });
+          pushUndo({ label: `${tNow('toast.created')} — ${activity.name}`, rows: [{ before: null, after: cloneAct(activity) }] });
         }
       }
 
-      toastOk(id !== null ? 'Actividad guardada ✓' : 'Actividad creada ✓');
+      toastOk(id !== null ? tNow('toast.saved') : tNow('toast.created'));
       onClose();
     } catch (error: any) {
       console.error('Failed to save activity:', error);
-      toastErr('Error al guardar: ' + (error.message || 'Error desconocido'));
+      toastErr(tNow('modal.saveError', { msg: error.message || tNow('settings.networkError') }));
     }
   }
 
@@ -386,7 +374,7 @@
         // Borrado suave (tombstone) para que el sync lo propague a otros dispositivos
         await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });
       }
-      toastOk('Actividad eliminada');
+      toastOk(tNow('toast.deleted'));
       onClose();
     }
   }
@@ -408,16 +396,16 @@
         days: [...daysOfWeek]
       });
       if (clone) {
-        toastOk(`Creada "${clone.name}" en el primer hueco libre ✓`);
+        toastOk(tNow('modal.createdCopy', { name: clone.name }));
         pushUndo({
-          label: `Duplicar ${clone.name}`,
+          label: `${tNow('modal.duplicate')} ${clone.name}`,
           rows: [{ before: null, after: cloneAct(clone) }]
         });
       } else {
-        toastErr('No hay hueco libre para duplicar');
+        toastErr(tNow('toast.noGap'));
       }
     } catch (error: any) {
-      toastErr('Error al duplicar: ' + (error.message || 'Error desconocido'));
+      toastErr(tNow('modal.duplicateError', { msg: error.message || tNow('settings.networkError') }));
     }
   }
 
@@ -441,8 +429,8 @@
 <div class="modal-overlay" onclick={onClose}>
   <div class="modal-content glass-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1" bind:this={modalEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
     <header class="modal-header">
-      <h2 id="modal-title">{id !== null ? 'Editar' : 'Nueva'} Actividad</h2>
-      <button class="close-btn" onclick={onClose} aria-label="Cerrar sin guardar"><X size={20} /></button>
+      <h2 id="modal-title">{id !== null ? $t('modal.editTitle') : $t('modal.newTitle')}</h2>
+      <button class="close-btn" onclick={onClose} aria-label={$t('modal.closeNoSave')}><X size={20} /></button>
     </header>
 
     <form onsubmit={e => { e.preventDefault(); save(); }}>
@@ -451,24 +439,24 @@
       <!-- Scope selector (only shown when opened from daily view) -->
       {#if targetDay !== null}
         <div class="scope-selector">
-          <label class="scope-label">Guardar en:</label>
+          <label class="scope-label">{$t('modal.saveIn')}</label>
           <div class="scope-options">
             <label class="scope-option" class:selected={saveScope === 'day'}>
               <input type="radio" name="scope" value="day" bind:group={saveScope} />
               <Zap size={14} />
-              <span>Solo este día (Temporal)</span>
+              <span>{$t('modal.scopeDay')}</span>
             </label>
             <label class="scope-option" class:selected={saveScope === 'week'}>
               <input type="radio" name="scope" value="week" bind:group={saveScope} />
               <Calendar size={14} />
-              <span>Plantilla semanal</span>
+              <span>{$t('dayView.templateMode')}</span>
             </label>
           </div>
         </div>
       {/if}
 
       <div class="form-group">
-        <label for="act-category">Categoría</label>
+        <label for="act-category">{$t('modal.category')}</label>
         <select id="act-category" bind:value={categoryId} required>
           {#each categories as cat}
             <option value={cat.id}>{cat.label}</option>
@@ -477,8 +465,8 @@
       </div>
 
       <div class="form-group">
-        <label for="act-name">¿Qué vas a hacer?</label>
-        <input id="act-name" type="text" bind:value={name} placeholder="Ej. Rutina Matutina" required class="input-large" />
+        <label for="act-name">{$t('modal.whatToDo')}</label>
+        <input id="act-name" type="text" bind:value={name} placeholder={$t('modal.namePlaceholder')} required class="input-large" />
       </div>
 
       <!-- Sección de Imagen de la rutina -->
@@ -486,15 +474,15 @@
         <div class="image-header">
           <div class="image-title">
             <ImageIcon size={18} />
-            <span>Imagen de la rutina</span>
+            <span>{$t('modal.routineImage')}</span>
           </div>
           {#if image}
             <div class="image-header-actions">
-              <button type="button" class="image-btn" onclick={openImagePreview} title="Ver imagen ampliada">
-                Ver
+              <button type="button" class="image-btn" onclick={openImagePreview} title={$t('modal.viewImageTitle')}>
+                {$t('modal.view')}
               </button>
-              <button type="button" class="image-btn image-btn-danger" onclick={removeImage} title="Quitar imagen">
-                <Trash2 size={14} /> Quitar
+              <button type="button" class="image-btn image-btn-danger" onclick={removeImage} title={$t('modal.removeImage')}>
+                <Trash2 size={14} /> {$t('modal.remove')}
               </button>
             </div>
           {/if}
@@ -502,16 +490,16 @@
 
         {#if image}
           <button type="button" class="image-preview" onclick={openImagePreview} title="Ver imagen ampliada">
-            <img src={image} alt="Imagen de la rutina" />
+            <img src={image} alt={$t('modal.routineImage')} />
           </button>
         {:else}
           <div class="image-actions">
             <label class="image-upload-btn">
               <input type="file" accept="image/*" onchange={handleImageFile} hidden />
-              <ImageIcon size={16} /> Subir archivo
+              <ImageIcon size={16} /> {$t('modal.uploadFile')}
             </label>
             <button type="button" class="image-upload-btn" onclick={() => showImageUrlInput = !showImageUrlInput}>
-              <Link2 size={16} /> Usar URL
+              <Link2 size={16} /> {$t('modal.useUrl')}
             </button>
           </div>
 
@@ -534,11 +522,11 @@
         <div class="steps-header">
           <div class="steps-title">
             <ListChecks size={18} />
-            <span>Pasos / Subtareas ({steps.length})</span>
+            <span>{$t('modal.stepsCount', { n: steps.length })}</span>
           </div>
           {#if steps.length === 0}
-            <button type="button" class="preset-btn-sparkle" onclick={applyRoutinePresets} aria-label="Sugerir pasos de rutina según la categoría">
-              <Sparkles size={14} /> Sugerir rutina
+            <button type="button" class="preset-btn-sparkle" onclick={applyRoutinePresets} aria-label={$t('modal.suggestRoutineAria')}>
+              <Sparkles size={14} /> {$t('modal.suggestRoutine')}
             </button>
           {/if}
         </div>
@@ -547,13 +535,13 @@
           <input
             type="text"
             bind:value={newStepInput}
-            placeholder="Escribe un paso y presiona Enter..."
-            aria-label="Nuevo paso"
+            placeholder={$t('modal.stepPlaceholder')}
+            aria-label={$t('modal.newStep')}
             class="step-input"
             onkeydown={e => { if (e.key === 'Enter') { e.preventDefault(); addStep(); } }}
           />
-          <button type="button" class="btn-add-step" onclick={addStep} title="Agregar paso" aria-label="Agregar paso">
-            <Plus size={18} /> Añadir
+          <button type="button" class="btn-add-step" onclick={addStep} title={$t('modal.addStep')} aria-label={$t('modal.addStep')}>
+            <Plus size={18} /> {$t('modal.add')}
           </button>
         </div>
 
@@ -565,7 +553,7 @@
                   type="button"
                   class="step-check-btn"
                   onclick={() => toggleStep(step.id)}
-                  aria-label="Completar paso"
+                  aria-label={$t('modal.completeStep')}
                   aria-pressed={step.completed}
                 >
                   {#if step.completed}
@@ -584,7 +572,7 @@
                   type="button"
                   class="step-delete-btn"
                   onclick={() => removeStep(step.id)}
-                  aria-label="Eliminar paso"
+                  aria-label={$t('modal.deleteStep')}
                 >
                   <Trash2 size={15} />
                 </button>
@@ -597,7 +585,7 @@
       <div class="time-controls-box">
         <div class="time-row-modern">
           <div class="time-picker-group">
-            <label for="act-start">Desde</label>
+            <label for="act-start">{$t('modal.from')}</label>
             <select id="act-start" bind:value={startTime} class="time-select-modern">
               {#each startTimeOptions as opt}
                 <option value={opt.value}>{opt.label}</option>
@@ -605,10 +593,10 @@
             </select>
           </div>
 
-          <span class="to-separator">a</span>
+          <span class="to-separator">{$t('modal.toSep')}</span>
 
           <div class="time-picker-group">
-            <label for="act-end">Hasta</label>
+            <label for="act-end">{$t('modal.to')}</label>
             <select id="act-end" bind:value={endTime} class="time-select-modern">
               {#each endTimeOptions() as opt}
                 <option value={opt.value}>{opt.label}</option>
@@ -618,7 +606,7 @@
         </div>
 
         <div class="duration-controls">
-          <span class="hint-text">Ajuste rápido:</span>
+          <span class="hint-text">{$t('modal.quickAdjust')}</span>
           <div class="duration-chips">
             <button type="button" class="chip" onclick={() => addDuration(15)}>15m</button>
             <button type="button" class="chip" onclick={() => addDuration(30)}>30m</button>
@@ -629,14 +617,14 @@
         </div>
 
         <div class="duration-hint">
-          Duración total: <strong>{durationMinutes >= 60 ? `${Math.floor(durationMinutes/60)}h ${durationMinutes%60}m` : `${durationMinutes}m`}</strong>
+          {$t('modal.totalDuration')} <strong>{durationMinutes >= 60 ? `${Math.floor(durationMinutes/60)}h ${durationMinutes%60}m` : `${durationMinutes}m`}</strong>
         </div>
       </div>
 
       <!-- Days selector: hide when saving only to this day's override -->
       {#if saveScope === 'week'}
         <div class="form-group">
-          <label>Días de la semana</label>
+          <label>{$t('modal.daysOfWeek')}</label>
           <div class="days-selector">
             {#each days as day}
               <button
@@ -644,7 +632,7 @@
                 class="day-toggle"
                 class:selected={daysOfWeek.includes(day.index)}
                 aria-pressed={daysOfWeek.includes(day.index)}
-                aria-label="{['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][day.index]}"
+                aria-label={$t(`day.${day.index}`)}
                 onclick={() => toggleDay(day.index)}
               >
                 {day.label}
@@ -652,8 +640,8 @@
             {/each}
           </div>
           <div class="presets">
-            <button type="button" class="preset-btn" onclick={selectWeekdays}>Lunes a Viernes</button>
-            <button type="button" class="preset-btn" onclick={selectAll}>Toda la semana</button>
+            <button type="button" class="preset-btn" onclick={selectWeekdays}>{$t('modal.weekdays')}</button>
+            <button type="button" class="preset-btn" onclick={selectAll}>{$t('modal.allWeek')}</button>
           </div>
         </div>
       {/if}
@@ -661,16 +649,16 @@
       <footer class="modal-footer">
         {#if id !== null}
           <button type="button" class="btn btn-danger" onclick={() => confirmDuplicate = true}>
-            <Copy size={18} /> Duplicar
+            <Copy size={18} /> {$t('modal.duplicate')}
           </button>
           <button type="button" class="btn btn-danger" onclick={() => confirmRemove = true}>
-            <Trash2 size={18} /> Eliminar
+            <Trash2 size={18} /> {$t('confirm.deleteBtn')}
           </button>
         {/if}
         <div class="footer-right">
-          <button type="button" class="btn btn-secondary" onclick={onClose}>Cancelar</button>
+          <button type="button" class="btn btn-secondary" onclick={onClose}>{$t('confirm.cancel')}</button>
           <button type="submit" class="btn btn-primary">
-            <CheckCircle size={18} /> Guardar
+            <CheckCircle size={18} /> {$t('modal.save')}
           </button>
         </div>
       </footer>
@@ -680,18 +668,18 @@
 
 <ConfirmDialog
   bind:open={confirmRemove}
-  title="Eliminar actividad"
-  message="¿Eliminar esta actividad? Esta acción no se puede deshacer."
-  confirmText="Eliminar"
+  title={$t('modal.deleteTitle')}
+  message={$t('modal.deleteMsg')}
+  confirmText={$t('confirm.deleteBtn')}
   danger
   onconfirm={remove}
 />
 
 <ConfirmDialog
   bind:open={confirmDuplicate}
-  title="Duplicar actividad"
-  message={`Se creará "${name} (copia)" en el primer hueco libre de sus días (${daysOfWeek.length} día${daysOfWeek.length === 1 ? '' : 's'}).`}
-  confirmText="Duplicar"
+  title={$t('modal.duplicateTitle')}
+  message={$t('modal.duplicateMsg', { name, days: daysOfWeek.length })}
+  confirmText={$t('modal.duplicate')}
   onconfirm={duplicate}
 />
 

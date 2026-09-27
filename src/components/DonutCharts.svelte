@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Activity, Category } from '../lib/types.js';
   import { parseTime } from '../lib/stores.js';
+  import { t } from '../lib/i18n';
 
   // Donut SVG propio (~2 KB) en lugar de layerchart (~120 KB gzip):
   // misma estetica (innerRadius 50, porciones con separacion, overlay de horas).
@@ -98,9 +99,9 @@
 
 <div class="stats-container">
   <div class="stat-card glass-panel">
-    <h3>Horas Hoy</h3>
+    <h3>{$t('week.hoursToday')}</h3>
     <div class="chart-wrapper">
-      <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label="Distribución de horas de hoy por categoría">
+      <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label={$t('week.hoursTodayAria')}>
         {#each ringSegments(dayStats) as seg (seg.key)}
           <path d={seg.d} fill={seg.color} />
         {/each}
@@ -121,9 +122,9 @@
   </div>
 
   <div class="stat-card glass-panel">
-    <h3>Horas Semana</h3>
+    <h3>{$t('week.hoursWeek')}</h3>
     <div class="chart-wrapper">
-      <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label="Distribución de horas de la semana por categoría">
+      <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label={$t('week.hoursWeekAria')}>
         {#each ringSegments(weekStats) as seg (seg.key)}
           <path d={seg.d} fill={seg.color} />
         {/each}

@@ -11,6 +11,7 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr, toastErrRepetido } from '../lib/toast';
   import { portal } from '../lib/portal';
+  import { t, tNow } from '../lib/i18n';
   import { pushUndo, cloneAct } from '../lib/undo';
 
   interface Props {
@@ -58,7 +59,7 @@
     } as unknown as Activity);
   }
 
-  const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+  const DAY_NAMES = $derived([0, 1, 2, 3, 4, 5, 6].map(i => $t(`day.${i}`)));
   const dayName = $derived(DAY_NAMES[day]);
   const startHour = $derived(settings.startHour);
   const endHour = $derived(settings.endHour);
@@ -327,7 +328,7 @@
 
   async function doRestoreDefault() {
     await db.dayOverrides.delete(day);
-    toastOk('Plantilla restaurada');
+    toastOk(tNow('toast.templateRestored'));
   }
 
   async function saveAsPermanentTemplate() {
@@ -363,7 +364,7 @@
 
     // Remove the override since it's now the master
     await db.dayOverrides.delete(day);
-    toastOk('Aplicado a la plantilla semanal');
+    toastOk(tNow('toast.appliedWeek'));
   }
 
   let confirmDelete = $state(false);
@@ -406,7 +407,7 @@
       const res = computeLayoutForDrop(clientY, draggedActivityId);
       if (!res) return;
       setInvalid(!res.valido);
-      dragHint = !res.valido ? '⛔ No cabe' : res.accion === 'insertar' ? '↕ Insertar aquí' : '';
+      dragHint = !res.valido ? '⛔ ' + $t('toast.noFit') : res.accion === 'insertar' ? '↕ ' + $t('dayView.insertHere') : '';
       // (El resalte de mitad del pisado se retiró: el feedback de posición
       // vive en la tarjeta flotante — hora proyectada + acción del drop.)
       // Anti-parpadeo: solo reasignar dropPreview si el layout cambió por
@@ -519,7 +520,7 @@
       if (!res) return;
       setInvalid(!res.valido);
       // F4: feedback de por qué topó el borde (el deseo del puntero se acotó).
-      dragHint = res.limitadoPor ? `↕ Limitado por ${res.limitadoPor}` : '';
+      dragHint = res.limitadoPor ? `↕ ${tNow('dayView.limitedBy', { what: res.limitadoPor })}` : '';
       topOverride = { id: t.activityId, start: res.movido.start, end: res.movido.end };
       dropPreview = toSlotMap(res.slots);
     },
@@ -600,7 +601,7 @@
     // ±15 min es un deseo exacto: pared anclada que empuja lo que pisa.
     // Si el empuje en cadena desborda el día → ⛔ y NADA se escribe.
     const res = resolveNudgeDay(slots, activity.id!, newStart, startHour, endHour);
-    if (!res.valido) { toastErrRepetido(`teclado:${activity.id}`, '⛔ No cabe: el empuje desbordaría el día'); return; }
+    if (!res.valido) { toastErrRepetido(`teclado:${activity.id}`, tNow('toast.noFit')); return; }
     await commitResolved(toSlotMap(res.slots));
   }
 
@@ -628,7 +629,7 @@
     if (!cambio) return;
     try {
       const { commitCambios } = await import('../lib/commit');
-      const label = `Mover en ${DAY_NAMES[day]}`;
+      const label = tNow('dayView.moveIn', { day: DAY_NAMES[day] });
       // Sin toast de éxito (pedido del usuario): el movimiento confirmado no
       // avisa nada; los errores sí (toastErr). El paso queda en el stack de
       // undo por si se reviviera la acción.
@@ -637,7 +638,7 @@
         ovs: [{ day, activities: $state.snapshot(overrideActs) as Activity[] }]
       });
     } catch (err: any) {
-      toastErr('No se pudo mover: ' + (err?.message || err));
+      toastErr(tNow('toast.couldNotMove') + ': ' + (err?.message || err));
     }
   }
 
@@ -700,7 +701,7 @@
       }
 
       if (placed === null) {
-        toastErr('No hay hueco libre para duplicar');
+        toastErr(tNow('toast.noGap'));
         return;
       }
 
@@ -719,7 +720,7 @@
         activities: $state.snapshot(overrideActs),
         updatedAt: Date.now()
       });
-      toastOk(`${clone.name} → ${format12h(clone.startTime)}`);
+      toastOk(tNow('toast.duplicated', { name: clone.name, time: format12h(clone.startTime) }));
     } else {
       // ── Modo Plantilla: duplicar como actividad maestra en el mismo día ──
       const days = source.daysOfWeek?.length ? source.daysOfWeek : [day];
@@ -729,9 +730,9 @@
         days
       });
       if (clone) {
-        toastOk(`${clone.name} → ${format12h(clone.startTime)}`);
+        toastOk(tNow('toast.duplicated', { name: clone.name, time: format12h(clone.startTime) }));
       } else {
-        toastErr('No hay hueco libre para duplicar');
+        toastErr(tNow('toast.noGap'));
       }
     }
   }
@@ -759,7 +760,7 @@
         });
         if (victim) {
           pushUndo({
-            label: `Quitar ${victim.name} de ${DAY_NAMES[day]}`,
+            label: `${tNow('toast.deleted')} — ${victim.name} (${DAY_NAMES[day]})`,
             rows: [],
             overrides: [{ day, before: ovBefore ?? null, after: await db.dayOverrides.get(day) ?? null }]
           });
@@ -768,12 +769,12 @@
         const before = await db.activities.get(id);
         await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });
         if (before) {
-          pushUndo({ label: `Eliminar ${before.name}`, rows: [{ before, after: await db.activities.get(id) ?? null }] });
+          pushUndo({ label: `${tNow('toast.deleted')} — ${before.name}`, rows: [{ before, after: await db.activities.get(id) ?? null }] });
         }
       }
-      toastOk('Actividad eliminada');
+      toastOk(tNow('toast.deleted'));
     } catch (err: any) {
-      toastErr('No se pudo eliminar: ' + (err?.message || err));
+      toastErr(tNow('toast.couldNotDelete') + ': ' + (err?.message || err));
     }
   }
 </script>
@@ -796,27 +797,27 @@
         class:active={isTemporaryMode}
         onclick={() => isTemporaryMode = true}
       >
-        <Zap size={14} /> Solo este día
+        <Zap size={14} /> {$t('dayView.tempMode')}
       </button>
       <button
         class="mode-btn"
         class:active={!isTemporaryMode}
         onclick={() => isTemporaryMode = false}
       >
-        <Calendar size={14} /> Plantilla semanal
+        <Calendar size={14} /> {$t('dayView.templateMode')}
       </button>
     </div>
 
     <!-- Override banner -->
     {#if isTemporaryMode && hasOverride}
       <div class="override-banner">
-        <span class="banner-text">⚡ Cambios temporales activos</span>
+        <span class="banner-text">{$t('dayView.tempBanner')}</span>
         <div class="banner-actions">
           <button class="btn-banner btn-restore" onclick={restoreDefaultTemplate}>
-            <RotateCcw size={14} /> Restaurar
+            <RotateCcw size={14} /> {$t('dayView.restore')}
           </button>
           <button class="btn-banner btn-save" onclick={saveAsPermanentTemplate}>
-            <Save size={14} /> Aplicar a semana
+            <Save size={14} /> {$t('dayView.applyWeek')}
           </button>
         </div>
       </div>
@@ -836,7 +837,7 @@
       {#if layoutActivities.length === 0}
         <div class="empty-state glass-panel" aria-live="polite">
           <span class="empty-icon">🌱</span>
-          <p>Día libre — tocá cualquier hueco del horario para crear una actividad</p>
+          <p>{$t('dayView.empty')}</p>
         </div>
       {/if}
       {#key day}
@@ -853,7 +854,7 @@
           onanimationend={(e) => { if (e.animationName === 'shake-x') shakeInvalid = false; }}
           role="button"
           tabindex="0"
-          aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{totalSteps ? `, ${doneSteps} de ${totalSteps} pasos` : ''}. Arrastrar o tocar para editar"
+          aria-label="{activity.name}, {format12h(activity.startTime)} — {format12h(activity.endTime)}{totalSteps ? `, ${$t('dayView.steps', { done: doneSteps, total: totalSteps })}` : ''}. {$t('dayView.dragHint')}"
           onpointerdown={(e) => handlePointerDown(e, activity)}
           oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
           onclick={() => onEditActivity(activity.id!, activity)}
@@ -879,7 +880,7 @@
                 <button
                   type="button"
                   class="activity-image-thumb"
-                  aria-label="Ver imagen de {activity.name}"
+                  aria-label={$t('dayView.viewImage', { name: activity.name })}
                   onclick={(e) => { e.stopPropagation(); viewingImageActivity = activity; }}
                 >
                   <img src={activity.image} alt="" />
@@ -894,7 +895,7 @@
             <button
               class="edit-btn"
               onclick={(e) => { e.stopPropagation(); onEditActivity(activity.id!, activity); }}
-              aria-label="Editar {activity.name}"
+              aria-label={$t('dayView.edit', { name: activity.name })}
             >
               <Edit3 size={13} />
             </button>
@@ -931,40 +932,40 @@
          y ancla el position:fixed al PANEL (menú lejos del cursor). Mismo fix que Semana. -->
     <div class="custom-context-menu glass-panel" use:portal style="top: {contextMenu.y}px; left: {contextMenu.x}px">
       <button onclick={duplicateActivity}>
-        <Copy size={16} /> Duplicar (Independiente)
+        <Copy size={16} /> {$t('menu.duplicate')}
       </button>
       {#if contextMenuActivity?.image}
         <button onclick={() => { viewingImageActivity = contextMenuActivity; }}>
-          <ImageIcon size={16} /> Ver imagen
+          <ImageIcon size={16} /> {$t('menu.viewImage')}
         </button>
       {/if}
       <button class="delete-btn" onclick={askDeleteActivity}>
-        <Trash2 size={16} /> Eliminar
+        <Trash2 size={16} /> {$t('menu.delete')}
       </button>
     </div>
   {/if}
 
   <ConfirmDialog
     bind:open={confirmDelete}
-    title="Eliminar actividad"
-    message="¿Eliminar esta actividad del día? Esta acción no se puede deshacer."
-    confirmText="Eliminar"
+    title={$t('confirm.deleteTitle')}
+    message={$t('confirm.deleteDayMsg')}
+    confirmText={$t('confirm.deleteBtn')}
     danger
     onconfirm={deleteActivity}
   />
   <ConfirmDialog
     bind:open={confirmRestore}
-    title="Restaurar plantilla"
-    message="¿Restaurar la plantilla por defecto para este día? Se perderán los cambios temporales."
-    confirmText="Restaurar"
+    title={$t('confirm.restoreTemplateTitle')}
+    message={$t('confirm.restoreTemplateMsg')}
+    confirmText={$t('dayView.restore')}
     danger
     onconfirm={doRestoreDefault}
   />
   <ConfirmDialog
     bind:open={confirmSavePermanent}
-    title="Aplicar como plantilla semanal"
-    message="¿Aplicar estos cambios temporales como la plantilla semanal permanente? Reemplazará las actividades de este día en toda la semana."
-    confirmText="Aplicar"
+    title={$t('confirm.applyTemplateTitle')}
+    message={$t('confirm.applyTemplateMsg')}
+    confirmText={$t('confirm.applyBtn')}
     onconfirm={doSavePermanent}
   />
 

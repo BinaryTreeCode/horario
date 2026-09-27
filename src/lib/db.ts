@@ -246,11 +246,10 @@ export function backupToLocalStorage() {
         // Toast de error — persistente hasta que el usuario lo cierre (regla
         // dura de AGENTS.md: nunca alert() nativo). Import diferido para evitar
         // dependencia circular toast ↔ db.
-        import('./toast').then(({ toastErr }) =>
-          toastErr(
-            '⚠️ Respaldo automático pausado: localStorage lleno. Tus datos siguen intactos en la base principal. Usa "Exportar JSON" (Ajustes) o inicia sesión para respaldar en la nube.'
-          )
-        );
+        import('./toast').then(async ({ toastErr }) => {
+          const { tNow } = await import('./i18n');
+          toastErr(tNow('toast.quotaPaused'));
+        });
       }
     }
   }, 1000);

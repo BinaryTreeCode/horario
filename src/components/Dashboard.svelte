@@ -16,6 +16,7 @@
   import { undoStack } from '../lib/undo';
   import { Settings, Calendar, Clock, Plus, ChevronsUp, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
   import { onSyncChange, syncNow } from '../lib/sync';
+  import { t } from '../lib/i18n';
   import type { SyncStatus } from '../lib/types';
 
   let currentView = $state('week'); // 'week' | 'day'
@@ -41,8 +42,8 @@
     // pop del op + ejecución en chunk diferido (undoRun no va al bundle inicial)
     import('../lib/undoRun')
       .then(m => (redo ? m.popAndRedo() : m.popAndUndo()))
-      .then(label => { if (label) toastOk(redo ? `Rehecho: ${label}` : `Deshecho: ${label}`); })
-      .catch(err => toastErr('No se pudo ' + (redo ? 'rehacer' : 'deshacer') + ': ' + (err?.message || err)));
+      .then(label => { if (label) toastOk(redo ? `↻ ${label}` : tNow('toast.undone', { label })); })
+      .catch(err => toastErr(tNow('toast.couldNotMove') + ': ' + (err?.message || err)));
   }
 
   $effect(() => {
@@ -208,7 +209,7 @@
       });
     } catch (err: any) {
       console.error('Failed to adjust activities:', err);
-      toastErr('Error al ajustar las actividades: ' + (err.message || err));
+      toastErr(tNow('toast.couldNotMove') + ': ' + (err.message || err));
     }
   }
 </script>
@@ -217,22 +218,22 @@
   <!-- Top Navigation & Title -->
   <header class="dashboard-header glass-panel">
     <div class="header-left">
-      <div class="logo">🌲 Nature Planner</div>
-      <nav class="view-tabs" aria-label="Cambiar vista">
-        <button class:active={currentView === 'week'} onclick={() => currentView = 'week'} aria-label="Ver semana" aria-pressed={currentView === 'week'}>
-          <Calendar size={18} /> Semana
+      <div class="logo">🌲 {$t('app.name')}</div>
+      <nav class="view-tabs" aria-label="{$t('header.viewWeek')} / {$t('header.viewDay')}">
+        <button class:active={currentView === 'week'} onclick={() => currentView = 'week'} aria-label={$t('header.viewWeek')} aria-pressed={currentView === 'week'}>
+          <Calendar size={18} /> {$t('header.week')}
         </button>
-        <button class:active={currentView === 'day'} onclick={() => currentView = 'day'} aria-label="Ver día" aria-pressed={currentView === 'day'}>
-          <Clock size={18} /> Día
+        <button class:active={currentView === 'day'} onclick={() => currentView = 'day'} aria-label={$t('header.viewDay')} aria-pressed={currentView === 'day'}>
+          <Clock size={18} /> {$t('header.day')}
         </button>
       </nav>
     </div>
     <div class="header-right">
-      <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label="Ajustar Arriba" title="Ajusta todas las actividades para cubrir el espacio superior sobrante">
-        <ChevronsUp size={20} /> <span class="hide-mobile">Ajustar Arriba</span>
+      <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label={$t('header.adjustUp')} title={$t('header.adjustUpTitle')}>
+        <ChevronsUp size={20} /> <span class="hide-mobile">{$t('header.adjustUp')}</span>
       </button>
-      <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label="Nueva Actividad">
-        <Plus size={20} /> <span class="hide-mobile">Nueva Actividad</span>
+      <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label={$t('header.newActivity')}>
+        <Plus size={20} /> <span class="hide-mobile">{$t('header.newActivity')}</span>
       </button>
       {#if syncStatus !== 'local'}
         <button
@@ -247,7 +248,7 @@
           {:else}<CloudOff size={16} />{/if}
         </button>
       {/if}
-      <button class="btn btn-secondary btn-icon" onclick={openSettings} aria-label="Abrir ajustes">
+      <button class="btn btn-secondary btn-icon" onclick={openSettings} aria-label={$t('header.settings')}>
         <Settings size={20} />
       </button>
     </div>

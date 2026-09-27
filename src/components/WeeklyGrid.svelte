@@ -13,6 +13,7 @@
   import { cloneAct } from '../lib/undo';
   import { portal } from '../lib/portal';
   import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
+  import { t, tNow } from '../lib/i18n';
 
   interface Props {
     activities: Activity[];
@@ -54,7 +55,7 @@
 
   onDestroy(() => engine.destroy());
 
-  const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+  const days = $derived([0, 1, 2, 3, 4, 5, 6].map(i => $t(`day.${i}`)));
   const startHour = $derived(settings.startHour);
   const endHour = $derived(settings.endHour);
   const totalHours = $derived(endHour - startHour);
@@ -548,7 +549,7 @@
       await commitCambios({ label, acts });
       return label;
     } catch {
-      toastErr('No se pudo mover');
+      toastErr(tNow('toast.couldNotMove'));
       return null;
     }
   }
@@ -720,9 +721,9 @@
     });
 
     if (clone) {
-      toastOk(`${clone.name} → ${format12h(clone.startTime)}`);
+      toastOk(tNow('toast.duplicated', { name: clone.name, time: format12h(clone.startTime) }));
     } else {
-      toastErr('No hay hueco libre para duplicar');
+      toastErr(tNow('toast.noGap'));
     }
   }
 
@@ -744,7 +745,7 @@
         .filter(o => o.activities?.some(a => a.id === id))
         .map(o => ({ ...o, activities: o.activities.filter(a => a.id !== id) }));
       if (dirty.length > 0) await db.dayOverrides.bulkPut(dirty);
-      toastOk('Actividad eliminada');
+      toastOk(tNow('toast.deleted'));
     } catch (err: any) {
       console.error(err);
     }
@@ -754,7 +755,7 @@
 <svelte:window onclick={closeContextMenu} onscroll={closeContextMenu} />
 
 <div class="weekly-grid-container" style="--total-slots: {totalSlots}; --slot-height: {slotHeightPx}px">
-  <div class="scroll-hint" aria-hidden="true">Deslizá para ver los días →</div>
+  <div class="scroll-hint" aria-hidden="true">{$t('week.scrollHint')}</div>
   <div class="grid-scroll">
   <div class="time-column">
     <div class="header-spacer"></div>
@@ -778,13 +779,13 @@
         <!-- Nombre completo SIEMPRE accesible: en columna angosta el header muestra
              la abreviatura (Mié/Sáb) y el title lleva el nombre entero. Sin
              nombres cortados a medias jamás. -->
-        <button class="day-header" onclick={() => onSelectDay(i)} aria-label="Ver {day} en vista de día" title="{day}">
+        <button class="day-header" onclick={() => onSelectDay(i)} aria-label={$t('week.viewDay', { day })} title="{day}">
           <span class="day-name">
             <span class="day-name-completo">{day}</span>
             <span class="day-name-corto" aria-hidden="true">{day.slice(0, 3)}</span>
           </span>
           {#if dayOverrides.some(o => o.day === i && o.activities?.length >= 0)}
-            <span class="day-temp-badge" title="Tiene edición temporal activa en la vista diaria">⚡</span>
+            <span class="day-temp-badge" title={$t('week.tempBadge')}>⚡</span>
           {/if}
         </button>
         <div
@@ -809,7 +810,7 @@
                   nudgeWeekly(activity, e.key === 'ArrowUp' ? -0.25 : 0.25);
                 }
               }}
-              aria-label="{activity.name}, {format12h(activity.startTime)} a {format12h(activity.endTime)}{activity.steps?.length ? `, ${activity.steps.length} pasos` : ''}. Flechas arriba/abajo para mover, Enter para editar"
+              aria-label="{activity.name}, {format12h(activity.startTime)} — {format12h(activity.endTime)}{activity.steps?.length ? `, ${activity.steps.length}` : ''}. {$t('dayView.keyboardHint')}"
             >
               <div class="activity-title">
                 <span>{activity.name}</span>
@@ -818,7 +819,7 @@
                     class="grid-steps-icon grid-image-icon"
                     role="button"
                     tabindex="0"
-                    title="Ver imagen de la rutina"
+                    title={$t('menu.viewImage')}
                     onclick={(e) => { e.stopPropagation(); viewingImageActivity = activity; }}
                     onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); viewingImageActivity = activity; } }}
                   >
@@ -864,16 +865,16 @@
   {#if contextMenu.show}
     <!-- Portal a body: backdrop-filter de .glass-panel ancestro crea containing block y rompe el position:fixed -->
     <div class="custom-context-menu glass-panel" use:portal style="top: {contextMenu.y}px; left: {contextMenu.x}px">
-      <button onclick={duplicateActivity} aria-label="Duplicar actividad como bloque independiente">
-        <Copy size={16} /> Duplicar (Independiente)
+      <button onclick={duplicateActivity} aria-label={$t('menu.duplicate')}>
+        <Copy size={16} /> {$t('menu.duplicate')}
       </button>
       {#if viewingImageActivity === null && activityHasImage}
         <button onclick={() => { viewingImageActivity = activities.find(a => a.id === contextMenu.activityId) || null; }}>
-          <ImageIcon size={16} /> Ver imagen
+          <ImageIcon size={16} /> {$t('menu.viewImage')}
         </button>
       {/if}
       <button class="delete-btn" onclick={askDeleteActivity}>
-        <Trash2 size={16} /> Eliminar
+        <Trash2 size={16} /> {$t('menu.delete')}
       </button>
     </div>
   {/if}

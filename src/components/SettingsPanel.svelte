@@ -5,11 +5,13 @@
   import type { SyncStatus } from '../lib/types';
   import { Cloud, CloudUpload, LogIn, LogOut, RefreshCw, UserPlus } from '@lucide/svelte';
   import type { Category } from '../lib/types';
-  import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck } from '@lucide/svelte';
+  import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck, Languages } from '@lucide/svelte';
+  import { idioma, cambiarIdioma, t, IDIOMAS_DISPONIBLES } from '../lib/i18n';
   import { dndzone } from 'svelte-dnd-action';
   import { flip } from 'svelte/animate';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
+  import { tNow } from '../lib/i18n';
   import { clearUndo } from '../lib/undo';
   import { notifyDataChange } from '../lib/dataBus';
   import Toasts from './Toasts.svelte';
@@ -70,7 +72,7 @@
       });
       const data = await res.json();
       if (!res.ok) {
-        authError = data?.error ?? 'Error de autenticación';
+        authError = data?.error ?? tNow('settings.authError');
         return;
       }
       loggedIn = true;
@@ -78,11 +80,11 @@
       // vive solo en memoria; la nube recibe blobs que no puede leer.
       await establecerClave(authEmail, authPassword);
       authPassword = '';
-      syncMessage = 'Sincronizando…';
+      syncMessage = tNow('settings.syncingMsg');
       await initialSyncAfterLogin();
-      syncMessage = '✅ Sincronizado con la nube (cifrado E2E)';
+      syncMessage = tNow('settings.syncedE2E');
     } catch (err: any) {
-      authError = err?.message ?? 'Error de red';
+      authError = err?.message ?? tNow('settings.networkError');
     } finally {
       authBusy = false;
     }
@@ -98,12 +100,12 @@
   }
 
   async function handleManualSync() {
-    syncMessage = 'Sincronizando…';
+    syncMessage = tNow('settings.syncingMsg');
     try {
       await syncNow(true);
-      syncMessage = '✅ Sincronizado';
+      syncMessage = tNow('settings.syncedMsg');
     } catch (err: any) {
-      syncMessage = '⚠️ ' + (err?.message ?? 'Error de sync');
+      syncMessage = tNow('settings.syncFail', { msg: err?.message ?? tNow('settings.syncFailGeneric') });
     }
   }
 
@@ -212,18 +214,18 @@
           await db.categories.bulkPut(removed.map(c => ({ ...c, deletedAt: stampCat, updatedAt: stampCat })));
         });
         const names = removed.map(c => `"${c.label}"`).join(', ');
-        toastOk(`Categorías eliminadas: ${names}. Sus actividades ahora pertenecen a "Rutina".`);
+        toastOk(tNow('settings.removedCats', { names }));
       }
 
       if (snapshot.length > 0) {
         await db.categories.bulkPut(snapshot);
       }
 
-      toastOk('Ajustes guardados ✓');
+      toastOk(tNow('settings.saved'));
       onClose();
     } catch (err: any) {
       console.error('Error saving settings:', err);
-      toastErr('Error al guardar: ' + (err.message || 'Error desconocido'));
+      toastErr(tNow('settings.saveError', { msg: err.message || tNow('settings.networkError') }));
     }
   }
 
@@ -231,7 +233,7 @@
     const id = `cat-${Date.now()}`;
     localCategories = [
       ...localCategories,
-      { id, label: 'Nueva Categoría', color: '#999999', order: localCategories.length, updatedAt: Date.now() }
+      { id, label: tNow('settings.newCategory'), color: '#999999', order: localCategories.length, updatedAt: Date.now() }
     ];
   }
 
@@ -252,7 +254,7 @@
   async function restoreDefaultsConfirm() {
     const { INITIAL_CATEGORIES } = await import('../lib/db');
     localCategories = [...INITIAL_CATEGORIES];
-    toastOk('Categorías restablecidas — pulsa Guardar Todo para aplicar');
+    toastOk(tNow('settings.catsReset'));
   }
 
   // ── Borrar todo (zona de peligro) ──
@@ -293,11 +295,11 @@
       });
       clearUndo(); // sin historial: nada que deshacer tras el borrado
       notifyDataChange(['activities', 'categories', 'settings', 'dayOverrides']);
-      toastOk('Todos los datos fueron borrados');
+      toastOk(tNow('toast.wiped'));
       onClose();
     } catch (err: any) {
       console.error('Error al borrar todo:', err);
-      toastErr('No se pudo borrar: ' + (err?.message || err));
+      toastErr(tNow('settings.wipeError', { msg: err?.message || err }));
     } finally {
       wipingAll = false;
     }
@@ -315,7 +317,7 @@
       // Revocar con delay: revocar inmediatamente puede cortar la descarga en algunos navegadores
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (err: any) {
-      toastErr('Error al exportar: ' + err.message);
+      toastErr(tNow('settings.exportError', { msg: err.message }));
     }
   }
 
@@ -332,13 +334,13 @@
     }
     importFileName = file.name;
     if (file.size > MAX_IMPORT_SIZE) {
-      toastErr(`El archivo es demasiado grande (${(file.size / 1024 / 1024).toFixed(1)} MB). El límite es ${MAX_IMPORT_SIZE / 1024 / 1024} MB.`);
+      toastErr(tNow('settings.fileTooBig', { size: (file.size / 1024 / 1024).toFixed(1), max: MAX_IMPORT_SIZE / 1024 / 1024 }));
       return;
     }
 
     const reader = new FileReader();
     reader.onerror = () => {
-      toastErr('No se pudo leer el archivo. Verifica que exista y que tengas permisos sobre él.');
+      toastErr(tNow('settings.fileReadError'));
     };
     reader.onload = async (e) => {
       try {
@@ -347,7 +349,7 @@
         // 1) Validar ANTES de tocar la base de datos
         const validation = validateImport(text);
         if (!validation.valid) {
-          toastErr('No se pudo importar:\n' + validation.error);
+          toastErr(tNow('settings.importFailed', { error: validation.error }));
           return;
         }
 
@@ -357,19 +359,19 @@
         pendingImport = {
           validation,
           summary: [
-            `Actividades: ${s.activities}`,
-            `Categorías: ${s.categories}`,
-            `Ajustes: ${s.settings}`,
-            `Ediciones temporales por día: ${s.dayOverrides}`
+            tNow('settings.summaryActs', { n: s.activities }),
+            tNow('settings.summaryCats', { n: s.categories }),
+            tNow('settings.summarySettings', { n: s.settings }),
+            tNow('settings.summaryOverrides', { n: s.dayOverrides })
           ].join('\n'),
           warnings:
             warnings.length > 6
-              ? [...warnings.slice(0, 6), `… y ${warnings.length - 6} advertencias más`]
+              ? [...warnings.slice(0, 6), tNow('settings.moreWarnings', { count: warnings.length - 6 })]
               : warnings
         };
         confirmImport = true;
       } catch (err: any) {
-        toastErr('Error al importar: ' + (err?.message || 'Error desconocido'));
+        toastErr(tNow('settings.importError', { msg: err?.message || tNow('settings.networkError') }));
       }
     };
     reader.readAsText(file);
@@ -391,15 +393,15 @@
       if (await isLoggedIn()) {
         try {
           await syncNow(true);
-          toastOk('Datos importados y sincronizados con la nube ✓');
+          toastOk(tNow('settings.importedSynced'));
         } catch {
-          toastErr('Datos importados en este dispositivo. La subida a la nube falló — reintenta desde el banner de sincronización.');
+          toastErr(tNow('settings.importedLocal'));
         }
       } else {
-        toastOk('Datos importados con éxito ✓');
+        toastOk(tNow('settings.imported'));
       }
     } catch (err: any) {
-      toastErr('Error al importar: ' + (err?.message || 'Error desconocido'));
+      toastErr(tNow('settings.importError', { msg: err?.message || tNow('settings.networkError') }));
     }
   }
 </script>
@@ -407,56 +409,75 @@
 <div class="modal-overlay" onclick={onClose}>
   <div class="modal-content glass-panel" tabindex="-1" bind:this={panelEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
     <header class="modal-header">
-      <h2>Configuración</h2>
-      <button class="close-btn" onclick={onClose} aria-label="Cerrar ajustes"><X size={20} /></button>
+      <h2>{$t('settings.title')}</h2>
+      <button class="close-btn" onclick={onClose} aria-label={$t('settings.closeSettings')}><X size={20} /></button>
     </header>
 
     <div class="settings-sections">
       <!-- ── Cuenta y respaldo en la nube ── -->
       <section class="settings-section">
-        <h3><Cloud size={16} /> Cuenta y respaldo en la nube</h3>
+        <h3><Cloud size={16} /> {$t('settings.account')}</h3>
         {#if authLoading}
-          <p class="sync-hint">Comprobando sesión…</p>
+          <p class="sync-hint">{$t('settings.checkingSession')}</p>
         {:else if loggedIn}
           <div class="sync-status-row">
             <span class="sync-dot sync-{syncStatus}" aria-hidden="true"></span>
             <span class="sync-status-text">
-              {#if syncStatus === 'synced'}Sincronizado con la nube{:else if syncStatus === 'syncing'}Sincronizando…{:else if syncStatus === 'error'}Error de sincronización{:else if syncStatus === 'offline'}Sin conexión — cambios guardados localmente{:else}Solo local (sin respaldo en la nube){/if}
+              {#if syncStatus === 'synced'}{$t('settings.synced')}{:else if syncStatus === 'syncing'}{$t('settings.syncing')}{:else if syncStatus === 'error'}{$t('settings.syncError')}{:else if syncStatus === 'offline'}{$t('settings.offline')}{:else}{$t('settings.localOnly')}{/if}
             </span>
-            <button class="btn-sync-refresh" onclick={handleManualSync} title="Sincronizar ahora" disabled={syncStatus === 'syncing'}>
+            <button class="btn-sync-refresh" onclick={handleManualSync} title={$t('settings.syncNow')} aria-label={$t('settings.syncNow')} disabled={syncStatus === 'syncing'}>
               <RefreshCw size={14} />
             </button>
-            <button class="btn-sync-logout" onclick={handleLogout} title="Cerrar sesión">
-              <LogOut size={14} /> Salir
+            <button class="btn-sync-logout" onclick={handleLogout} title={$t('settings.logout')} aria-label={$t('settings.logout')}>
+              <LogOut size={14} /> {$t('settings.logoutShort')}
             </button>
           </div>
           {#if syncMessage}<p class="sync-hint">{syncMessage}</p>{/if}
         {:else}
-          <p class="sync-hint">Crea una cuenta o inicia sesión para respaldar tus datos y sincronizarlos entre dispositivos. Todo sigue funcionando offline.</p>
+          <p class="sync-hint">{$t('settings.loginPrompt')}</p>
           <div class="auth-tabs">
-            <button class:active={authMode === 'login'} onclick={() => authMode = 'login'}>Iniciar sesión</button>
-            <button class:active={authMode === 'register'} onclick={() => authMode = 'register'}>Crear cuenta</button>
+            <button class:active={authMode === 'login'} onclick={() => authMode = 'login'}>{$t('settings.login')}</button>
+            <button class:active={authMode === 'register'} onclick={() => authMode = 'register'}>{$t('settings.register')}</button>
           </div>
           <div class="auth-form">
             {#if authMode === 'register'}
-              <input type="text" placeholder="Nombre (opcional)" bind:value={authName} autocomplete="name" />
+              <input type="text" placeholder={$t('settings.nameOptional')} aria-label={$t('settings.nameOptional')} bind:value={authName} autocomplete="name" />
             {/if}
-            <input type="email" placeholder="Email" bind:value={authEmail} autocomplete="email" />
-            <input type="password" placeholder="Contraseña (mín. 8 caracteres)" bind:value={authPassword} autocomplete={authMode === 'login' ? 'current-password' : 'new-password'} />
+            <input type="email" placeholder={$t('settings.email')} aria-label={$t('settings.email')} bind:value={authEmail} autocomplete="email" />
+            <input type="password" placeholder={$t('settings.password')} aria-label={$t('settings.password')} bind:value={authPassword} autocomplete={authMode === 'login' ? 'current-password' : 'new-password'} />
             {#if authError}<p class="auth-error">{authError}</p>{/if}
             <button class="btn btn-primary auth-submit" onclick={handleAuth} disabled={authBusy || !authEmail || !authPassword}>
-              {#if authMode === 'login'}<LogIn size={15} /> Entrar{:else}<UserPlus size={15} /> Crear cuenta{/if}
+              {#if authMode === 'login'}<LogIn size={15} /> {$t('settings.enter')}{:else}<UserPlus size={15} /> {$t('settings.createAccount')}{/if}
             </button>
           </div>
         {/if}
       </section>
 
+      <!-- ── Idioma / Language ── -->
       <section class="settings-section">
-        <h3>Límites del Horario (Rango diario)</h3>
+        <h3><Languages size={16} /> {$t('settings.language')}</h3>
+        <div class="lang-selector" role="radiogroup" aria-label="{$t('settings.language')}">
+          {#each IDIOMAS_DISPONIBLES as opt}
+            <button
+              class="lang-option"
+              class:active={$idioma === opt.codigo}
+              role="radio"
+              aria-checked={$idioma === opt.codigo}
+              onclick={() => cambiarIdioma(opt.codigo)}
+            >
+              {opt.nombre}
+            </button>
+          {/each}
+        </div>
+        <p class="lang-hint">{$t('settings.languageHint')}</p>
+      </section>
+
+      <section class="settings-section">
+        <h3>{$t('settings.hoursRange')}</h3>
         <div class="range-selector">
           <div class="range-inputs-horizontal">
             <div class="form-group-compact">
-              <label for="set-start">Empieza a las:</label>
+              <label for="set-start">{$t('settings.startsAt')}</label>
               <select id="set-start" bind:value={startHour}>
                 {#each startOptions as opt}
                   <option value={opt.value}>{opt.label}</option>
@@ -464,10 +485,10 @@
               </select>
             </div>
             
-            <div class="to-text">a las</div>
+            <div class="to-text">{$t('settings.to')}</div>
 
             <div class="form-group-compact">
-              <label for="set-end">Termina a las:</label>
+              <label for="set-end">{$t('settings.endsAt')}</label>
               <select id="set-end" bind:value={endHour}>
                 {#each endOptions as opt}
                   <option value={opt.value}>{opt.label}</option>
@@ -485,14 +506,14 @@
               <span>12h</span>
               <span>24h</span>
             </div>
-            <p class="range-summary">Tu día tiene <strong>{endHour - startHour} horas</strong> de planificación.</p>
+            <p class="range-summary">{$t('settings.daySummary', { hours: endHour - startHour })}</p>
           </div>
         </div>
       </section>
 
       <section class="settings-section">
         <header class="section-header">
-          <h3>Categorías</h3>
+          <h3>{$t('settings.categories')}</h3>
         </header>
         <div 
           class="categories-list" 
@@ -505,9 +526,9 @@
               <div class="grip-handle">
                 <GripVertical size={16} />
               </div>
-              <input type="color" value={cat.color} aria-label="Color de {cat.label}" oninput={e => updateCategory(cat.id, 'color', e.currentTarget.value)} />
-              <input type="text" value={cat.label} aria-label="Nombre de la categoría" oninput={e => updateCategory(cat.id, 'label', e.currentTarget.value)} />
-              <button class="remove-cat" onclick={() => removeCategory(cat.id)} aria-label="Quitar la categoría {cat.label}">
+              <input type="color" value={cat.color} aria-label={$t('settings.colorOf', { name: cat.label })} oninput={e => updateCategory(cat.id, 'color', e.currentTarget.value)} />
+              <input type="text" value={cat.label} aria-label={$t('settings.categoryName')} oninput={e => updateCategory(cat.id, 'label', e.currentTarget.value)} />
+              <button class="remove-cat" onclick={() => removeCategory(cat.id)} aria-label={$t('settings.removeCategory', { name: cat.label })}>
                 <Trash2 size={16} />
               </button>
             </div>
@@ -515,30 +536,30 @@
         </div>
         <div class="categories-footer">
           <button class="btn btn-secondary btn-full" onclick={addCategory}>
-            <Plus size={16} /> Añadir nueva categoría
+            <Plus size={16} /> {$t('settings.addCategory')}
           </button>
         </div>
       </section>
 
       <section class="settings-section">
         <header class="section-header">
-          <h3>Datos y Respaldo</h3>
+          <h3>{$t('settings.backup')}</h3>
         </header>
         <div class="backup-container">
           <div class="backup-actions">
             <button class="btn btn-secondary btn-backup" onclick={handleExport}>
-              <Download size={18} /> Exportar JSON
+              <Download size={18} /> {$t('settings.exportJson')}
             </button>
             
             <button
               class="btn btn-secondary btn-backup import-btn"
               onclick={() => fileInput?.click()}
-              aria-label="Importar JSON: elegir archivo"
+              aria-label={$t('settings.importJson')}
             >
-              <Upload size={18} /> Importar JSON
+              <Upload size={18} /> {$t('settings.importJson')}
             </button>
             {#if importFileName}
-              <span class="import-filename" role="status">Archivo: {importFileName}</span>
+              <span class="import-filename" role="status">{$t('settings.file', { name: importFileName })}</span>
             {/if}
             <input
               bind:this={fileInput}
@@ -555,49 +576,32 @@
               class="btn btn-danger btn-backup"
               onclick={() => confirmWipeAll = true}
               disabled={wipingAll}
-              aria-label="Borrar todos los datos: actividades, categorías y ediciones temporales"
+              aria-label={$t('settings.wipeAllLabel')}
             >
-              <Trash2 size={18} /> Borrar todo
+              <Trash2 size={18} /> {$t('settings.wipeAll')}
             </button>
           </div>
-          <p class="backup-info">Exporta actividades, categorías, ediciones temporales e imágenes para respaldarlas o moverlas a otro navegador. Al importar se te pedirá confirmación y verás un resumen antes de reemplazar tus datos.</p>
+          <p class="backup-info">{$t('settings.backupInfo')}</p>
         </div>
       </section>
 
       <!-- ── Tus datos: transparencia sobre el tratamiento (pedido del usuario) ── -->
       <section class="settings-section data-transparency">
-        <h3><ShieldCheck size={16} /> Tus datos, en claro</h3>
+        <h3><ShieldCheck size={16} /> {$t('settings.dataTitle')}</h3>
         <ul class="data-points">
-          <li>
-            <strong>Sin cuenta:</strong> todo vive <strong>solo en este navegador</strong> (IndexedDB).
-            Nunca sale de tu dispositivo — funciona igual con o sin internet.
-          </li>
-          <li>
-            <strong>Con cuenta:</strong> tu horario se respalda en la nube para sincronizar
-            dispositivos. Se transmite cifrado en tránsito (HTTPS) y se guarda por cuenta
-            en una base de datos propia — <strong>no se comparte con terceros, no hay
-            analítica ni rastreadores</strong>.
-          </li>
-          <li>
-            <strong>Lo que se guarda:</strong> actividades, horarios, pasos, categorías,
-            ediciones temporales y las imágenes que tú subas. <strong>Nada más.</strong>
-          </li>
-          <li>
-            <strong>Tú tienes el control:</strong> exporta todo cuando quieras (JSON arriba),
-            y "Borrar todo" elimina local + nube de verdad (borrado sincronizado).
-          </li>
-          <li>
-            <strong>Sin letra chica:</strong> no vendemos datos, no hay publicidad, no hay
-            perfiles de usuario. La app vive de ser tuya.
-          </li>
+          <li>{@html $t('privacy.noAccount')}</li>
+          <li>{@html $t('privacy.withAccount')}</li>
+          <li>{@html $t('privacy.whatWeStore')}</li>
+          <li>{@html $t('privacy.youControl')}</li>
+          <li>{@html $t('privacy.noFinePrint')}</li>
         </ul>
       </section>
     </div>
 
     <footer class="modal-footer">
-      <button class="btn btn-secondary" onclick={onClose}>Cancelar</button>
+      <button class="btn btn-secondary" onclick={onClose}>{$t('settings.cancel')}</button>
       <button class="btn btn-primary" onclick={saveSettings}>
-        <Save size={18} /> Guardar Todo
+        <Save size={18} /> {$t('settings.saveAll')}
       </button>
     </footer>
   </div>
@@ -605,9 +609,9 @@
 
 <ConfirmDialog
   bind:open={confirmRestoreCats}
-  title="Restablecer categorías"
-  message="¿Restablecer todas las categorías a las originales? Los cambios no se aplican hasta que pulses Guardar Todo."
-  confirmText="Restablecer"
+  title={$t('settings.resetCatsTitle')}
+  message={$t('settings.resetCatsMsg')}
+  confirmText={$t('settings.resetBtn')}
   onconfirm={() => restoreDefaultsConfirm()}
 />
 
@@ -615,9 +619,12 @@
   bind:open={confirmImport}
   title="¿Importar este archivo?"
   message={pendingImport
-    ? `REEMPLAZARÁ TODOS tus datos actuales por el contenido del archivo:\n\n${pendingImport.summary}${pendingImport.warnings.length ? '\n\n⚠️ Advertencias:\n• ' + pendingImport.warnings.join('\n• ') : ''}\n\nEsta acción no se puede deshacer.`
+    ? $t('settings.importMsg', {
+        summary: pendingImport.summary,
+        warnings: pendingImport.warnings.length ? $t('settings.importWarnings', { list: pendingImport.warnings.join('\n• ') }) : ''
+      })
     : ''}
-  confirmText="Importar"
+  confirmText={$t('settings.importBtn')}
   danger
   onconfirm={doImport}
   oncancel={() => pendingImport = null}
@@ -625,9 +632,9 @@
 
 <ConfirmDialog
   bind:open={confirmWipeAll}
-  title="¿Borrar TODOS los datos?"
-  message="Se eliminarán TODAS las actividades, categorías y ediciones temporales de este dispositivo (el horario vuelve a 7:00–23:00).\n\nSi tienes sesión iniciada, el borrado también se sincronizará con la nube.\n\nEsta acción no se puede deshacer — exporta un respaldo antes si lo necesitas."
-  confirmText="Borrar todo"
+  title={$t('settings.wipeTitle')}
+  message={$t('settings.wipeMsg')}
+  confirmText={$t('settings.wipeAll')}
   danger
   onconfirm={wipeAll}
 />
@@ -1007,6 +1014,38 @@
     .data-points li {
       font-size: 0.78rem;
     }
+  }
+
+  /* ── Selector de idioma: pills gemelas al estilo mode-toggle de Día ── */
+  .lang-selector {
+    display: flex;
+    background: rgba(0,0,0,0.04);
+    border-radius: 10px;
+    padding: 3px;
+    gap: 2px;
+    width: fit-content;
+  }
+  .lang-option {
+    padding: 0.5rem 1.1rem;
+    min-height: 44px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #888;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .lang-option.active {
+    background: white;
+    color: var(--color-green-dark);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .lang-hint {
+    margin: 0.4rem 0 0;
+    font-size: 0.75rem;
+    color: #999;
   }
 
   .danger-zone .btn-danger:disabled {

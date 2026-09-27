@@ -1,5 +1,6 @@
 <script lang="ts">
   import { toasts, dismissToast, pauseToast, resumeToast } from '../lib/toast';
+  import { tNow } from '../lib/i18n';
   import { CheckCircle2, AlertCircle, Info, X } from '@lucide/svelte';
 
   const icons = { success: CheckCircle2, error: AlertCircle, info: Info };
@@ -72,7 +73,7 @@
         {/if}
         <button
           class="toast-close"
-          aria-label="Cerrar aviso"
+          aria-label={tNow('confirm.close')}
           onclick={() => cerrar(t.id)}
         ><X size={14} /></button>
       </div>
