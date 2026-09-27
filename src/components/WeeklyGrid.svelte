@@ -903,11 +903,22 @@
      Bajo ese ancho el scroll horizontal toma el relevo sin aplastar días. */
   .grid-scroll {
     display: flex;
-    /* Llena el ancho disponible (flex:1) PERO sin bajar del piso: bajo
-       68px + 7×88px (+ 6px de gaps entre columnas) el scroll horizontal
-       toma el relevo sin aplastar días. */
+    /* Llena el ancho disponible (flex:1) PERO sin bajar del piso. El piso
+       total es escalonado como las columnas (68px horas + 7×piso + gaps):
+       88px/día en desktop, 66px en ≤768px, 56px en ≤480px — así en un móvil
+       de 320px caben 4 días sin scroll (antes: 2 días y scroll eterno). */
     flex: 1;
     min-width: calc(68px + 7 * 88px + 6px);
+  }
+  @media (max-width: 768px) {
+    .grid-scroll {
+      min-width: calc(48px + 7 * 66px + 6px);
+    }
+  }
+  @media (max-width: 480px) {
+    .grid-scroll {
+      min-width: calc(48px + 7 * 56px + 6px);
+    }
   }
 
   .time-column {
@@ -925,6 +936,18 @@
     background: rgba(255, 255, 255, 0.82);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+  }
+  /* En móvil angosto la columna de horas se compacta igual que los días
+     (misma escala que los breakpoints del piso de columnas). */
+  @media (max-width: 768px) {
+    .time-column {
+      width: 56px;
+    }
+  }
+  @media (max-width: 480px) {
+    .time-column {
+      width: 48px;
+    }
   }
 
   .header-spacer {
@@ -971,12 +994,28 @@
     flex: 1;
     display: grid;
     /* Ajuste dinámico con piso y tope (pedido del usuario): reparte el ancho
-       sin aplastar los días (piso 88px) ni dejarlos gigantes (tope 220px).
-       % y NO fr dentro de clamp (fr invalida la declaración entera): 14.2857%
-       = 1/7 del contenedor ≈ 1fr — mismo reparto fluido, clamp válido. */
-    grid-template-columns: repeat(7, clamp(88px, 14.2857%, 220px));
+       sin aplastar los días ni dejarlos gigantes.
+       % y NO fr dentro de clamp (fr invalida la declaración entera):
+       14.2857% = 1/7 del contenedor, menos 1px por el gap entre columnas
+       (6 gaps consumen 6px que el % puro ignora — sin el descuento, la suma
+       de columnas excede el contenedor en 6px y aparece micro-scroll).
+       Piso ESCALONADO (cobertura general móvil): el 88px fijo era una pared
+       en 320/425px (2 días en pantalla y scroll eterno). En móvil angosto el
+       piso baja: 66px en ≤768px, 56px en ≤480px — el día SIEMPRE cabe en su
+       mínimo y el scroll solo aparece cuando no caben los 7 días. */
+    grid-template-columns: repeat(7, clamp(88px, calc(14.2857% - 1px), 220px));
     gap: 1px;
     background: rgba(0,0,0,0.06);
+  }
+  @media (max-width: 768px) {
+    .days-columns {
+      grid-template-columns: repeat(7, clamp(66px, calc(14.2857% - 1px), 220px));
+    }
+  }
+  @media (max-width: 480px) {
+    .days-columns {
+      grid-template-columns: repeat(7, clamp(56px, calc(14.2857% - 1px), 220px));
+    }
   }
 
   .day-column {
@@ -1295,6 +1334,16 @@
     line-clamp: 1;
     white-space: nowrap;
     display: block;
+  }
+  /* Con las columnas compactas de móvil (piso 56px) el título normal baja
+     un punto: "Miércoles" completo entra en 56px sin recortes agresivos. */
+  @media (max-width: 480px) {
+    .activity-title {
+      font-size: 0.7rem;
+    }
+    .activity-item.short .activity-title {
+      font-size: 0.62rem;
+    }
   }
 
   /* Hint de scroll horizontal solo en pantallas angostas */
