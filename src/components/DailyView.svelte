@@ -1117,6 +1117,26 @@
     /* Scrollbar invisible: el scroll queda (rueda del mouse + touch), pero sin
        la barra pegada al borde de las tarjetas. */
     scrollbar-width: none;
+    /* En pantallas grandes (≥1536px) el track de actividades deja de ser una
+       cinta kilométrica: tope 900px y centrado — las tarjetas conservan
+       proporción legible y los ojos no viajan 60cm de lado a lado. */
+  }
+  @media (min-width: 1536px) {
+    .daily-container {
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
+      width: 100%;
+    }
+    .daily-header {
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
+      width: 100%;
+    }
+    .daily-header h2 {
+      font-size: 1.7rem;
+    }
   }
   .daily-container::-webkit-scrollbar {
     display: none;

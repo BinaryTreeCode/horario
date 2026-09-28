@@ -345,7 +345,14 @@
 
 <style>
   .dashboard {
-    max-width: 1400px;
+    /* Escalado por ancho de pantalla: 1400px de piso en desktop común,
+       1560px en pantallas grandes y 1800px en ultrawide (2560+) para que
+       el contenido crezca con la pantalla en vez de dejar franjas muertas
+       a los lados (QHD/21:9). clamp fluido: nada brusco entre breakpoints. */
+    max-width: clamp(1400px, 78vw, 1800px);
+    /* width 100%: sin esto, siendo grid item de .app-layout con margin auto,
+       el navegador lo encoge a fit-content y el clamp no llega a usarse. */
+    width: 100%;
     margin: 0 auto;
     padding: 1.5rem;
     display: flex;
@@ -509,7 +516,9 @@
 
   .week-layout {
     display: grid;
-    grid-template-columns: 1fr 320px;
+    /* Sidebar de donuts fluida: 320px de piso, 360px en pantallas grandes —
+       en ultrawide la grilla semanal se queda el resto (igual legible). */
+    grid-template-columns: 1fr clamp(320px, 24vw, 360px);
     gap: 1.5rem;
     height: 100%;
   }
@@ -523,6 +532,47 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+  }
+
+  /* ── Pantallas grandes / ultrawide (≥1536px) ──
+     Tipografía y aire del header suben un punto para acompañar el ancho:
+     en 21:9 el header quedaba enano frente a 2 metros de grilla. */
+  @media (min-width: 1536px) {
+    .dashboard {
+      padding: 2rem;
+      gap: 2rem;
+    }
+    .logo {
+      font-size: 1.4rem;
+    }
+    .dashboard-header {
+      padding: 1.1rem 1.75rem;
+    }
+    .view-tabs button {
+      font-size: 0.95rem;
+      padding: 0.6rem 1.25rem;
+    }
+    .dashboard-header :global(.btn) {
+      font-size: 0.95rem;
+    }
+  }
+
+  /* Ultrawide real (≥2200px, 21:9 QHD+): un punto más de escala sin pasarse —
+     la app es mobile-first, no convertimos el header en un banner. */
+  @media (min-width: 2200px) {
+    .dashboard {
+      padding: 2.5rem;
+    }
+    .logo {
+      font-size: 1.55rem;
+    }
+    .dashboard-header {
+      padding: 1.25rem 2rem;
+    }
+    .view-tabs button {
+      font-size: 1rem;
+      padding: 0.65rem 1.4rem;
+    }
   }
 
   @media (max-width: 1024px) {

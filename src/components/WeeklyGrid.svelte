@@ -62,8 +62,23 @@
   
   // 15-minute precision (4 slots per hour)
   const slotsPerHour = 4;
-  const slotHeightPx = 26; // ≥26px/slot: bloques de 15min tocables (~44px los de 30min, 104px los de 1h)
+  /** Altura de slot en px. En viewports anchos (≥1536px) sube a 30px para
+   *  aprovechar pantallas grandes/ultrawide: la matemática del drag no cambia
+   *  porque usa esta constante (reactiva) y el rect vivo del grid. */
+  const ALTURA_COMPACTA = 26; // ≥26px/slot: bloques de 15min tocables (~44px los de 30min, 104px los de 1h)
+  const ALTURA_GRANDE = 30;
+  let slotHeightPx = $state(
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 1536px)').matches ? ALTURA_GRANDE : ALTURA_COMPACTA
+  );
   const totalSlots = $derived(totalHours * slotsPerHour);
+
+  $effect(() => {
+    const mq = window.matchMedia('(min-width: 1536px)');
+    const sync = () => { slotHeightPx = mq.matches ? ALTURA_GRANDE : ALTURA_COMPACTA; };
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  });
 
   const hours = $derived(Array.from({ length: totalHours + 1 }, (_, i) => startHour + i));
 
@@ -1053,6 +1068,7 @@
     cursor: pointer;
     transition: background 0.2s;
     overflow: hidden; /* el nombre largo nunca desborda la columna */
+    box-sizing: border-box;
   }
 
   /* Nombre completo SIEMPRE legible (nada cortado a medias):
@@ -1468,5 +1484,28 @@
 
   .custom-context-menu button.delete-btn:hover {
     background: #fff5f5;
+  }
+
+  /* Desktop grande / ultrawide (≥1536px): la cabecera de día gana aire y la
+     tipografía de bloques sube medio punto — en 21:9 la grilla es el elemento
+     dominante y merece la legibilidad extra. AL FINAL del bloque: misma
+     especificidad que las reglas base, gana por orden de cascade. */
+  @media (min-width: 1536px) {
+    .header-spacer {
+      height: 48px;
+    }
+    .day-header {
+      height: 52px;
+      font-size: 0.95rem;
+    }
+    .activity-title {
+      font-size: 0.88rem;
+    }
+    .activity-item.short .activity-title {
+      font-size: 0.76rem;
+    }
+    .hour-label {
+      font-size: 0.78rem;
+    }
   }
 </style>

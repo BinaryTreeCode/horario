@@ -74,6 +74,18 @@
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
     animation: pop-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.15);
   }
+
+  /* Desktop grande (≥1536px): 440px de ancho y tipografía un punto mayor —
+     en ultrawide el diálogo quedaba chico frente al resto de la app. */
+  @media (min-width: 1536px) {
+    .confirm-box {
+      width: min(92vw, 440px);
+      padding: 26px 28px;
+    }
+    h3 {
+      font-size: 1.2rem;
+    }
+  }
   h3 {
     margin: 0 0 10px;
     font-size: 1.12rem;

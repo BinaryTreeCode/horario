@@ -1066,6 +1066,14 @@
     flex-direction: column;
   }
 
+  /* Desktop grande (≥1536px): el modal gana 40px de ancho — proporción mejor
+     frente a la pantalla sin convertir el formulario en un ocupador de sala. */
+  @media (min-width: 1536px) {
+    .modal-content {
+      max-width: 540px;
+    }
+  }
+
   @keyframes slideUp {
     from { transform: translateY(20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
