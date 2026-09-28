@@ -428,10 +428,12 @@
 
 <div class="modal-overlay" onclick={onClose}>
   <div class="modal-content glass-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1" bind:this={modalEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
-    <header class="modal-header">
+    <!-- div, no header: un <header> suelto dentro del modal se convierte en un
+         segundo landmark banner (axe: landmark-no-duplicate-banner) -->
+    <div class="modal-header">
       <h2 id="modal-title">{id !== null ? $t('modal.editTitle') : $t('modal.newTitle')}</h2>
       <button class="close-btn" onclick={onClose} aria-label={$t('modal.closeNoSave')}><X size={20} /></button>
-    </header>
+    </div>
 
     <form onsubmit={e => { e.preventDefault(); save(); }}>
       <div class="category-preview" style="background: {categoryColor}"></div>
@@ -855,7 +857,7 @@
     cursor: pointer;
     font-size: 0.82rem;
     font-weight: 600;
-    color: #888;
+    color: #6b6b6b; /* AA (antes #888) */
     transition: all 0.2s;
   }
 
@@ -984,7 +986,7 @@
     cursor: pointer;
     display: flex;
     align-items: center;
-    color: #999;
+    color: #6b6b6b; /* AA (antes #999) */
     transition: color 0.2s;
   }
 
@@ -1013,7 +1015,7 @@
 
   .step-text-input.done-text {
     text-decoration: line-through;
-    color: #888;
+    color: #6b6b6b; /* AA (antes #888) */
   }
 
   .step-delete-btn {
@@ -1152,7 +1154,7 @@
 
   .to-separator {
     font-size: 1rem;
-    color: #999;
+    color: #6b6b6b; /* AA (antes #999) */
     padding-top: 1.25rem;
   }
 
@@ -1169,7 +1171,7 @@
 
   .hint-text {
     font-size: 0.75rem;
-    color: #999;
+    color: #6b6b6b; /* AA (antes #999) */
     font-weight: 600;
     text-transform: uppercase;
   }
@@ -1220,7 +1222,7 @@
     margin-top: 1rem;
     text-align: center;
     font-size: 0.85rem;
-    color: #888;
+    color: #6b6b6b; /* AA (antes #888) */
   }
 
   .duration-hint strong {
@@ -1236,7 +1238,7 @@
   .close-btn {
     background: transparent;
     border: none;
-    color: #999;
+    color: #6b6b6b; /* AA sobre blanco (antes #999) */
     cursor: pointer;
     /* Target táctil >= 44px (regla dura #5); ya lo era en móvil, ahora también en desktop */
     min-width: 44px;

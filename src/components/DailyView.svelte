@@ -824,7 +824,9 @@
     {/if}
   </div>
 
-  <div class="daily-container">
+  <!-- tabindex+role=region: contenedor scrolleable accesible por teclado
+       (axe: scrollable-region-focusable) -->
+  <div class="daily-container" tabindex="0" role="region" aria-label={$t('dayView.title')}>
     <div class="time-track">
       {#each Array.from({ length: totalHours + 1 }, (_, i) => startHour + i) as hour}
         <div class="hour-marker" style="top: {((hour - startHour) / totalHours) * 100}%">
@@ -1034,7 +1036,7 @@
     background: transparent;
     font-size: 0.8rem;
     font-weight: 600;
-    color: #888;
+    color: #6b6b6b; /* AA (antes #888) */
     cursor: pointer;
     transition: all 0.2s;
     white-space: nowrap;
@@ -1153,7 +1155,7 @@
     width: 100%;
     transform: translateY(-50%);
     font-size: 0.75rem;
-    color: #888;
+    color: #6b6b6b; /* AA (antes #888) */
     display: flex;
     justify-content: flex-end;
     padding-right: 0.5rem;
@@ -1531,7 +1533,7 @@
   .time-bar-label {
     position: absolute;
     right: 15px; /* Move to the left of the dot */
-    background: #e53e3e;
+    background: #c53030; /* AA con blanco 4.9:1 (antes #e53e3e = 3.7:1) */
     color: white;
     font-size: 0.65rem;
     font-weight: 700;

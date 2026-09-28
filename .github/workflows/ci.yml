@@ -1,6 +1,7 @@
 # CI — Nature Planner
-# Bun install → test → build. Sin secrets: la app compila y los tests
-# corren en modo local (sin DATABASE_URL, db.ts cae al proxy de fallback).
+# Bun install → test → build → a11y E2E (Playwright + axe-core).
+# Sin secrets: la app compila y los tests corren en modo local
+# (sin DATABASE_URL, db.ts cae al proxy de fallback).
 
 name: CI
 
@@ -36,3 +37,11 @@ jobs:
         env:
           # Evita que el adapter Vercel intente requerir un token/deploy en CI
           VERCEL: 'false'
+
+      # Regresión de accesibilidad: axe en Semana/Día/modales + targets 44px.
+      # Falla el pipeline si entra cualquier violación nueva.
+      - name: Instalar navegador de Playwright
+        run: bunx playwright install --with-deps chromium
+
+      - name: Accesibilidad E2E (axe-core)
+        run: bun run test:a11y

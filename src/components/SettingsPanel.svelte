@@ -408,10 +408,11 @@
 
 <div class="modal-overlay" onclick={onClose}>
   <div class="modal-content glass-panel" tabindex="-1" bind:this={panelEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
-    <header class="modal-header">
+    <!-- div, no header: evita un segundo landmark banner (axe) -->
+    <div class="modal-header">
       <h2>{$t('settings.title')}</h2>
       <button class="close-btn" onclick={onClose} aria-label={$t('settings.closeSettings')}><X size={20} /></button>
-    </header>
+    </div>
 
     <div class="settings-sections">
       <!-- ── Cuenta y respaldo en la nube ── -->
@@ -688,7 +689,7 @@
   .close-btn {
     background: transparent;
     border: none;
-    color: #999;
+    color: #6b6b6b; /* AA sobre blanco (antes #999) */
     cursor: pointer;
     min-width: 44px;
     min-height: 44px;
@@ -748,7 +749,7 @@
   .to-text {
     padding-top: 1.25rem;
     font-size: 0.85rem;
-    color: #999;
+    color: #6b6b6b; /* AA sobre #f5f5f5 (antes #999 = 2.8:1) */
     font-weight: 600;
   }
 
@@ -778,7 +779,7 @@
     display: flex;
     justify-content: space-between;
     font-size: 0.7rem;
-    color: #999;
+    color: #6b6b6b; /* AA (antes #999) */
     margin-top: 0.5rem;
   }
 
@@ -848,7 +849,7 @@
   }
 
   .grip-handle {
-    color: #999;
+    color: #6b6b6b; /* AA (antes #999) */
     cursor: grab;
     display: flex;
     align-items: center;
@@ -1033,7 +1034,7 @@
     background: transparent;
     font-size: 0.85rem;
     font-weight: 600;
-    color: #888;
+    color: #6b6b6b; /* AA (antes #888 = 3.5:1) */
     cursor: pointer;
     transition: all 0.2s;
   }
@@ -1045,7 +1046,7 @@
   .lang-hint {
     margin: 0.4rem 0 0;
     font-size: 0.75rem;
-    color: #999;
+    color: #6b6b6b; /* AA (antes #999) */
   }
 
   .danger-zone .btn-danger:disabled {
@@ -1157,7 +1158,7 @@
     border-radius: 8px;
     font-size: 0.8rem;
     font-weight: 600;
-    color: #888;
+    color: #6b6b6b; /* AA (antes #888 = 3.5:1) */
     cursor: pointer;
     transition: all 0.2s;
   }

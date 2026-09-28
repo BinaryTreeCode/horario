@@ -1,0 +1,5 @@
+[test]
+# El spec E2E (tests/*.spec.ts) es de Playwright, no de bun test: sin esta
+# exclusión bun intenta ejecutarlo y falla al ver beforeEach de @playwright/test.
+# root limita el descubrimiento de tests a src/.
+root = "./src"

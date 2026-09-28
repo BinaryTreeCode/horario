@@ -11,6 +11,7 @@
     "preview": "astro preview",
     "astro": "astro",
     "test": "bun test",
+    "test:a11y": "playwright test",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
@@ -29,6 +30,8 @@
   },
   "devDependencies": {
     "@astrojs/vercel": "^10",
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
     "drizzle-kit": "^0.31.10",
     "lightningcss": "^1.32.0",
     "tinyglobby": "^0.2.17"

@@ -55,6 +55,7 @@ const es: Catalogo = {
   'donut.free': 'Libre',
 
   // ── Vista Día ──
+  'dayView.title': 'Horario del día',
   'dayView.empty': 'Día libre — tocá cualquier hueco del horario para crear una actividad',
   'dayView.dragHint': 'Arrastrar o tocar para editar',
   'dayView.edit': 'Editar {name}',
@@ -280,6 +281,7 @@ const en: Catalogo = {
   'donut.ofWeek': 'planned this week',
   'donut.free': 'Free',
 
+  'dayView.title': 'Day schedule',
   'dayView.empty': 'Free day — tap any slot in the schedule to create an activity',
   'dayView.dragHint': 'Drag or tap to edit',
   'dayView.edit': 'Edit {name}',
