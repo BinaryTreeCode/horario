@@ -424,9 +424,9 @@
       </nav>
     </div>
     <div class="header-right">
-      <!-- Acciones del header: solo móvil/tablet (<1024px); en desktop viven en
-           la barra lateral (ver .actions-sidebar) para liberar el header. -->
-      <div class="header-actions">
+      <!-- Acciones del header: visibles en móvil/tablet siempre, y en desktop
+           solo en Semana (en Día viven en la barra lateral dentro del panel). -->
+      <div class="header-actions" class:header-actions-hidden-desktop={currentView === 'day'}>
         <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label={$t('header.adjustUp')} title={$t('header.adjustUpTitle')}>
           <ChevronsUp size={20} /> <span class="hide-mobile">{$t('header.adjustUp')}</span>
         </button>
@@ -482,59 +482,6 @@
   {/if}
 
   <main class="dashboard-main">
-    <!-- Barra lateral de acciones: solo desktop (≥1024px, se muestra por CSS).
-         Duplicar los botones del header es intencional: en móvil la barra no
-         existe y en PC el header queda solo con logo/pestañas/sync. -->
-    <aside class="actions-sidebar glass-panel" aria-label={$t('header.settings')}>
-      <button class="side-btn" onclick={coverGapsAbove} title={$t('header.adjustUpTitle')} aria-label={$t('header.adjustUp')}>
-        <ChevronsUp size={20} />
-        <span>{$t('header.adjustUp')}</span>
-      </button>
-      <button class="side-btn" onclick={coverGapsBelow} title={$t('header.adjustDownTitle')} aria-label={$t('header.adjustDown')}>
-        <ChevronsDown size={20} />
-        <span>{$t('header.adjustDown')}</span>
-      </button>
-      <div class="side-sep" role="presentation"></div>
-      <button class="side-btn" onclick={() => shiftAll(-0.25)} title={$t('header.shiftAllTitle', { scope: currentView === 'day' ? $t('header.shiftScopeDay') : $t('header.shiftScopeWeek') })} aria-label={$t('header.shiftUp')}>
-        <ArrowUp size={20} />
-        <span>{$t('header.shiftUp')}</span>
-      </button>
-      <button class="side-btn" onclick={() => shiftAll(0.25)} title={$t('header.shiftAllTitle', { scope: currentView === 'day' ? $t('header.shiftScopeDay') : $t('header.shiftScopeWeek') })} aria-label={$t('header.shiftDown')}>
-        <ArrowDown size={20} />
-        <span>{$t('header.shiftDown')}</span>
-      </button>
-      <button class="side-btn side-btn-primary" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label={$t('header.newActivity')}>
-        <Plus size={20} />
-        <span>{$t('header.newActivity')}</span>
-      </button>
-      <button
-        class="side-btn"
-        class:privacy-on={$modoPrivacidad}
-        onclick={alternarPrivacidad}
-        aria-label={$t('header.privacy')}
-        aria-pressed={$modoPrivacidad}
-        title={$t('header.privacy')}
-      >
-        {#if $modoPrivacidad}<EyeOff size={20} />{:else}<Eye size={20} />{/if}
-        <span>{$t('header.privacyShort')}</span>
-      </button>
-      <button class="side-btn" onclick={openSettings} aria-label={$t('header.settings')} title={$t('header.settings')}>
-        <Settings size={20} />
-        <span>{$t('header.settings')}</span>
-      </button>
-      <div class="side-sep" role="presentation"></div>
-      <!-- Subir/bajar datos: exportar descarga el JSON directo; importar abre
-           Ajustes (el import pide confirmación y vive en su sección de respaldo) -->
-      <button class="side-btn" onclick={exportarDesdeSidebar} title={$t('sidebar.exportTitle')} aria-label={$t('sidebar.export')}>
-        <Download size={20} />
-        <span>{$t('sidebar.export')}</span>
-      </button>
-      <button class="side-btn" onclick={openSettingsParaImportar} title={$t('sidebar.importTitle')} aria-label={$t('sidebar.import')}>
-        <Upload size={20} />
-        <span>{$t('sidebar.import')}</span>
-      </button>
-    </aside>
-
     <div class="view-container" id="view-panel" role="tabpanel" aria-labelledby={currentView === 'week' ? 'tab-week' : 'tab-day'}>
       {#if currentView === 'week'}
         <div class="week-layout">
@@ -558,16 +505,70 @@
           </div>
         </div>
       {:else}
+        <!-- Vista Día (solo desktop): la barra de acciones vive DENTRO del panel,
+             a la derecha; el horario corre un poco a la izquierda para hacerle
+             lugar. En móvil la barra no existe (header manda) y el panel es uno. -->
         <div class="day-layout glass-panel">
           {#if DailyViewComp}
-            <DailyViewComp 
-              day={selectedDay}
-              activities={$activitiesStore || []} 
-              categories={$categoriesStore || []} 
-              settings={settingsObj}
-              dayOverrides={$dayOverridesStore || []}
-              onEditActivity={(id, initialData) => openActivityModal(id, selectedDay, initialData)}
-            />
+            <div class="day-view-host">
+              <DailyViewComp 
+                day={selectedDay}
+                activities={$activitiesStore || []} 
+                categories={$categoriesStore || []} 
+                settings={settingsObj}
+                dayOverrides={$dayOverridesStore || []}
+                onEditActivity={(id, initialData) => openActivityModal(id, selectedDay, initialData)}
+              />
+            </div>
+            <aside class="actions-sidebar" aria-label={$t('header.settings')}>
+              <button class="side-btn" onclick={coverGapsAbove} title={$t('header.adjustUpTitle')} aria-label={$t('header.adjustUp')}>
+                <ChevronsUp size={20} />
+                <span>{$t('header.adjustUp')}</span>
+              </button>
+              <button class="side-btn" onclick={coverGapsBelow} title={$t('header.adjustDownTitle')} aria-label={$t('header.adjustDown')}>
+                <ChevronsDown size={20} />
+                <span>{$t('header.adjustDown')}</span>
+              </button>
+              <div class="side-sep" role="presentation"></div>
+              <button class="side-btn" onclick={() => shiftAll(-0.25)} title={$t('header.shiftAllTitle', { scope: $t('header.shiftScopeDay') })} aria-label={$t('header.shiftUp')}>
+                <ArrowUp size={20} />
+                <span>{$t('header.shiftUp')}</span>
+              </button>
+              <button class="side-btn" onclick={() => shiftAll(0.25)} title={$t('header.shiftAllTitle', { scope: $t('header.shiftScopeDay') })} aria-label={$t('header.shiftDown')}>
+                <ArrowDown size={20} />
+                <span>{$t('header.shiftDown')}</span>
+              </button>
+              <button class="side-btn side-btn-primary" onclick={() => openActivityModal(null, selectedDay)} aria-label={$t('header.newActivity')}>
+                <Plus size={20} />
+                <span>{$t('header.newActivity')}</span>
+              </button>
+              <button
+                class="side-btn"
+                class:privacy-on={$modoPrivacidad}
+                onclick={alternarPrivacidad}
+                aria-label={$t('header.privacy')}
+                aria-pressed={$modoPrivacidad}
+                title={$t('header.privacy')}
+              >
+                {#if $modoPrivacidad}<EyeOff size={20} />{:else}<Eye size={20} />{/if}
+                <span>{$t('header.privacyShort')}</span>
+              </button>
+              <button class="side-btn" onclick={openSettings} aria-label={$t('header.settings')} title={$t('header.settings')}>
+                <Settings size={20} />
+                <span>{$t('header.settings')}</span>
+              </button>
+              <div class="side-sep" role="presentation"></div>
+              <!-- Subir/bajar datos: exportar descarga el JSON directo; importar abre
+                   Ajustes (el import pide confirmación y vive en su sección de respaldo) -->
+              <button class="side-btn" onclick={exportarDesdeSidebar} title={$t('sidebar.exportTitle')} aria-label={$t('sidebar.export')}>
+                <Download size={20} />
+                <span>{$t('sidebar.export')}</span>
+              </button>
+              <button class="side-btn" onclick={openSettingsParaImportar} title={$t('sidebar.importTitle')} aria-label={$t('sidebar.import')}>
+                <Upload size={20} />
+                <span>{$t('sidebar.import')}</span>
+              </button>
+            </aside>
           {:else}
             <div class="modal-loading" role="status">Cargando vista del día…</div>
           {/if}
@@ -804,18 +805,32 @@
     flex-direction: column;
   }
 
-  /* ── Barra lateral de acciones (solo ≥1024px) ──
-     En PC las opciones viven aquí (sticky) y el header queda limpio; en
-     móvil/tablet la barra no se muestra y las acciones quedan en el header. */
+  /* ── Barra lateral de acciones (solo ≥1024px, SOLO vista Día) ──
+     En Día vive DENTRO del panel, a la derecha del horario; en Semana las
+     acciones vuelven al header y la barra no existe. En móvil nunca se
+     muestra: las acciones quedan en el header en ambas vistas. */
   .actions-sidebar {
     display: none;
   }
 
+  /* En desktop con vista Día el header queda solo con logo/pestañas/sync */
   @media (min-width: 1024px) {
-    .dashboard-main {
-      flex-direction: row;
+    .header-actions-hidden-desktop {
+      display: none;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .day-layout {
+      display: flex;
       align-items: flex-start;
-      gap: 1.25rem;
+      gap: 0.9rem;
+    }
+    /* El horario cede ~190px: corre a la izquierda para que la barra entre
+       sin apretarlo de más (min-width 0 permite encoger). */
+    .day-view-host {
+      flex: 1;
+      min-width: 0;
     }
     .actions-sidebar {
       display: flex;
@@ -827,15 +842,6 @@
       position: sticky;
       top: 1.5rem;
       align-self: flex-start;
-    }
-    /* El header ya no necesita las acciones: quedan solo en la sidebar */
-    .header-actions {
-      display: none;
-    }
-    /* La grilla semanal debe repartir el ancho restante con la sidebar */
-    .view-container {
-      flex: 1;
-      min-width: 0;
     }
   }
 
