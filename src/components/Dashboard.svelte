@@ -17,6 +17,8 @@
   import { Settings, Calendar, Clock, Plus, ChevronsUp, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
   import { onSyncChange, syncNow } from '../lib/sync';
   import { t } from '../lib/i18n';
+  import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
+  import { Eye, EyeOff } from '@lucide/svelte';
   import type { SyncStatus } from '../lib/types';
 
   let currentView = $state('week'); // 'week' | 'day'
@@ -214,7 +216,7 @@
   }
 </script>
 
-<div class="dashboard">
+<div class="dashboard" class:privacy-mode={$modoPrivacidad}>
   <!-- Top Navigation & Title -->
   <header class="dashboard-header glass-panel">
     <div class="header-left">
@@ -248,6 +250,17 @@
           {:else}<CloudOff size={16} />{/if}
         </button>
       {/if}
+      <!-- Modo privacidad: desenfoca el contenido de las actividades (mirones/capturas) -->
+      <button
+        class="btn btn-secondary btn-icon"
+        class:privacy-on={$modoPrivacidad}
+        onclick={alternarPrivacidad}
+        aria-label={$t('header.privacy')}
+        aria-pressed={$modoPrivacidad}
+        title={$t('header.privacy')}
+      >
+        {#if $modoPrivacidad}<EyeOff size={20} />{:else}<Eye size={20} />{/if}
+      </button>
       <button class="btn btn-secondary btn-icon" onclick={openSettings} aria-label={$t('header.settings')}>
         <Settings size={20} />
       </button>
@@ -502,6 +515,16 @@
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+
+  /* Modo privacidad activo: el ojo cerrado se destaca (fondo verde, no gris)
+     para que se vea de un vistazo que el contenido está oculto. */
+  .btn-icon.privacy-on {
+    background: var(--color-green-dark);
+    color: white;
+  }
+  .btn-icon.privacy-on:hover {
+    background: var(--color-green-moss);
   }
 
   .dashboard-main {

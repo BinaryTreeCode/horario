@@ -87,6 +87,47 @@ h1, h2, h3, h4 {
   outline-offset: 2px;
 }
 
+/* ── Modo privacidad: desenfoque del contenido de actividades ──
+   La clase .privacy-mode la pone Dashboard en su raíz cuando el modo está
+   activo. Se desenfoca el CONTENIDO (nombre, horas, pasos, imágenes) pero no
+   la estructura: la UI sigue navegable y el drag sigue funcionando. El
+   revelado momentáneo es solo-hover en dispositivos con puntero fino (en
+   táctil el tap abre el modal, que también queda desenfocado — privado). */
+.privacy-mode .activity-item span,
+.privacy-mode .activity-title span,
+.privacy-mode .df-title,
+.privacy-mode .df-hora,
+.privacy-mode .daily-activity-card .activity-name,
+.privacy-mode .daily-activity-card .activity-steps-badge,
+.privacy-mode .daily-activity-card .activity-image-thumb,
+.privacy-mode .stat-card .legend .label {
+  filter: blur(7px);
+  transition: filter 0.18s ease;
+}
+
+/* Imágenes: desenfoque más fuerte (una imagen en claro delata aunque el
+   nombre esté borroso). */
+.privacy-mode .activity-image-thumb img {
+  filter: blur(12px);
+  transition: filter 0.18s ease;
+}
+
+/* Revelado momentáneo: solo con puntero fino (no dispara hover fantasma en
+   táctil). Soltar el puntero = volver a difuminar; para editar en claro,
+   desactiva el modo. */
+@media (hover: hover) and (pointer: fine) {
+  .privacy-mode .activity-item:hover span,
+  .privacy-mode .activity-item:hover .activity-title span,
+  .privacy-mode .daily-activity-card:hover .activity-name,
+  .privacy-mode .daily-activity-card:hover .activity-image-thumb,
+  .privacy-mode .daily-activity-card:hover .activity-image-thumb img {
+    filter: none;
+  }
+}
+
+/* El drag-float (fantasma durante arrastre) ya se difumina por regla base:
+   arrastrar en modo privacidad no revela nada. */
+
 .btn:hover {
   background: var(--color-green-moss);
 }

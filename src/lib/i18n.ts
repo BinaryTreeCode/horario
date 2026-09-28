@@ -29,6 +29,7 @@ const es: Catalogo = {
   'header.adjustUpTitle': 'Ajusta todas las actividades para cubrir el espacio superior sobrante',
   'header.newActivity': 'Nueva Actividad',
   'header.settings': 'Abrir ajustes',
+  'header.privacy': 'Modo privacidad: ocultar el contenido de las actividades',
   'header.viewWeek': 'Ver semana',
   'header.viewDay': 'Ver día',
 
@@ -253,6 +254,7 @@ const en: Catalogo = {
   'header.adjustUpTitle': 'Shift all activities to cover the leftover space at the top',
   'header.newActivity': 'New Activity',
   'header.settings': 'Open settings',
+  'header.privacy': 'Privacy mode: hide activity contents',
   'header.viewWeek': 'View week',
   'header.viewDay': 'View day',
 
