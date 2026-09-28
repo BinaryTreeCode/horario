@@ -50,6 +50,8 @@ const es: Catalogo = {
   'week.hoursWeek': 'Horas Semana',
   'week.hoursTodayAria': 'Distribución de horas de hoy por categoría',
   'week.hoursWeekAria': 'Distribución de horas de la semana por categoría',
+  'donut.ofDay': 'planificadas hoy',
+  'donut.ofWeek': 'planificadas esta semana',
 
   // ── Vista Día ──
   'dayView.empty': 'Día libre — tocá cualquier hueco del horario para crear una actividad',
@@ -273,6 +275,8 @@ const en: Catalogo = {
   'week.hoursWeek': 'Hours This Week',
   'week.hoursTodayAria': 'Distribution of today’s hours by category',
   'week.hoursWeekAria': 'Distribution of this week’s hours by category',
+  'donut.ofDay': 'planned today',
+  'donut.ofWeek': 'planned this week',
 
   'dayView.empty': 'Free day — tap any slot in the schedule to create an activity',
   'dayView.dragHint': 'Drag or tap to edit',

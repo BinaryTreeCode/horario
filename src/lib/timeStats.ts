@@ -1,0 +1,90 @@
+// Estadísticas de horas planificadas por categoría — módulo PURO (sin Dexie,
+// sin stores) para poder testearlo con bun test de forma aislada.
+//
+// Bug histórico que corrige: la versión anterior replicaba el MISMO intervalo
+// `daysOfWeek.length` veces y la lógica anti-solapamiento dividía cada tramo
+// entre las copias, cancelándose: la semana sumaba exactamente lo mismo que
+// un día (el "15.8h" duplicado de los donuts). Ahora se recorre día por día
+// y se acumula de verdad.
+
+import type { Activity, Category } from './types.js';
+
+/** "HH:MM" → horas decimales (acepta "24:00"). Replica parseTime de stores.ts sin arrastrar la importación de Dexie. */
+function parseTimeToHours(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h + m / 60;
+}
+
+export interface CategoryStat {
+  key: string;
+  label: string;
+  color: string;
+  /** Horas decimales de la categoría en los días pedidos. */
+  value: number;
+}
+
+/**
+ * Horas por categoría para los días pedidos (índices 0=Lunes..6=Domingo,
+ * misma convención que Activity.daysOfWeek).
+ *
+ * Los solapamientos NO se cuentan doble: dentro de cada día los tramos se
+ * reparten a partes iguales entre las categorías que los cubren (así el total
+ * del día nunca excede el tramo horario real).
+ */
+export function computeCategoryStats(
+  activities: Activity[],
+  categories: Category[],
+  days: number[]
+): CategoryStat[] {
+  const stats: Record<string, number> = {};
+
+  for (const day of days) {
+    // 1) Intervalos concretos (start, end, categoryId) de ESTE día
+    const intervals: { start: number; end: number; categoryId: string }[] = [];
+    for (const a of activities) {
+      if (!a.daysOfWeek.includes(day)) continue;
+      const s = parseTimeToHours(a.startTime);
+      const e = parseTimeToHours(a.endTime);
+      if (e <= s) continue;
+      intervals.push({ start: s, end: e, categoryId: a.categoryId });
+    }
+    if (intervals.length === 0) continue;
+
+    // 2) Breakpoints → cobertura por tramo, repartida entre las categorías activas
+    const points = [...new Set(intervals.flatMap(iv => [iv.start, iv.end]))].sort((x, y) => x - y);
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const covering = intervals.filter(iv => iv.start <= a && iv.end >= b);
+      if (covering.length === 0) continue;
+      const slice = (b - a) / covering.length;
+      for (const iv of covering) {
+        stats[iv.categoryId] = (stats[iv.categoryId] || 0) + slice;
+      }
+    }
+  }
+
+  return categories
+    .map((c: Category) => ({
+      key: c.id,
+      label: c.label,
+      value: stats[c.id] || 0,
+      color: c.color
+    }))
+    .filter((s: CategoryStat) => s.value > 0);
+}
+
+/** Total de horas de una lista de stats. */
+export function totalHours(stats: CategoryStat[]): number {
+  return stats.reduce((acc, s) => acc + s.value, 0);
+}
+
+/** "7.5" → "7h 30m"; "0.5" → "30m"; "3" → "3h". Minutos redondeados para evitar residuos de flotantes. */
+export function formatHours(hours: number): string {
+  const totalMin = Math.max(0, Math.round(hours * 60));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}

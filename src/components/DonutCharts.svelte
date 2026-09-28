@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Activity, Category } from '../lib/types.js';
-  import { parseTime } from '../lib/stores.js';
+  import { computeCategoryStats, totalHours, formatHours } from '../lib/timeStats.js';
   import { t } from '../lib/i18n';
 
   // Donut SVG propio (~2 KB) en lugar de layerchart (~120 KB gzip):
@@ -17,47 +17,16 @@
 
   let { activities, categories }: Props = $props();
 
-  // Helper to calculate total hours per category.
-  // Overlaps are NOT double-counted: intervals are merged per time slot and
-  // each merged slice is divided evenly among the categories covering it.
-  function getStats(filterActivities: Activity[]) {
-    // 1) Expand to concrete (start, end, category) intervals for one day
-    const intervals: { start: number; end: number; categoryId: string }[] = [];
-    filterActivities.forEach((a: Activity) => {
-      const s = parseTime(a.startTime);
-      const e = parseTime(a.endTime);
-      if (e <= s) return;
-      const occurrences = filterActivities === activities ? a.daysOfWeek.length : 1;
-      for (let i = 0; i < occurrences; i++) {
-        intervals.push({ start: s, end: e, categoryId: a.categoryId });
-      }
-    });
-    if (intervals.length === 0) return [];
+  // Hoy en índice de daysOfWeek (0=Lunes..6=Domingo): JS da 0=Domingo.
+  const todayIndex = $derived(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1);
 
-    // 2) Collect breakpoints and compute per-slice coverage
-    const points = [...new Set(intervals.flatMap(iv => [iv.start, iv.end]))].sort((x, y) => x - y);
-    const stats: Record<string, number> = {};
+  // Cálculo corregido: la semana suma día por día (antes el total semanal
+  // acababa duplicando el diario por un bug de intervalos replicados).
+  const dayStats = $derived(computeCategoryStats(activities, categories, [todayIndex]));
+  const weekStats = $derived(computeCategoryStats(activities, categories, [0, 1, 2, 3, 4, 5, 6]));
 
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i];
-      const b = points[i + 1];
-      const covering = intervals.filter(iv => iv.start <= a && iv.end >= b);
-      if (covering.length === 0) continue;
-      const slice = (b - a) / covering.length; // el tramo se reparte entre las categorías activas
-      covering.forEach(iv => {
-        stats[iv.categoryId] = (stats[iv.categoryId] || 0) + slice;
-      });
-    }
-
-    return categories
-      .map((c: Category) => ({
-        key: c.id,
-        label: c.label,
-        value: stats[c.id] || 0,
-        color: c.color
-      }))
-      .filter((s: any) => s.value > 0);
-  }
+  const dayTotal = $derived(totalHours(dayStats));
+  const weekTotal = $derived(totalHours(weekStats));
 
   // Segmentos del anillo: paths de arco (exterior + interior) proporcionales al valor.
   function ringSegments(stats: { value: number; color: string; key: string }[]) {
@@ -92,9 +61,6 @@
     }
     return out;
   }
-
-  const dayStats = $derived(getStats(activities.filter((a: Activity) => a.daysOfWeek.includes(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1))));
-  const weekStats = $derived(getStats(activities));
 </script>
 
 <div class="stats-container">
@@ -107,7 +73,8 @@
         {/each}
       </svg>
       <div class="chart-overlay">
-        <span>{dayStats.reduce((acc: number, s: any) => acc + s.value, 0).toFixed(1)}h</span>
+        <span class="overlay-total">{formatHours(dayTotal)}</span>
+        <span class="overlay-sub">{$t('donut.ofDay')}</span>
       </div>
     </div>
     <div class="legend">
@@ -115,7 +82,10 @@
         <div class="legend-item">
           <span class="dot" style="background: {stat.color}"></span>
           <span class="label">{stat.label}</span>
-          <span class="val">{stat.value.toFixed(1)}h</span>
+          <span class="val">
+            {formatHours(stat.value)}
+            <span class="pct">{Math.round((stat.value / (dayTotal || 1)) * 100)}%</span>
+          </span>
         </div>
       {/each}
     </div>
@@ -130,7 +100,8 @@
         {/each}
       </svg>
       <div class="chart-overlay">
-        <span>{weekStats.reduce((acc: number, s: any) => acc + s.value, 0).toFixed(1)}h</span>
+        <span class="overlay-total">{formatHours(weekTotal)}</span>
+        <span class="overlay-sub">{$t('donut.ofWeek')}</span>
       </div>
     </div>
     <div class="legend">
@@ -138,7 +109,10 @@
         <div class="legend-item">
           <span class="dot" style="background: {stat.color}"></span>
           <span class="label">{stat.label}</span>
-          <span class="val">{stat.value.toFixed(1)}h</span>
+          <span class="val">
+            {formatHours(stat.value)}
+            <span class="pct">{Math.round((stat.value / (weekTotal || 1)) * 100)}%</span>
+          </span>
         </div>
       {/each}
     </div>
@@ -184,9 +158,24 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .overlay-total {
     font-size: 1.25rem;
     font-weight: 700;
     color: var(--color-brown-bark);
+    white-space: nowrap;
+  }
+
+  .overlay-sub {
+    font-size: 0.65rem;
+    color: #999;
+    margin-top: 0.15rem;
+    white-space: nowrap;
   }
 
   .legend {
@@ -221,6 +210,13 @@
   .val {
     font-weight: 600;
     color: var(--text-main);
+  }
+
+  .pct {
+    font-weight: 400;
+    color: #999;
+    font-size: 0.72rem;
+    margin-left: 0.3rem;
   }
 
   @media (max-width: 768px) {
