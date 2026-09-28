@@ -220,14 +220,33 @@
   <!-- Top Navigation & Title -->
   <header class="dashboard-header glass-panel">
     <div class="header-left">
-      <div class="logo">🌲 {$t('app.name')}</div>
+      <h1 class="logo">🌲 {$t('app.name')}</h1>
       <nav class="view-tabs" aria-label="{$t('header.viewWeek')} / {$t('header.viewDay')}">
-        <button class:active={currentView === 'week'} onclick={() => currentView = 'week'} aria-label={$t('header.viewWeek')} aria-pressed={currentView === 'week'}>
-          <Calendar size={18} /> {$t('header.week')}
-        </button>
-        <button class:active={currentView === 'day'} onclick={() => currentView = 'day'} aria-label={$t('header.viewDay')} aria-pressed={currentView === 'day'}>
-          <Clock size={18} /> {$t('header.day')}
-        </button>
+        <!-- Pestañas semánticas: role=tablist/tab + aria-selected (los lectores anuncian "pestaña", no "botón pulsado") -->
+        <div class="view-tabs-inner" role="tablist">
+          <button
+            role="tab"
+            id="tab-week"
+            aria-selected={currentView === 'week'}
+            aria-controls="view-panel"
+            class:active={currentView === 'week'}
+            onclick={() => currentView = 'week'}
+            aria-label={$t('header.viewWeek')}
+          >
+            <Calendar size={18} /> {$t('header.week')}
+          </button>
+          <button
+            role="tab"
+            id="tab-day"
+            aria-selected={currentView === 'day'}
+            aria-controls="view-panel"
+            class:active={currentView === 'day'}
+            onclick={() => currentView = 'day'}
+            aria-label={$t('header.viewDay')}
+          >
+            <Clock size={18} /> {$t('header.day')}
+          </button>
+        </div>
       </nav>
     </div>
     <div class="header-right">
@@ -276,7 +295,7 @@
   {/if}
 
   <main class="dashboard-main">
-    <div class="view-container">
+    <div class="view-container" id="view-panel" role="tabpanel" aria-labelledby={currentView === 'week' ? 'tab-week' : 'tab-day'}>
       {#if currentView === 'week'}
         <div class="week-layout">
           <div class="grid-section glass-panel">
@@ -392,6 +411,8 @@
     font-size: 1.25rem;
     font-weight: 700;
     color: var(--color-green-dark);
+    /* h1: neutralizar el estilo de agente de usuario y mantener el aspecto previo */
+    margin: 0;
   }
 
   .view-tabs {
@@ -399,6 +420,12 @@
     background: rgba(92, 64, 51, 0.05);
     padding: 0.25rem;
     border-radius: 10px;
+    gap: 0.25rem;
+  }
+
+  /* role=tablist exige layout flex en el CONTENEDOR con role (no en el nav) */
+  .view-tabs-inner {
+    display: flex;
     gap: 0.25rem;
   }
 
@@ -428,9 +455,10 @@
     gap: 0.75rem;
   }
 
-  /* Targets táctiles >= 42px en el header */
+  /* Targets táctiles >= 44px en el header (regla dura #5) */
   .header-right .btn {
-    min-height: 42px;
+    min-height: 44px;
+    min-width: 44px;
   }
 
   /* Banner de estado de sincronización */
@@ -515,6 +543,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Target táctil completo aunque el icono sea pequeño */
+    min-width: 44px;
+    min-height: 44px;
   }
 
   /* Modo privacidad activo: el ojo cerrado se destaca (fondo verde, no gris)

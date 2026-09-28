@@ -1483,8 +1483,9 @@
     color: #bbb;
     cursor: pointer;
     padding: 0.35rem;
-    min-width: 32px;
-    min-height: 32px;
+    /* Accesibilidad: target táctil >= 44px (regla dura #5) aunque el icono siga a 13px */
+    min-width: 44px;
+    min-height: 44px;
     display: grid;
     place-items: center;
     border-radius: 8px;

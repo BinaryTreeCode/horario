@@ -1238,6 +1238,11 @@
     border: none;
     color: #999;
     cursor: pointer;
+    /* Target táctil >= 44px (regla dura #5); ya lo era en móvil, ahora también en desktop */
+    min-width: 44px;
+    min-height: 44px;
+    display: grid;
+    place-items: center;
   }
 
   .form-group {
@@ -1281,7 +1286,7 @@
 
   .day-toggle {
     flex: 1;
-    height: 40px;
+    height: 44px;
     border-radius: 8px;
     border: 1px solid rgba(0,0,0,0.1);
     background: white;
@@ -1390,7 +1395,7 @@
       gap: 0.25rem;
     }
     .day-toggle {
-      height: 36px;
+      height: 44px;
       font-size: 0.8rem;
     }
     .modal-footer {

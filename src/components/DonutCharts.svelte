@@ -74,7 +74,7 @@
 
 <div class="stats-container">
   <div class="stat-card glass-panel">
-    <h3>{$t('week.hoursToday')}</h3>
+    <h2>{$t('week.hoursToday')}</h2>
     <div class="chart-wrapper">
       <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label={$t('week.hoursTodayAria')}>
         {#each ringSegments(dayWithFree) as seg (seg.key)}
@@ -100,7 +100,7 @@
   </div>
 
   <div class="stat-card glass-panel">
-    <h3>{$t('week.hoursWeek')}</h3>
+    <h2>{$t('week.hoursWeek')}</h2>
     <div class="chart-wrapper">
       <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label={$t('week.hoursWeekAria')}>
         {#each ringSegments(weekWithFree) as seg (seg.key)}
@@ -141,9 +141,10 @@
     gap: 1rem;
   }
 
-  .stat-card h3 {
+  .stat-card h2 {
     margin: 0;
     font-size: 1.1rem;
+    font-weight: 600;
     color: var(--color-green-dark);
     align-self: flex-start;
   }
@@ -180,7 +181,7 @@
 
   .overlay-sub {
     font-size: 0.65rem;
-    color: #999;
+    color: #6b6b6b; /* AA sobre panel blanco: 4.6:1 (antes #999 = 2.8:1) */
     margin-top: 0.15rem;
     white-space: nowrap;
   }
@@ -216,7 +217,7 @@
 
   .label {
     flex: 1;
-    color: #666;
+    color: #595959; /* AA holgado: 7:1 (antes #666 = 5.7:1, justo) */
   }
 
   .val {
@@ -226,7 +227,7 @@
 
   .pct {
     font-weight: 400;
-    color: #999;
+    color: #6b6b6b; /* AA sobre panel blanco: 4.6:1 (antes #999 = 2.8:1) */
     font-size: 0.72rem;
     margin-left: 0.3rem;
   }
