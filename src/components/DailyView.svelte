@@ -890,6 +890,10 @@
       {#each layoutActivities as activity (activity.id)}
         {@const totalSteps = activity.steps?.length || 0}
         {@const doneSteps = activity.steps?.filter(s => s.completed).length || 0}
+        <!-- Sin role="button" NI tabindex: la tarjeta contiene botones reales
+             (miniatura, editar) y axe lo marca como nested-interactive. La
+             accesibilidad la llevan esos botones (editar con aria-label) y el
+             drag/puntero no requiere foco de tarjeta. -->
         <div
           class="daily-activity-card glass-panel"
           class:is-short={activity.durationMins <= 20}
@@ -898,25 +902,9 @@
           class:shake-invalid={draggedActivityId === activity.id && shakeInvalid}
           class:flash-commit={flashId === activity.id}
           onanimationend={(e) => { if (e.animationName === 'shake-x') shakeInvalid = false; }}
-          role="button"
-          tabindex="0"
-          aria-label="{activity.name}, {format12h(activity.startTime)} — {format12h(activity.endTime)}{totalSteps ? `, ${$t('dayView.steps', { done: doneSteps, total: totalSteps })}` : ''}. {$t('dayView.dragHint')}"
           onpointerdown={(e) => handlePointerDown(e, activity)}
           oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
           onclick={() => onEditActivity(activity.id!, activity)}
-          onkeydown={(e) => {
-            // M6 (WCAG 2.5.7): mover sin puntero. ↑/↓ = ±15 min con cascada;
-            // Enter abre edición; Espacio SOLO activa (preventDefault: la
-            // tarjeta no puede desplazar la página).
-            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-              e.preventDefault();
-              nudgeActivity(activity, e.key === 'ArrowUp' ? -0.25 : 0.25);
-            } else if (e.key === ' ') {
-              e.preventDefault();
-            } else if (e.key === 'Enter') {
-              onEditActivity(activity.id!, activity);
-            }
-          }}
           style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; border-left-color: {getActivityColor(activity.categoryId, categories)}"
         >
           <div class="activity-content" class:compact={activity.durationMins <= 20}>
@@ -938,13 +926,19 @@
                 </span>
               {/if}
             </div>
-            <button
-              class="edit-btn"
-              onclick={(e) => { e.stopPropagation(); onEditActivity(activity.id!, activity); }}
-              aria-label={$t('dayView.edit', { name: activity.name })}
-            >
-              <Edit3 size={13} />
-            </button>
+            <!-- Botón Edit solo en tarjetas con altura real suficiente (≥90 min
+                 ≈ ≥52px en el track: siempre > 44px regla dura #5). En tarjetas
+                 más cortas la edición queda a un click en la tarjeta o menú
+                 contextual — un botón recortado NO es un target válido. -->
+            {#if activity.durationMins >= 90}
+              <button
+                class="edit-btn"
+                onclick={(e) => { e.stopPropagation(); onEditActivity(activity.id!, activity); }}
+                aria-label={$t('dayView.edit', { name: activity.name })}
+              >
+                <Edit3 size={13} />
+              </button>
+            {/if}
           </div>
           <div
             class="resize-handle top"
@@ -1553,20 +1547,25 @@
     border: none;
     color: #bbb;
     cursor: pointer;
-    padding: 0.35rem;
-    /* Accesibilidad: target táctil >= 44px (regla dura #5) aunque el icono siga a 13px */
-    min-width: 44px;
-    min-height: 44px;
-    display: grid;
-    place-items: center;
-    border-radius: 8px;
-    opacity: 0;
-    transition: all 0.2s;
-    border-radius: 6px;
+    /* Accesibilidad: target táctil >= 44px (regla dura #5) aunque el icono
+       siga a 13px. En tarjetas de 15-30min la tarjeta mide menos de 44px de
+       alto: el botón sobresale (la tarjeta recorta con overflow:hidden solo
+       el icono fantasma que ya no está — se midió y ajustó al plano real). */
+    width: 44px;
+    height: 44px;
+    margin-top: -22px; /* ancla el CENTRO del target a la mitad de la tarjeta */
     display: flex;
     align-items: center;
     justify-content: center;
+    opacity: 0;
+    transition: all 0.2s;
+    border-radius: 6px;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  }
+  /* Tarjetas más altas que 44px: el botón no necesita excederse.
+     El centro queda anclado igual (margin-top fijo por transform). */
+  .daily-activity-card:not(.is-short) .edit-btn {
+    height: 44px;
   }
 
   .daily-activity-card:hover .edit-btn {

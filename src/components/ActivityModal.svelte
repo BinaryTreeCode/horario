@@ -58,10 +58,12 @@
     return diff > 0 ? diff : 0;
   });
 
-  // Ensure categoryId is set
+  // Asegurar categoría seleccionada: por defecto 'Rutina' (la categoría
+  // base de la app), no la primera de la lista — una actividad nueva sin
+  // elección consciente del usuario cae en lo genérico.
   $effect(() => {
     if (!categoryId && categories.length > 0) {
-      categoryId = categories[0].id;
+      categoryId = categories.some(c => c.id === 'rutina') ? 'rutina' : categories[0].id;
     }
   });
 

@@ -52,19 +52,19 @@ test('Semana: sin violaciones de accesibilidad', async ({ page }) => {
 
 test('Día: sin violaciones de accesibilidad', async ({ page }) => {
   await page.locator(TAB_DIA).click();
-  // Con perfil limpio no hay actividades: la señal de vista cargada es el
-  // estado vacío (visible solo en día libre).
-  await expect(page.locator('.empty-state')).toBeVisible({ timeout: 30_000 });
+  // Con actividades semilla el día ya no está vacío: la señal de vista cargada
+  // es el track del horario (existen con o sin actividades).
+  await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
   const violations = await runAxe(page);
   expect(violations, formatear(violations)).toEqual([]);
 });
 
 test('Modal de actividad (creación): sin violaciones de accesibilidad', async ({ page }) => {
   await page.locator(TAB_DIA).click();
-  await expect(page.locator('.empty-state')).toBeVisible({ timeout: 30_000 });
-  // Día libre → tap en el track abre el modal de creación (mismo flujo que un
-  // usuario real con perfil nuevo).
-  await page.locator('.activities-track').click({ position: { x: 200, y: 300 } });
+  await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
+  // Tap en un hueco del track abre el modal de creación (mismo flujo que un
+  // usuario real).
+  await page.locator('.activities-track').first().click({ position: { x: 200, y: 300 } });
   const modal = page.locator('.modal-content[role="dialog"]');
   await expect(modal).toBeVisible({ timeout: 30_000 });
   await esperarAnimacion(page);
@@ -88,7 +88,9 @@ test('Ajustes: sin violaciones de accesibilidad', async ({ page }) => {
 
 test('Sin botones por debajo de 44px (regla del proyecto)', async ({ page }) => {
   await page.locator(TAB_DIA).click();
-  await expect(page.locator('.empty-state')).toBeVisible({ timeout: 30_000 });
+  // Con semillas por defecto el día ya no muestra el estado vacío: la señal
+  // de vista cargada es el track del horario.
+  await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
   const chicos = await page.evaluate(() => {
     return [...document.querySelectorAll('button')]
       .filter(b => {

@@ -278,12 +278,50 @@ async function initializeDefaults() {
     { id: 'endHour', key: 'endHour', value: 23, updatedAt: 0 }
   ]);
   await db.syncState.put({ id: '1' });
+  // Actividades comunes por defecto: una instalación nueva nunca arranca
+  // vacía — el usuario ve un día armado de ejemplo que puede editar/borrar.
+  // updatedAt 0 (igual que las categorías iniciales): datos semilla, no
+  // mutaciones del usuario — el LWW no debe tratarlos como frescos.
+  const seed = (name: string, categoryId: string, startTime: string, endTime: string, daysOfWeek: number[]): Activity => ({
+    id: newId(),
+    categoryId,
+    name,
+    description: undefined,
+    image: undefined,
+    startTime,
+    endTime,
+    daysOfWeek,
+    steps: undefined,
+    updatedAt: 0,
+    deletedAt: undefined
+  });
+  const TODOS = [0, 1, 2, 3, 4, 5, 6];
+  const LUNES_A_VIERNES = [1, 2, 3, 4, 5];
+  await db.activities.bulkAdd([
+    seed('Rutina matutina', 'rutina', '07:00', '08:00', TODOS),
+    seed('Desayuno', 'comer', '08:00', '08:30', TODOS),
+    seed('Trabajo', 'trabajar', '09:00', '13:00', LUNES_A_VIERNES),
+    seed('Almuerzo', 'comer', '13:00', '14:00', TODOS),
+    seed('Aseo personal', 'aseo', '22:00', '22:30', TODOS)
+  ]);
 }
 
 export async function initDB() {
   try {
-    if (!db.isOpen()) {
-      await db.open();
+    try {
+      if (!db.isOpen()) {
+        await db.open();
+      }
+    } catch (openErr: any) {
+      // ── Rescate de BD legacy (UpgradeError: changing primary key) ──
+      // BDs creadas con el esquema v2/v3 (++id numérico) NO pueden migrar:
+      // IndexedDB jamás permite cambiar la primary key de una store. Dexie
+      // aborta el open() y sin BD todo guardado falla (parece "pedir cuenta"
+      // pero es el upgrade roto — la app es y sigue siendo local-first).
+      // Rescate: leer los datos crudos con IndexedDB nativo, borrar la BD
+      // completa y recrearla con el esquema actual + los datos rescatados.
+      console.error('[Init] Apertura falló, intentando rescate de BD legacy:', openErr);
+      await rescatarBdLegacy(openErr);
     }
 
     const activitiesCount = await db.activities.count();
@@ -331,6 +369,94 @@ export async function initDB() {
     backupToLocalStorage();
   } catch (err) {
     console.error('Error durante initDB:', err);
+  }
+}
+
+/**
+ * Rescate de BD legacy: cuando Dexie no puede abrir por cambio de primary key
+ * (v2/v3 → v4), lee las tablas crudas con IndexedDB nativo, borra la BD y la
+ * recrea con el esquema declarado actual; los datos rescatados se normalizan
+ * por el MISMO pipeline del import (validateImport) y se restauran.
+ * Sin datos rescatables, queda una instalación fresca con contenido por defecto.
+ */
+async function rescatarBdLegacy(openErr: any): Promise<void> {
+  const nombre = db.name; // 'ScheduleDB'
+  const esErrorPrimaryKey =
+    openErr?.name === 'UpgradeError' ||
+    /primary key/i.test(String(openErr?.message ?? openErr ?? ''));
+  if (!esErrorPrimaryKey || typeof indexedDB === 'undefined') {
+    throw openErr; // no es el caso conocido: que suba y se registre el error
+  }
+
+  // 1) Leer las stores crudas ANTES de borrar (open de bajo nivel, sin Dexie)
+  const leerCrudo = (store: string): Promise<any[]> =>
+    new Promise((resolve) => {
+      const req = indexedDB.open(nombre);
+      req.onupgradeneeded = () => {
+        // Abrir en la versión vieja SIN pedir upgrade: si el navegador intenta
+        // crear stores nuevas abortamos; solo leemos lo que ya existe.
+        req.transaction?.abort();
+      };
+      req.onsuccess = () => {
+        const idb = req.result;
+        if (!idb.objectStoreNames.contains(store)) {
+          idb.close();
+          resolve([]);
+          return;
+        }
+        try {
+          const tx = idb.transaction(store, 'readonly');
+          const getAll = tx.objectStore(store).getAll();
+          getAll.onsuccess = () => {
+            idb.close();
+            resolve(getAll.result ?? []);
+          };
+          getAll.onerror = () => {
+            idb.close();
+            resolve([]);
+          };
+        } catch {
+          idb.close();
+          resolve([]);
+        }
+      };
+      req.onerror = () => resolve([]);
+      req.onblocked = () => resolve([]);
+    });
+
+  const [acts, cats, sets, ovs] = await Promise.all(
+    ['activities', 'categories', 'settings', 'dayOverrides'].map(leerCrudo)
+  );
+
+  // 2) Borrar la BD entera y dejar que Dexie la cree con el esquema actual
+  await Dexie.delete(nombre);
+
+  // 3) Normalizar lo rescatado con el pipeline del import (ids nuevos, stamps,
+  // whitelist, integridad). Si no había nada, initializeDefaults() puebla todo.
+  const validation = validateImport(JSON.stringify({
+    app: 'nature-planner',
+    version: EXPORT_FORMAT_VERSION,
+    activities: acts ?? [],
+    categories: cats ?? [],
+    settings: sets ?? [],
+    dayOverrides: ovs ?? []
+  }));
+
+  await db.open();
+  if (validation.valid) {
+    await importValidatedData(validation);
+    // importValidatedData pausa el push (filosofía del import): en un rescate
+    // NO corresponde — nunca hubo nube en juego y los stamps son frescos.
+    // Nota: si el usuario NO está logueado esto es inocuo (push ya inactivo).
+    const { resumePushAndSync } = await import('./sync');
+    try {
+      await resumePushAndSync();
+    } catch { /* sin sesión: syncNow falla y queda en su estado */ }
+  } else {
+    console.error('[Init] Datos rescatados inválidos:', validation.error);
+  }
+  if ((await db.settings.count()) === 0 || (await db.categories.count()) === 0) {
+    await initializeDefaults();
   }
 }
 

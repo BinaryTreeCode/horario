@@ -35,6 +35,10 @@ async function sembrar(page: import('@playwright/test').Page) {
         const now = Date.now();
         const catId = 'cat-a11y-test';
         const tx = db.transaction(['categories', 'activities'], 'readwrite');
+        // La instalación nueva ahora trae actividades semilla (Rutina
+        // matutina, Desayuno…): se limpian para que el detector de huérfanas
+        // mida SOLO las semillas del test.
+        tx.objectStore('activities').clear();
         tx.objectStore('categories').put({
           id: catId, label: 'Test', color: '#2d5a27', order: 99, updatedAt: now
         });
