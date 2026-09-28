@@ -697,6 +697,15 @@
     gap: 0.75rem;
   }
 
+  /* Acciones del header: fila horizontal SIEMPRE (en Semana y en móvil).
+     Sin esto los botones-block se apilan en columna (bug visto en Semana). */
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
   /* Targets táctiles >= 44px en el header (regla dura #5) */
   .header-right .btn {
     min-height: 44px;
