@@ -4,7 +4,7 @@
   import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
   import { resolveDayCascade, resolveResizeDay, resolveNudgeDay } from '../lib/cascade';
   import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
-  import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon } from '@lucide/svelte';
+  import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon, Plus } from '@lucide/svelte';
   import { db, newId } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import ImageLightbox from './ImageLightbox.svelte';
@@ -33,19 +33,31 @@
   function handleTrackTap(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (target.closest('.daily-activity-card, .context-menu, button')) return;
-    const track = e.currentTarget as HTMLElement;
+    onEditActivity(null, buildDraftAt(hourAtY(e, e.currentTarget as HTMLElement)));
+  }
+
+  /** y de un evento del mouse → hora snap-a-15min dentro del rango visible. */
+  function hourAtY(e: MouseEvent, track: HTMLElement): number {
     const rect = track.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    const yPercent = y / rect.height;
+    const yPercent = (e.clientY - rect.top) / rect.height;
     const hour = startHour + yPercent * (endHour - startHour);
-    // Snap a 15 min y clamp dentro del rango visible
-    const snapped = Math.max(startHour, Math.min(Math.round(hour * 4) / 4, endHour - 0.25));
-    const h = Math.floor(snapped);
-    const m = Math.round((snapped - h) * 60);
+    return Math.max(startHour, Math.min(Math.round(hour * 4) / 4, endHour - 0.25));
+  }
+
+  /** Hora decimal (4.5) → "HH:MM" para el label del menú. */
+  function horasAHoraReloj(hour: number): string {
+    const h = Math.floor(hour);
+    const m = Math.round((hour - h) * 60);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  }
+
+  /** Draft de actividad nueva que arranca a `hour` (fin = +60 min, normalizado). */
+  function buildDraftAt(hour: number): Activity {
+    const h = Math.floor(hour);
+    const m = Math.round((hour - h) * 60);
     const fmt = (v: number) => v.toString().padStart(2, '0');
-    // Fin = inicio + 60 min, normalizado (no clavado en :59)
     const endTotal = h * 60 + m + 60;
-    onEditActivity(null, {
+    return {
       id: '',
       categoryId: categories[0]?.id ?? 'rutina',
       name: '',
@@ -56,7 +68,7 @@
       daysOfWeek: [day],
       steps: [],
       updatedAt: 0,
-    } as unknown as Activity);
+    } as unknown as Activity;
   }
 
   const DAY_NAMES = $derived([0, 1, 2, 3, 4, 5, 6].map(i => $t(`day.${i}`)));
@@ -643,7 +655,9 @@
   }
 
   // Context Menu logic
-  let contextMenu = $state({ show: false, x: 0, y: 0, activityId: null as string | null });
+  // emptyMenuHour ≠ null → el menú es de CREACIÓN sobre un hueco (click derecho
+  // en espacio vacío); null → menú de actividad existente.
+  let contextMenu = $state({ show: false, x: 0, y: 0, activityId: null as string | null, emptyMenuHour: null as number | null });
 
   // Lightbox para ver la imagen de la rutina
   let viewingImageActivity = $state<Activity | null>(null);
@@ -659,6 +673,28 @@
     openContextMenuAt(activityId, e.clientX, e.clientY);
   }
 
+  /** Click derecho en espacio vacío del track: menú de creación con hora del punto. */
+  function handleTrackContextMenu(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.closest('.daily-activity-card, .custom-context-menu, button')) return;
+    e.preventDefault();
+    closeContextMenu();
+    const hour = hourAtY(e, e.currentTarget as HTMLElement);
+    const MENU_W = 220;
+    const MENU_H = 44;
+    const cx = Math.min(e.clientX, window.innerWidth - MENU_W - 8);
+    const cy = Math.min(e.clientY, window.innerHeight - MENU_H - 8);
+    contextMenu = { show: true, x: Math.max(4, cx), y: Math.max(4, cy), activityId: null, emptyMenuHour: hour };
+  }
+
+  /** Abre el modal de creación con la hora del hueco donde se hizo click derecho. */
+  function createAtEmptySlot() {
+    const hour = contextMenu.emptyMenuHour;
+    closeContextMenu();
+    if (hour === null) return;
+    onEditActivity(null, buildDraftAt(hour));
+  }
+
   /** Abre el menú contextual con clamp para que no se salga de la ventana.
    *  Solo mouse (click derecho); el long-press táctil quieto (G6) se eliminó
    *  en F3 del plan v2. */
@@ -672,6 +708,7 @@
 
   function closeContextMenu() {
     contextMenu.show = false;
+    contextMenu.emptyMenuHour = null;
   }
 
   async function duplicateActivity() {
@@ -835,7 +872,7 @@
       {/each}
     </div>
 
-    <div class="activities-track" class:track-dragging={draggedActivityId !== null} class:track-entrada={entradaDia} onclick={handleTrackTap} role="presentation">
+    <div class="activities-track" class:track-dragging={draggedActivityId !== null} class:track-entrada={entradaDia} onclick={handleTrackTap} oncontextmenu={handleTrackContextMenu} role="presentation">
       {#if layoutActivities.length === 0}
         <div class="empty-state glass-panel" aria-live="polite">
           <span class="empty-icon">🌱</span>
@@ -933,6 +970,12 @@
     <!-- Portal a body: el backdrop-filter de .glass-panel ancestro crea containing block
          y ancla el position:fixed al PANEL (menú lejos del cursor). Mismo fix que Semana. -->
     <div class="custom-context-menu glass-panel" use:portal style="top: {contextMenu.y}px; left: {contextMenu.x}px">
+      {#if contextMenu.emptyMenuHour !== null}
+        <!-- Menú de hueco: crear con la hora del punto del click derecho -->
+        <button onclick={createAtEmptySlot} aria-label={$t('menu.createHere', { time: format12h(horasAHoraReloj(contextMenu.emptyMenuHour)) })}>
+          <Plus size={16} /> {$t('menu.createHere', { time: format12h(horasAHoraReloj(contextMenu.emptyMenuHour)) })}
+        </button>
+      {:else}
       <button onclick={duplicateActivity}>
         <Copy size={16} /> {$t('menu.duplicate')}
       </button>
@@ -944,6 +987,7 @@
       <button class="delete-btn" onclick={askDeleteActivity}>
         <Trash2 size={16} /> {$t('menu.delete')}
       </button>
+      {/if}
     </div>
   {/if}
 

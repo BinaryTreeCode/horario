@@ -6,7 +6,7 @@
   import type { WeeklyResolution } from '../lib/cascade';
   import { db } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
-  import { Copy, Trash2, ListChecks, ImageIcon } from '@lucide/svelte';
+  import { Copy, Trash2, ListChecks, ImageIcon, Plus } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr, toastErrRepetido } from '../lib/toast';
@@ -21,10 +21,67 @@
     settings: { startHour: number; endHour: number };
     dayOverrides?: DayOverride[];
     onSelectDay: (day: number) => void;
-    onEditActivity: (id: string | null) => void;
+    // initialData: draft precargado (crear en hueco vía click derecho)
+    onEditActivity: (id: string | null, initialData?: Activity) => void;
   }
 
   let { activities, categories, settings, dayOverrides = [], onSelectDay, onEditActivity }: Props = $props();
+
+  // ── Menú de hueco: click derecho en espacio vacío de una columna ──
+  let emptySlotMenu = $state({ show: false, x: 0, y: 0, day: -1, hour: 0 });
+
+  /** Click derecho en un hueco de la grilla semanal: ofrece crear ahí. */
+  function handleGridContextMenu(e: MouseEvent, day: number) {
+    const target = e.target as HTMLElement;
+    if (target.closest('.activity-item, .custom-context-menu, button')) return;
+    e.preventDefault();
+    emptySlotMenu.show = false;
+    const grid = e.currentTarget as HTMLElement;
+    const rect = grid.getBoundingClientRect();
+    const hour = Math.max(
+      startHour,
+      Math.min(Math.round(((e.clientY - rect.top) / rect.height * (endHour - startHour) + startHour) * 4) / 4, endHour - 0.25)
+    );
+    const MENU_W = 220;
+    const MENU_H = 44;
+    emptySlotMenu = {
+      show: true,
+      x: Math.max(4, Math.min(e.clientX, window.innerWidth - MENU_W - 8)),
+      y: Math.max(4, Math.min(e.clientY, window.innerHeight - MENU_H - 8)),
+      day,
+      hour
+    };
+  }
+
+  /** Abre el modal de creación en el día del hueco, con la hora del click. */
+  function createAtEmptySlotWeekly() {
+    const { day, hour } = emptySlotMenu;
+    emptySlotMenu.show = false;
+    if (day < 0) return;
+    const h = Math.floor(hour);
+    const m = Math.round((hour - h) * 60);
+    const fmt = (v: number) => v.toString().padStart(2, '0');
+    const endTotal = h * 60 + m + 60;
+    onEditActivity(null, {
+      id: '',
+      categoryId: categories[0]?.id ?? 'rutina',
+      name: '',
+      description: '',
+      image: null,
+      startTime: `${fmt(h)}:${fmt(m)}`,
+      endTime: `${fmt(Math.floor(endTotal / 60) % 24)}:${fmt(endTotal % 60)}`,
+      daysOfWeek: [day],
+      steps: [],
+      updatedAt: 0,
+    } as unknown as Activity);
+  }
+
+  /** Hora decimal → "HH:MM" para el label del menú de hueco. */
+  function horasAHoraReloj(hour: number): string {
+    const h = Math.floor(hour);
+    const m = Math.round((hour - h) * 60);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  }
 
   // ── Drag & Drop: la mecánica vive en src/lib/dragEngine.ts (dueño único,
   // compartida con la vista Día). El quiet-hold táctil (G6) se ELIMINÓ (F3
@@ -717,6 +774,7 @@
 
   function closeContextMenu() {
     contextMenu.show = false;
+    emptySlotMenu.show = false;
   }
 
   async function duplicateActivity() {
@@ -805,6 +863,7 @@
         </button>
         <div
           class="slots-grid"
+          oncontextmenu={(e) => handleGridContextMenu(e, i)}
         >
           {#each dayData.items as activity (activity.id)}
             {@const numSlots = activity.numSlots}
@@ -875,6 +934,16 @@
       style="left: {dragGhostXY.x - grabDX}px; top: {dragGhostXY.y - grabDY}px; width: {grabW}px; height: {grabH}px; --bg-color: {ghostColor}">
       <div class="df-title"><span>{ghostActivity.name}</span></div>
       <span class="df-hora">{dragGhostHora}</span>
+    </div>
+  {/if}
+
+  {#if emptySlotMenu.show}
+    <!-- Menú de hueco (click derecho en espacio vacío de un día): portal por el
+         mismo motivo que el menú de actividad (containing block de glass-panel). -->
+    <div class="custom-context-menu glass-panel" use:portal style="top: {emptySlotMenu.y}px; left: {emptySlotMenu.x}px">
+      <button onclick={createAtEmptySlotWeekly} aria-label={$t('menu.createHere', { time: format12h(horasAHoraReloj(emptySlotMenu.hour)) })}>
+        <Plus size={16} /> {$t('menu.createHere', { time: format12h(horasAHoraReloj(emptySlotMenu.hour)) })}
+      </button>
     </div>
   {/if}
 

@@ -72,6 +72,7 @@ const es: Catalogo = {
   'dayView.limitedBy': 'Limitado por {what}',
 
   // ── Menú contextual ──
+  'menu.createHere': 'Crear actividad a las {time}',
   'menu.duplicate': 'Duplicar (Independiente)',
   'menu.viewImage': 'Ver imagen',
   'menu.delete': 'Eliminar',
@@ -297,6 +298,7 @@ const en: Catalogo = {
   'dayView.insertHere': 'Insert here',
   'dayView.limitedBy': 'Limited by {what}',
 
+  'menu.createHere': 'Create activity at {time}',
   'menu.duplicate': 'Duplicate (Independent)',
   'menu.viewImage': 'View image',
   'menu.delete': 'Delete',

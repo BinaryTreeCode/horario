@@ -305,7 +305,7 @@
               settings={settingsObj}
               dayOverrides={$dayOverridesStore || []}
               onSelectDay={handleDaySelect}
-              onEditActivity={(id) => openActivityModal(id, null)}
+              onEditActivity={(id, _initialData) => openActivityModal(id, null, _initialData)}
             />
           </div>
           <div class="stats-section">
