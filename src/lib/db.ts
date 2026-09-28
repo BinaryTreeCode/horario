@@ -363,6 +363,19 @@ export async function exportData(): Promise<string> {
   }
 }
 
+/** Descarga el respaldo JSON (compartido por Ajustes y la barra lateral). */
+export async function descargarRespaldo(): Promise<void> {
+  const data = await exportData();
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `planificador-datos-${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+  // Revocar con delay: revocar inmediatamente puede cortar la descarga en algunos navegadores
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
 export async function importValidatedData(result: ValidationResult): Promise<void> {
   if (!result.valid) {
     throw new Error('Los datos no fueron validados: llama a validateImport() primero.');

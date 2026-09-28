@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { db, exportData, validateImport, importValidatedData, type ValidationResult } from '../lib/db';
+  import { db, descargarRespaldo, validateImport, importValidatedData, type ValidationResult } from '../lib/db';
   import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync } from '../lib/sync';
   import { establecerClave, olvidarClave } from '../lib/crypto';
   import type { SyncStatus } from '../lib/types';
@@ -321,15 +321,7 @@
 
   async function handleExport() {
     try {
-      const data = await exportData();
-      const blob = new Blob([data], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `planificador-datos-${new Date().toISOString().split('T')[0]}.json`;
-      a.click();
-      // Revocar con delay: revocar inmediatamente puede cortar la descarga en algunos navegadores
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      await descargarRespaldo();
     } catch (err: any) {
       toastErr(tNow('settings.exportError', { msg: err.message }));
     }

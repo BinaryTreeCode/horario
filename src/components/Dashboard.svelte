@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { db } from '../lib/db';
+    import { db, descargarRespaldo } from '../lib/db';
   import type { Activity } from '../lib/types';
   import { 
     activitiesStore, 
@@ -14,7 +14,7 @@
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { undoStack, cloneAct } from '../lib/undo';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, ArrowUp, ArrowDown, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, ArrowUp, ArrowDown, Download, Upload, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
   import { onSyncChange, syncNow } from '../lib/sync';
   import { t, tNow } from '../lib/i18n';
   import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
@@ -111,6 +111,21 @@
   function openSettings() {
     showSettings = true;
     loadSettingsPanel();
+  }
+
+  /** Exportar desde la sidebar: descarga el respaldo JSON con toast de éxito/error. */
+  async function exportarDesdeSidebar() {
+    try {
+      await descargarRespaldo();
+      toastOk(tNow('sidebar.exported'));
+    } catch (err: any) {
+      toastErr(tNow('settings.exportError', { msg: err?.message || err }));
+    }
+  }
+
+  /** Importar desde la sidebar: abre Ajustes donde vive el flujo con confirmación. */
+  function openSettingsParaImportar() {
+    openSettings();
   }
   function preloadModals() {
     ('requestIdleCallback' in window ? requestIdleCallback : (cb: () => void) => setTimeout(cb, 2000))(() => {
@@ -506,6 +521,17 @@
       <button class="side-btn" onclick={openSettings} aria-label={$t('header.settings')} title={$t('header.settings')}>
         <Settings size={20} />
         <span>{$t('header.settings')}</span>
+      </button>
+      <div class="side-sep" role="presentation"></div>
+      <!-- Subir/bajar datos: exportar descarga el JSON directo; importar abre
+           Ajustes (el import pide confirmación y vive en su sección de respaldo) -->
+      <button class="side-btn" onclick={exportarDesdeSidebar} title={$t('sidebar.exportTitle')} aria-label={$t('sidebar.export')}>
+        <Download size={20} />
+        <span>{$t('sidebar.export')}</span>
+      </button>
+      <button class="side-btn" onclick={openSettingsParaImportar} title={$t('sidebar.importTitle')} aria-label={$t('sidebar.import')}>
+        <Upload size={20} />
+        <span>{$t('sidebar.import')}</span>
       </button>
     </aside>
 
