@@ -73,6 +73,13 @@
 
   const DAY_NAMES = $derived([0, 1, 2, 3, 4, 5, 6].map(i => $t(`day.${i}`)));
   const dayName = $derived(DAY_NAMES[day]);
+  // Señalización: ¿el día mostrado es hoy? Mismo mapeo que WeeklyGrid:
+  // la semana de la app arranca en Lunes (índice 0) y getDay() da Domingo=0.
+  const esHoy = $derived.by(() => {
+    const d = new Date().getDay();
+    const hoy = d === 0 ? 6 : d - 1;
+    return day === hoy;
+  });
   const startHour = $derived(settings.startHour);
   const endHour = $derived(settings.endHour);
   const totalHours = $derived(endHour - startHour);
@@ -821,7 +828,7 @@
 <div class="daily-view">
   <div class="daily-header">
     <div class="header-top-row">
-      <h2>{dayName}</h2>
+      <h2>{dayName}{#if esHoy} <span class="hoy-chip">{$t('week.today')}</span>{/if}</h2>
       <div class="current-time-display">
         <Clock size={16} /> {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
       </div>
@@ -1045,6 +1052,24 @@
     margin: 0;
     font-size: 1.5rem;
     color: var(--color-green-dark);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  /* Chip "Hoy" junto al título: mismo verde institucional que el badge de
+     la vista Semana para que la señalización sea consistente. */
+  .hoy-chip {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #ffffff;
+    background: var(--color-green-dark);
+    border-radius: 999px;
+    padding: 3px 10px;
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    transform: translateY(-1px);
   }
 
   .current-time-display {

@@ -113,6 +113,20 @@
   onDestroy(() => engine.destroy());
 
   const days = $derived([0, 1, 2, 3, 4, 5, 6].map(i => $t(`day.${i}`)));
+  // Señalización del día actual: JS getDay() → 0=domingo…6=sábado, igual que
+  // el índice de columnas. Se fija al montar (la vista no vive cruzando
+  // medianoche: el usuario recarga o cambia de pestaña antes).
+  const hoyIdx = getHoyIdx();
+  function getHoyIdx(): number {
+    try {
+      const d = new Date().getDay();
+      // Domingo=0 en JS pero la semana de la app arranca en Lunes (índice 0):
+      // L,M,X,J,V = 1..5 → 0..4; Sábado=6 → 5; Domingo=0 → 6.
+      return d === 0 ? 6 : d - 1;
+    } catch {
+      return -1;
+    }
+  }
   const startHour = $derived(settings.startHour);
   const endHour = $derived(settings.endHour);
   const totalHours = $derived(endHour - startHour);
@@ -848,15 +862,18 @@
   <div class="days-columns">
     {#each days as day, i}
       {@const dayData = getDayActivitiesWithLayout(i, dropPreview?.day === i ? dropPreview.slots : undefined, draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i) ? draggedActivityId : null)}
-      <div class="day-column" class:col-dragging={draggedActivityId !== null}>
+      <div class="day-column" class:col-dragging={draggedActivityId !== null} class:col-hoy={i === hoyIdx}>
         <!-- Nombre completo SIEMPRE accesible: en columna angosta el header muestra
              la abreviatura (Mié/Sáb) y el title lleva el nombre entero. Sin
              nombres cortados a medias jamás. -->
-        <button class="day-header" onclick={() => onSelectDay(i)} aria-label={$t('week.viewDay', { day })} title="{day}">
+        <button class="day-header" class:header-hoy={i === hoyIdx} onclick={() => onSelectDay(i)} aria-label={$t('week.viewDay', { day })} title="{day}">
           <span class="day-name">
             <span class="day-name-completo">{day}</span>
             <span class="day-name-corto" aria-hidden="true">{day.slice(0, 3)}</span>
           </span>
+          {#if i === hoyIdx}
+            <span class="hoy-badge">{$t('week.today')}</span>
+          {/if}
           {#if dayOverrides.some(o => o.day === i && o.activities?.length >= 0)}
             <span class="day-temp-badge" title={$t('week.tempBadge')}>⚡</span>
           {/if}
@@ -1169,6 +1186,38 @@
 
   .day-header:hover {
     background: rgba(92, 64, 51, 0.05);
+  }
+
+  /* ── Señalización del día actual ──
+     El header de hoy se tiñe de verde (color de la app) y lleva el badge
+     "Hoy"; la columna entera lleva un borde sutil para encontrarla de
+     reojo sin marear con colores fuertes el tablero completo. */
+  .day-header.header-hoy {
+    background: rgba(74, 124, 68, 0.10);
+    color: var(--color-green-dark, #2f6b2f);
+    box-shadow: inset 0 -2px 0 var(--color-green-dark, #2f6b2f);
+  }
+  .day-header.header-hoy:hover {
+    background: rgba(74, 124, 68, 0.16);
+  }
+  .hoy-badge {
+    font-size: 0.62rem;
+    font-weight: 700;
+    margin-left: 0.3rem;
+    color: #ffffff;
+    background: var(--color-green-dark, #2f6b2f);
+    border-radius: 999px;
+    padding: 1px 7px;
+    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+  }
+  /* Columna de hoy: borde verde sutil en los costados (no tapa el grid:
+     outline no ocupa espacio de layout). */
+  .day-column.col-hoy .slots-grid {
+    box-shadow: inset 2px 0 0 rgba(74, 124, 68, 0.25), inset -2px 0 0 rgba(74, 124, 68, 0.25);
   }
 
   .day-temp-badge {
