@@ -76,7 +76,7 @@
   <div class="stat-card glass-panel">
     <h2>{$t('week.hoursToday')}</h2>
     <div class="chart-wrapper">
-      <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label={$t('week.hoursTodayAria')}>
+      <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label={$t('week.hoursTodayAria', { total: formatHours(dayTotal) })}>
         {#each ringSegments(dayWithFree) as seg (seg.key)}
           <path d={seg.d} fill={seg.color} />
         {/each}
@@ -102,7 +102,7 @@
   <div class="stat-card glass-panel">
     <h2>{$t('week.hoursWeek')}</h2>
     <div class="chart-wrapper">
-      <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label={$t('week.hoursWeekAria')}>
+      <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label={$t('week.hoursWeekAria', { total: formatHours(weekTotal) })}>
         {#each ringSegments(weekWithFree) as seg (seg.key)}
           <path d={seg.d} fill={seg.color} />
         {/each}
