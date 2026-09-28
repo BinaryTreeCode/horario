@@ -2,6 +2,9 @@ import type { Activity, Category, AppSettings, DayOverride } from './types';
 
 export const EXPORT_FORMAT_VERSION = 4;
 
+/** Identificador del formato compacto posicional (respaldo ~85% más chico). */
+export const COMPACT_FORMAT = 'c1';
+
 export interface ValidationResult {
   valid: boolean;
   error?: string;
@@ -65,6 +68,128 @@ function normalizeId(v: unknown, generate: () => string): string {
   return generate();
 }
 
+// ── Formato compacto 'c1' ─────────────────────────────────────────────────
+// Respaldo posicional ~85% más chico que el JSON completo: sin ids ni
+// updatedAt (el import los regenera). Estructura:
+//   cat:  [id, label, color, order]
+//   acts: [name, startTime, endTime, daysOfWeek, catIdx, desc?, steps?, image?]
+//   set:  [key, value]
+//   ovs:  [day, [misma fila posicional que acts]]
+// catIdx es el índice en `cat` (-1 = sin categoría → 'rutina'). Los steps se
+// guardan como [title] o [title, 1] (completado). La imagen vive en la última
+// posición opcional: si existe, se rellenan los huecos con null.
+
+export interface BackupPayload {
+  activities: Activity[];
+  categories: Category[];
+  settings: AppSettings[];
+  dayOverrides: DayOverride[];
+}
+
+/** Empaqueta datos vivos (sin tombstones) en el formato compacto 'c1'. */
+export function compactToBackup(data: BackupPayload): Record<string, unknown> {
+  const cat = data.categories.map(c => [c.id, c.label, c.color, c.order]);
+  const catIdx = new Map(data.categories.map((c, i) => [c.id, i] as const));
+
+  const encAct = (a: Activity): unknown[] => {
+    // Ranuras FIJAS: la posición codifica el campo. Si se rellena una ranura
+    // tardía, las intermedias quedan como null (nunca desplazar: el descodificador
+    // lee por índice). Se recortan los nulos del final para no inflar el archivo.
+    const row: unknown[] = [
+      a.name,
+      a.startTime,
+      a.endTime,
+      [...a.daysOfWeek],
+      catIdx.get(a.categoryId) ?? -1,
+      a.description ?? null,
+      a.steps?.length ? a.steps.map(s => (s.completed ? [s.title, 1] : [s.title])) : null,
+      a.image ?? null
+    ];
+    while (row.length > 5 && row[row.length - 1] == null) row.pop();
+    return row;
+  };
+
+  return {
+    app: 'nature-planner',
+    fmt: COMPACT_FORMAT,
+    v: EXPORT_FORMAT_VERSION,
+    exportDate: new Date().toISOString(),
+    cat,
+    acts: data.activities.map(encAct),
+    set: data.settings.map(s => [s.key, s.value]),
+    ovs: data.dayOverrides.map(o => [o.day, o.activities.map(encAct)])
+  };
+}
+
+/** Decodifica una fila posicional de actividad al formato completo.
+ *  La validación fina (horas, días, truncados) la hace el pipeline existente. */
+function decAct(row: unknown, what: string, n: number, warnings: string[], catList: any[]): any | null {
+  if (!Array.isArray(row)) {
+    warnings.push(`${what} #${n + 1}: fila inválida. Será ignorada.`);
+    return null;
+  }
+  const [name, start, end, days, catIdx, desc, steps, image] = row;
+  const act: any = { name, startTime: start, endTime: end, daysOfWeek: days };
+  if (typeof catIdx === 'number' && catIdx >= 0 && catList[catIdx]) {
+    act.categoryId = catList[catIdx].id;
+  }
+  if (typeof desc === 'string' && desc) act.description = desc;
+  if (Array.isArray(steps)) {
+    act.steps = steps
+      .map((s: unknown) => (Array.isArray(s) ? { title: s[0], completed: s[1] === 1 || s[1] === true } : { title: s }))
+      .filter((s: any) => typeof s.title === 'string' && s.title.trim());
+  }
+  if (typeof image === 'string' && image) act.image = image;
+  return act;
+}
+
+/** Expande un archivo compacto 'c1' a la estructura completa EN MEMORIA,
+ *  para que continúe por el pipeline de validación existente sin duplicarlo. */
+function expandCompact(data: any, warnings: string[]): any {
+  const catRows = Array.isArray(data.cat) ? data.cat : [];
+  const catList: any[] = [];
+  catRows.forEach((row: unknown, i: number) => {
+    if (!Array.isArray(row) || typeof row[0] !== 'string' || !row[0]) {
+      warnings.push(`Categoría compacta #${i + 1}: fila inválida. Será ignorada.`);
+      return;
+    }
+    catList.push({
+      id: row[0],
+      label: typeof row[1] === 'string' ? row[1] : '',
+      color: row[2],
+      order: typeof row[3] === 'number' ? row[3] : i
+    });
+  });
+
+  const decRows = (rows: unknown, what: string) => {
+    if (!Array.isArray(rows)) return [];
+    return rows.map((row, i) => decAct(row, what, i, warnings, catList)).filter(Boolean);
+  };
+
+  return {
+    app: 'nature-planner',
+    version: typeof data.v === 'number' ? data.v : EXPORT_FORMAT_VERSION,
+    exportDate: data.exportDate,
+    activities: decRows(data.acts, 'Actividad compacta'),
+    categories: catList,
+    settings: (Array.isArray(data.set) ? data.set : []).map((row: unknown, i: number) => {
+      if (!Array.isArray(row) || typeof row[0] !== 'string' || !row[0]) {
+        warnings.push(`Ajuste compacto #${i + 1}: fila inválida. Será ignorado.`);
+        return null;
+      }
+      return { key: row[0], value: row[1] ?? null };
+    }).filter(Boolean),
+    dayOverrides: (Array.isArray(data.ovs) ? data.ovs : []).map((row: unknown, i: number) => {
+      if (!Array.isArray(row) || !Number.isInteger(row[0]) || (row[0] as number) < 0 || (row[0] as number) > 6) {
+        warnings.push(`Edición temporal compacta #${i + 1}: día inválido. Será ignorada.`);
+        return null;
+      }
+      const day: number = row[0];
+      return { day, activities: decRows(row[1], `Edición temporal compacta del día ${day + 1}`) };
+    }).filter(Boolean)
+  };
+}
+
 /**
  * Normaliza y valida un archivo de exportación ANTES de tocar la base de datos.
  * Función pura: sin dependencias de Dexie ni del navegador.
@@ -98,6 +223,21 @@ export function validateImport(jsonString: string): ValidationResult {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
     result.error = 'El contenido del archivo no tiene el formato esperado.';
     return result;
+  }
+
+  // Formato compacto 'c1': expandir en memoria a la estructura completa y
+  // continuar por el MISMO pipeline de validación (whitelist, warnings,
+  // integridad referencial). Los ids/updatedAt se regeneran abajo como siempre.
+  if (data.fmt === COMPACT_FORMAT) {
+    if (data.v !== undefined && (typeof data.v !== 'number' || data.v > EXPORT_FORMAT_VERSION)) {
+      result.error = `El archivo compacto fue creado con una versión más nueva de la app (v${data.v} > v${EXPORT_FORMAT_VERSION}). Actualiza la aplicación.`;
+      return result;
+    }
+    if (data.acts === undefined && data.cat === undefined && data.set === undefined && data.ovs === undefined) {
+      result.error = 'El archivo compacto no contiene datos del planificador (faltan acts, cat, set y ovs).';
+      return result;
+    }
+    data = expandCompact(data, result.warnings);
   }
 
   if (data.app !== undefined && data.app !== 'nature-planner') {

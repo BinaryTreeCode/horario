@@ -319,9 +319,12 @@
     }
   }
 
+  // Formato del respaldo: compacto posicional (por defecto) o JSON completo
+  let exportMode = $state<'compact' | 'full'>('compact');
+
   async function handleExport() {
     try {
-      await descargarRespaldo();
+      await descargarRespaldo(exportMode);
     } catch (err: any) {
       toastErr(tNow('settings.exportError', { msg: err.message }));
     }
@@ -546,6 +549,18 @@
           <h3>{$t('settings.backup')}</h3>
         </header>
         <div class="backup-container">
+          <!-- Formato del respaldo: compacto posicional o JSON completo -->
+          <fieldset class="export-mode">
+            <legend>{$t('settings.exportMode')}</legend>
+            <label class="export-option">
+              <input type="radio" name="exportMode" value="compact" bind:group={exportMode} />
+              <span>{$t('settings.exportCompact')}</span>
+            </label>
+            <label class="export-option">
+              <input type="radio" name="exportMode" value="full" bind:group={exportMode} />
+              <span>{$t('settings.exportFull')}</span>
+            </label>
+          </fieldset>
           <div class="backup-actions">
             <button class="btn btn-secondary btn-backup" onclick={handleExport}>
               <Download size={18} /> {$t('settings.exportJson')}
@@ -937,6 +952,35 @@
     display: flex;
     gap: 0.75rem;
     margin-bottom: 1rem;
+  }
+
+  /* Selector de formato del respaldo (compacto / completo) */
+  .export-mode {
+    border: 1px dashed rgba(0,0,0,0.12);
+    border-radius: 10px;
+    padding: 0.5rem 0.75rem 0.6rem;
+    margin: 0 0 0.9rem;
+  }
+  .export-mode legend {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--color-green-dark);
+    padding: 0 0.35rem;
+  }
+  .export-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.35;
+    color: #555;
+    padding: 0.45rem 0; /* radio 16px + padding ≥ 44px de touch target */
+    cursor: pointer;
+  }
+  .export-option input {
+    accent-color: var(--color-green-dark);
+    margin-top: 0.1rem;
+    flex-shrink: 0;
   }
 
   .btn-backup {

@@ -1,6 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type { Activity, Category, AppSettings, DayOverride, SyncState } from './types';
-import { validateImport, EXPORT_FORMAT_VERSION, type ValidationResult } from './importValidation';
+import { validateImport, EXPORT_FORMAT_VERSION, compactToBackup, type ValidationResult } from './importValidation';
 import { notifyDataChange } from './dataBus';
 
 export { EXPORT_FORMAT_VERSION, validateImport };
@@ -336,7 +336,9 @@ export async function initDB() {
 
 // ── Export / Import ─────────────────────────────────────────────────────────
 
-export async function exportData(): Promise<string> {
+export type ExportMode = 'compact' | 'full';
+
+export async function exportData(mode: ExportMode = 'compact'): Promise<string> {
   try {
     return await db.transaction('r', db.activities, db.categories, db.settings, db.dayOverrides, async () => {
       // Excluye tombstones (deletedAt): el export es para migrar/respaldar datos vivos,
@@ -347,6 +349,11 @@ export async function exportData(): Promise<string> {
         db.settings.filter(s => !s.deletedAt).toArray(),
         db.dayOverrides.filter(o => !o.deletedAt).toArray()
       ]);
+      if (mode === 'compact') {
+        // Formato compacto posicional (~85% más chico): sin ids ni updatedAt,
+        // el import los regenera. Minificado: ya no lleva espacios de más.
+        return JSON.stringify(compactToBackup({ activities, categories, settings, dayOverrides }));
+      }
       return JSON.stringify({
         app: 'nature-planner',
         version: EXPORT_FORMAT_VERSION,
@@ -363,14 +370,15 @@ export async function exportData(): Promise<string> {
   }
 }
 
-/** Descarga el respaldo JSON (compartido por Ajustes y la barra lateral). */
-export async function descargarRespaldo(): Promise<void> {
-  const data = await exportData();
+/** Descarga el respaldo (compartido por Ajustes y la barra lateral).
+ *  mode 'compact' (por defecto) = formato posicional chico; 'full' = JSON completo. */
+export async function descargarRespaldo(mode: ExportMode = 'compact'): Promise<void> {
+  const data = await exportData(mode);
   const blob = new Blob([data], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `planificador-datos-${new Date().toISOString().split('T')[0]}.json`;
+  a.download = `planificador-datos-${new Date().toISOString().split('T')[0]}${mode === 'compact' ? '-compacto' : ''}.json`;
   a.click();
   // Revocar con delay: revocar inmediatamente puede cortar la descarga en algunos navegadores
   setTimeout(() => URL.revokeObjectURL(url), 5000);
