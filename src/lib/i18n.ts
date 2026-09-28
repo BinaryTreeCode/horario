@@ -482,6 +482,15 @@ function idiomaInicial(): Idioma {
 
 export const idioma = writable<Idioma>('es');
 
+// <html lang> en espejo del idioma activo: los guiones automáticos de CSS
+// (hyphens: auto) solo cortan con las reglas del idioma correcto si el lang
+// del documento lo declara, y los lectores de pantalla pronuncian mejor.
+if (typeof document !== 'undefined') {
+  idioma.subscribe((lang) => {
+    document.documentElement.lang = lang;
+  });
+}
+
 /** Carga la preferencia guardada (settings de IndexedDB) y arranca el i18n. */
 export async function iniciarIdioma(): Promise<void> {
   try {

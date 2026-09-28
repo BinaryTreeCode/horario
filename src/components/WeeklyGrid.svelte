@@ -810,7 +810,7 @@
             {@const numSlots = activity.numSlots}
             <button 
               class="activity-item" 
-              class:short={numSlots <= 1}
+              class:short={numSlots <= 2}
               class:drag-ghost={draggedActivityId === activity.id}
               class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
               onpointerdown={(e) => handleItemPointerDown(e, activity, i)}
@@ -826,6 +826,7 @@
                 }
               }}
               aria-label="{activity.name}, {format12h(activity.startTime)} — {format12h(activity.endTime)}{activity.steps?.length ? `, ${activity.steps.length}` : ''}. {$t('dayView.keyboardHint')}"
+              title={activity.name}
             >
               <div class="activity-title">
                 <span>{activity.name}</span>
@@ -1042,7 +1043,9 @@
   }
   @container weekly-grid (width < 480px) {
     .days-columns {
-      grid-template-columns: repeat(7, clamp(56px, calc(14.2857% - 1px), 220px));
+      /* Piso 60px (antes 56): con el padding fino da el ancho justo para que
+         "Almuerzo" completo entre en una línea a 0.7rem. */
+      grid-template-columns: repeat(7, clamp(60px, calc(14.2857% - 1px), 220px));
     }
   }
 
@@ -1153,7 +1156,9 @@
     color: white;
     margin: 1px;
     border-radius: 4px;
-    padding: 2px 5px;
+    /* Padding fino: en columnas de piso (56-66px) cada px horizontal decide
+       entre "Almuerzo" entero o roto a mitad de palabra. */
+    padding: 2px 3px;
     text-align: left;
     border: none;
     cursor: grab;
@@ -1374,7 +1379,13 @@
     -webkit-box-orient: vertical;
     line-clamp: 2;
     white-space: normal;
-    word-break: break-word;
+    /* Cortes con guion real ("Al-muerzo") en vez de letras huérfanas
+       ("Almuerz/o") que dejaba break-word. overflow-wrap solo responde si
+       una palabra entera excede TODA la línea. Requiere <html lang> correcto
+       (el store idioma lo mantiene en espejo). */
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    overflow-wrap: break-word;
     min-width: 0;
   }
 
