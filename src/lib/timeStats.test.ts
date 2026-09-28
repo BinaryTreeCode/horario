@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import type { Activity, Category } from './types';
-import { computeCategoryStats, totalHours, formatHours, withFreeTime, DAY_CAPACITY, WEEK_CAPACITY } from './timeStats';
+import { computeCategoryStats, totalHours, formatHours, withFreeTime, capacidadDia, capacidadSemana } from './timeStats';
 
 const cats: Category[] = [
   { id: 'c-rutina', label: 'Rutina', color: '#4a7c2f' },
@@ -64,25 +64,43 @@ describe('computeCategoryStats', () => {
   });
 });
 
-describe('withFreeTime', () => {
-  it('añade el espacio libre hasta completar la capacidad del día', () => {
+describe('withFreeTime (libre = huecos DENTRO del rango horario)', () => {
+  const RANGO = { start: 7, end: 23 }; // 16h de horario planificado
+  const capDia = capacidadDia(RANGO.start, RANGO.end);
+
+  it('la capacidad es el rango horario configurado, no 24h', () => {
+    expect(capDia).toBe(16);
+    expect(capacidadSemana(7, 23)).toBe(112);
+  });
+
+  it('el tiempo FUERA del horario no cuenta ni como uso ni como libre', () => {
+    // 23:00→24:00 está fuera del rango 7-23: se recorta a nada.
+    const acts = [
+      act({ startTime: '08:00', endTime: '10:00', daysOfWeek: [0] }),
+      act({ startTime: '23:00', endTime: '23:30', daysOfWeek: [0] })
+    ];
+    const stats = withFreeTime(computeCategoryStats(acts, cats, [0], RANGO), capDia);
+    expect(totalHours(stats)).toBe(16);          // 2h usadas + 14h de huecos
+    expect(stats.find(s => s.key === '__free__')!.value).toBe(14); // huecos del rango, NO 22h
+  });
+
+  it('actividad parcialmente fuera del rango se recorta (no se descarta)', () => {
+    // 6:30→8:00: solo 7:00→8:00 cuenta dentro del rango 7-23.
+    const acts = [act({ startTime: '06:30', endTime: '08:00', daysOfWeek: [0] })];
+    const stats = computeCategoryStats(acts, cats, [0], RANGO);
+    expect(totalHours(stats)).toBe(1);
+  });
+
+  it('sin rango (compatibilidad) el día completo es la capacidad', () => {
     const acts = [act({ startTime: '08:00', endTime: '10:00', daysOfWeek: [0] })];
-    const stats = withFreeTime(computeCategoryStats(acts, cats, [0]), DAY_CAPACITY);
-    expect(stats).toHaveLength(2);
-    expect(stats[1].key).toBe('__free__');
-    expect(stats[1].value).toBe(22); // 24h − 2h
+    const stats = withFreeTime(computeCategoryStats(acts, cats, [0]), 24);
+    expect(stats.find(s => s.key === '__free__')!.value).toBe(22);
   });
 
-  it('la semana usa capacidad de 168h', () => {
-    const acts = [act({ startTime: '08:00', endTime: '18:00', daysOfWeek: [0, 1, 2, 3, 4] })];
-    const stats = withFreeTime(computeCategoryStats(acts, cats, [0, 1, 2, 3, 4, 5, 6]), WEEK_CAPACITY);
-    expect(stats[1].value).toBe(118); // 168 − 50
-  });
-
-  it('no añade libre si la ocupación cubre toda la capacidad', () => {
-    const acts = [act({ startTime: '00:00', endTime: '24:00', daysOfWeek: [0] })];
-    const stats = withFreeTime(computeCategoryStats(acts, cats, [0]), DAY_CAPACITY);
-    expect(stats).toHaveLength(1);
+  it('no añade libre si la ocupación cubre todo el rango', () => {
+    const acts = [act({ startTime: '07:00', endTime: '23:00', daysOfWeek: [0] })];
+    const stats = withFreeTime(computeCategoryStats(acts, cats, [0], RANGO), capDia);
+    expect(stats.find(s => s.key === '__free__')).toBeUndefined();
   });
 
   it('con solapamientos el libre se calcula sobre ocupación real (sin dobles conteos)', () => {
@@ -90,17 +108,17 @@ describe('withFreeTime', () => {
       act({ categoryId: 'c-rutina', startTime: '08:00', endTime: '10:00', daysOfWeek: [0] }),
       act({ categoryId: 'c-trabajar', startTime: '08:00', endTime: '10:00', daysOfWeek: [0] })
     ];
-    const stats = withFreeTime(computeCategoryStats(acts, cats, [0]), DAY_CAPACITY);
-    // 2h reales cubiertas (1h + 1h repartidas), no 4h; libre al final (2 categorías antes)
+    const stats = withFreeTime(computeCategoryStats(acts, cats, [0], RANGO), capDia);
+    // 2h reales cubiertas (1h + 1h repartidas), no 4h; huecos = 14h
     expect(stats).toHaveLength(3);
     expect(stats[2].key).toBe('__free__');
-    expect(stats[2].value).toBe(22);
+    expect(stats[2].value).toBe(14);
   });
 
-  it('total con libre = capacidad exacta', () => {
+  it('total con libre = capacidad exacta del rango', () => {
     const acts = [act({ startTime: '09:00', endTime: '09:30', daysOfWeek: [0] })];
-    const stats = withFreeTime(computeCategoryStats(acts, cats, [0]), DAY_CAPACITY);
-    expect(totalHours(stats)).toBe(24);
+    const stats = withFreeTime(computeCategoryStats(acts, cats, [0], RANGO), capDia);
+    expect(totalHours(stats)).toBe(16);
   });
 });
 

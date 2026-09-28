@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Activity, Category } from '../lib/types.js';
-  import { computeCategoryStats, totalHours, formatHours, withFreeTime, DAY_CAPACITY, WEEK_CAPACITY } from '../lib/timeStats.js';
+  import { computeCategoryStats, totalHours, formatHours, withFreeTime, capacidadDia, capacidadSemana } from '../lib/timeStats.js';
   import { t } from '../lib/i18n';
 
   // Donut SVG propio (~2 KB) en lugar de layerchart (~120 KB gzip):
@@ -13,26 +13,33 @@
   interface Props {
     activities: Activity[];
     categories: Category[];
+    settings: { startHour: number; endHour: number };
   }
 
-  let { activities, categories }: Props = $props();
+  let { activities, categories, settings }: Props = $props();
 
   // Hoy en índice de daysOfWeek (0=Lunes..6=Domingo): JS da 0=Domingo.
   const todayIndex = $derived(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1);
 
+  // "Libre" = HUECOS dentro del rango horario configurado (p. ej. 7→23 = 16h
+  // por día), NO el tiempo fuera del horario. El rango recorta los intervalos.
+  const rango = $derived({ start: settings.startHour, end: settings.endHour });
+  const capDia = $derived(capacidadDia(settings.startHour, settings.endHour));
+  const capSemana = $derived(capacidadSemana(settings.startHour, settings.endHour));
+
   // Cálculo corregido: la semana suma día por día (antes el total semanal
   // acababa duplicando el diario por un bug de intervalos replicados).
-  const dayStats = $derived(computeCategoryStats(activities, categories, [todayIndex]));
-  const weekStats = $derived(computeCategoryStats(activities, categories, [0, 1, 2, 3, 4, 5, 6]));
+  const dayStats = $derived(computeCategoryStats(activities, categories, [todayIndex], rango));
+  const weekStats = $derived(computeCategoryStats(activities, categories, [0, 1, 2, 3, 4, 5, 6], rango));
 
   const dayTotal = $derived(totalHours(dayStats));
   const weekTotal = $derived(totalHours(weekStats));
 
   // Espacio libre: horas sin planificar (franja gris del anillo + fila en leyenda).
-  const dayWithFree = $derived(withFreeTime(dayStats, DAY_CAPACITY));
-  const weekWithFree = $derived(withFreeTime(weekStats, WEEK_CAPACITY));
+  const dayWithFree = $derived(withFreeTime(dayStats, capDia));
+  const weekWithFree = $derived(withFreeTime(weekStats, capSemana));
 
-  // % sobre la capacidad total (24h / 168h): contexto real de ocupación.
+  // % sobre la capacidad real del horario (p. ej. 16h día / 112h semana).
   function pct(value: number, capacity: number): string {
     return Math.round((value / capacity) * 100) + '%';
   }
@@ -92,7 +99,7 @@
             <span class="label">{stat.key === '__free__' ? $t('donut.free') : stat.label}</span>
             <span class="val">
               {formatHours(stat.value)}
-              <span class="pct">{pct(stat.value, DAY_CAPACITY)}</span>
+              <span class="pct">{pct(stat.value, capDia)}</span>
             </span>
           </div>
         {/each}
@@ -118,7 +125,7 @@
             <span class="label">{stat.key === '__free__' ? $t('donut.free') : stat.label}</span>
             <span class="val">
               {formatHours(stat.value)}
-              <span class="pct">{pct(stat.value, WEEK_CAPACITY)}</span>
+              <span class="pct">{pct(stat.value, capSemana)}</span>
             </span>
           </div>
         {/each}

@@ -34,7 +34,11 @@ export interface CategoryStat {
 export function computeCategoryStats(
   activities: Activity[],
   categories: Category[],
-  days: number[]
+  days: number[],
+  /** Rango horario configurado (startHour..endHour): los intervalos fuera del
+   *  rango se RECORTAN, no se descartan — así las stats y el "Libre" siempre
+   *  hablan del horario planificado, nunca del tiempo fuera de él. */
+  range?: { start: number; end: number }
 ): CategoryStat[] {
   const stats: Record<string, number> = {};
 
@@ -43,9 +47,14 @@ export function computeCategoryStats(
     const intervals: { start: number; end: number; categoryId: string }[] = [];
     for (const a of activities) {
       if (!a.daysOfWeek.includes(day)) continue;
-      const s = parseTimeToHours(a.startTime);
-      const e = parseTimeToHours(a.endTime);
+      let s = parseTimeToHours(a.startTime);
+      let e = parseTimeToHours(a.endTime);
       if (e <= s) continue;
+      if (range) {
+        s = Math.max(s, range.start);
+        e = Math.min(e, range.end);
+        if (e <= s) continue; // queda fuera del rango horario por completo
+      }
       intervals.push({ start: s, end: e, categoryId: a.categoryId });
     }
     if (intervals.length === 0) continue;
@@ -74,9 +83,17 @@ export function computeCategoryStats(
     .filter((s: CategoryStat) => s.value > 0);
 }
 
-/** Capacidad de un día: 24h. De una semana completa: 168h. */
-export const DAY_CAPACITY = 24;
-export const WEEK_CAPACITY = 24 * 7;
+/**
+ * Capacidad REAL del rango horario configurado: "Libre" son los HUECOS
+ * dentro del horario (p. ej. 7→23 = 16h por día), nunca el tiempo fuera de
+ * él. La semana es la misma capacidad × 7 días.
+ */
+export function capacidadDia(startHour: number, endHour: number): number {
+  return Math.max(0, endHour - startHour);
+}
+export function capacidadSemana(startHour: number, endHour: number): number {
+  return capacidadDia(startHour, endHour) * 7;
+}
 
 /**
  * Añade la categoría sintética "espacio libre": horas del rango pedido que

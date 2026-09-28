@@ -500,6 +500,7 @@
               <DonutChartsComp
                 activities={$activitiesStore || []}
                 categories={$categoriesStore || []}
+                settings={settingsObj}
               />
             {/if}
           </div>
