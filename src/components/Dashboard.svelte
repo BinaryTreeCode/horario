@@ -14,7 +14,7 @@
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { undoStack } from '../lib/undo';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
   import { onSyncChange, syncNow } from '../lib/sync';
   import { t } from '../lib/i18n';
   import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
@@ -214,6 +214,83 @@
       toastErr(tNow('toast.couldNotMove') + ': ' + (err.message || err));
     }
   }
+
+  /** Espejo de coverGapsAbove: empuja todo hacia endHour preservando los
+   *  huecos ENTRE actividades (elimina solo el espacio libre inferior). */
+  async function coverGapsBelow() {
+    const endH = settingsObj.endHour;
+
+    if (currentView === 'day') {
+      const overrides = $state.snapshot($dayOverridesStore) || [];
+      const currentOverride = overrides.find(o => o.day === selectedDay);
+
+      if (currentOverride && currentOverride.activities?.length > 0) {
+        const dayActs = currentOverride.activities.map(a => ({ ...a }));
+        dayActs.sort((a, b) => parseTime(b.endTime) - parseTime(a.endTime)); // desde la última
+
+        let nextStart = endH;
+        for (const act of dayActs) {
+          const actEnd = parseTime(act.endTime);
+          if (actEnd < nextStart) {
+            const duration = actEnd - parseTime(act.startTime);
+            act.startTime = formatTime(nextStart - duration);
+            act.endTime = formatTime(nextStart);
+          }
+          nextStart = parseTime(act.startTime);
+        }
+
+        await db.dayOverrides.put({
+          day: selectedDay,
+          activities: dayActs,
+          updatedAt: Date.now()
+        });
+        return;
+      }
+    }
+
+    const list = $state.snapshot($activitiesStore) || [];
+    if (list.length === 0) return;
+
+    const updatedActivities = list.map(a => ({
+      ...a,
+      daysOfWeek: [...a.daysOfWeek]
+    }));
+
+    // Por día: desde la última actividad hacia atrás, pegada al final del día.
+    for (let day = 0; day < 7; day++) {
+      const dayActs = updatedActivities.filter(a => a.daysOfWeek.includes(day));
+      dayActs.sort((a, b) => parseTime(b.endTime) - parseTime(a.endTime));
+
+      let nextStart = endH;
+      for (const act of dayActs) {
+        const actEnd = parseTime(act.endTime);
+        if (actEnd < nextStart) {
+          const duration = actEnd - parseTime(act.startTime);
+          act.startTime = formatTime(nextStart - duration);
+          act.endTime = formatTime(nextStart);
+        }
+        nextStart = parseTime(act.startTime);
+      }
+    }
+
+    try {
+      await db.transaction('rw', db.activities, async () => {
+        for (const act of updatedActivities) {
+          const original = list.find(o => o.id === act.id);
+          if (original && (original.startTime !== act.startTime || original.endTime !== act.endTime)) {
+            await db.activities.update(act.id!, {
+              startTime: act.startTime,
+              endTime: act.endTime,
+              updatedAt: Date.now()
+            });
+          }
+        }
+      });
+    } catch (err: any) {
+      console.error('Failed to adjust activities:', err);
+      toastErr(tNow('toast.couldNotMove') + ': ' + (err.message || err));
+    }
+  }
 </script>
 
 <div class="dashboard" class:privacy-mode={$modoPrivacidad}>
@@ -250,12 +327,33 @@
       </nav>
     </div>
     <div class="header-right">
-      <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label={$t('header.adjustUp')} title={$t('header.adjustUpTitle')}>
-        <ChevronsUp size={20} /> <span class="hide-mobile">{$t('header.adjustUp')}</span>
-      </button>
-      <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label={$t('header.newActivity')}>
-        <Plus size={20} /> <span class="hide-mobile">{$t('header.newActivity')}</span>
-      </button>
+      <!-- Acciones del header: solo móvil/tablet (<1024px); en desktop viven en
+           la barra lateral (ver .actions-sidebar) para liberar el header. -->
+      <div class="header-actions">
+        <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label={$t('header.adjustUp')} title={$t('header.adjustUpTitle')}>
+          <ChevronsUp size={20} /> <span class="hide-mobile">{$t('header.adjustUp')}</span>
+        </button>
+        <button class="btn btn-secondary" onclick={coverGapsBelow} aria-label={$t('header.adjustDown')} title={$t('header.adjustDownTitle')}>
+          <ChevronsDown size={20} /> <span class="hide-mobile">{$t('header.adjustDown')}</span>
+        </button>
+        <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label={$t('header.newActivity')}>
+          <Plus size={20} /> <span class="hide-mobile">{$t('header.newActivity')}</span>
+        </button>
+        <!-- Modo privacidad: desenfoca el contenido de las actividades (mirones/capturas) -->
+        <button
+          class="btn btn-secondary btn-icon"
+          class:privacy-on={$modoPrivacidad}
+          onclick={alternarPrivacidad}
+          aria-label={$t('header.privacy')}
+          aria-pressed={$modoPrivacidad}
+          title={$t('header.privacy')}
+        >
+          {#if $modoPrivacidad}<EyeOff size={20} />{:else}<Eye size={20} />{/if}
+        </button>
+        <button class="btn btn-secondary btn-icon" onclick={openSettings} aria-label={$t('header.settings')}>
+          <Settings size={20} />
+        </button>
+      </div>
       {#if syncStatus !== 'local'}
         <button
           class="sync-badge"
@@ -269,20 +367,6 @@
           {:else}<CloudOff size={16} />{/if}
         </button>
       {/if}
-      <!-- Modo privacidad: desenfoca el contenido de las actividades (mirones/capturas) -->
-      <button
-        class="btn btn-secondary btn-icon"
-        class:privacy-on={$modoPrivacidad}
-        onclick={alternarPrivacidad}
-        aria-label={$t('header.privacy')}
-        aria-pressed={$modoPrivacidad}
-        title={$t('header.privacy')}
-      >
-        {#if $modoPrivacidad}<EyeOff size={20} />{:else}<Eye size={20} />{/if}
-      </button>
-      <button class="btn btn-secondary btn-icon" onclick={openSettings} aria-label={$t('header.settings')}>
-        <Settings size={20} />
-      </button>
     </div>
   </header>
 
@@ -295,6 +379,39 @@
   {/if}
 
   <main class="dashboard-main">
+    <!-- Barra lateral de acciones: solo desktop (≥1024px, se muestra por CSS).
+         Duplicar los botones del header es intencional: en móvil la barra no
+         existe y en PC el header queda solo con logo/pestañas/sync. -->
+    <aside class="actions-sidebar glass-panel" aria-label={$t('header.settings')}>
+      <button class="side-btn" onclick={coverGapsAbove} title={$t('header.adjustUpTitle')} aria-label={$t('header.adjustUp')}>
+        <ChevronsUp size={20} />
+        <span>{$t('header.adjustUp')}</span>
+      </button>
+      <button class="side-btn" onclick={coverGapsBelow} title={$t('header.adjustDownTitle')} aria-label={$t('header.adjustDown')}>
+        <ChevronsDown size={20} />
+        <span>{$t('header.adjustDown')}</span>
+      </button>
+      <button class="side-btn side-btn-primary" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label={$t('header.newActivity')}>
+        <Plus size={20} />
+        <span>{$t('header.newActivity')}</span>
+      </button>
+      <button
+        class="side-btn"
+        class:privacy-on={$modoPrivacidad}
+        onclick={alternarPrivacidad}
+        aria-label={$t('header.privacy')}
+        aria-pressed={$modoPrivacidad}
+        title={$t('header.privacy')}
+      >
+        {#if $modoPrivacidad}<EyeOff size={20} />{:else}<Eye size={20} />{/if}
+        <span>{$t('header.privacyShort')}</span>
+      </button>
+      <button class="side-btn" onclick={openSettings} aria-label={$t('header.settings')} title={$t('header.settings')}>
+        <Settings size={20} />
+        <span>{$t('header.settings')}</span>
+      </button>
+    </aside>
+
     <div class="view-container" id="view-panel" role="tabpanel" aria-labelledby={currentView === 'week' ? 'tab-week' : 'tab-day'}>
       {#if currentView === 'week'}
         <div class="week-layout">
@@ -562,6 +679,86 @@
     flex: 1;
     display: flex;
     flex-direction: column;
+  }
+
+  /* ── Barra lateral de acciones (solo ≥1024px) ──
+     En PC las opciones viven aquí (sticky) y el header queda limpio; en
+     móvil/tablet la barra no se muestra y las acciones quedan en el header. */
+  .actions-sidebar {
+    display: none;
+  }
+
+  @media (min-width: 1024px) {
+    .dashboard-main {
+      flex-direction: row;
+      align-items: flex-start;
+      gap: 1.25rem;
+    }
+    .actions-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      width: 172px;
+      flex-shrink: 0;
+      padding: 0.75rem 0.6rem;
+      position: sticky;
+      top: 1.5rem;
+      align-self: flex-start;
+    }
+    /* El header ya no necesita las acciones: quedan solo en la sidebar */
+    .header-actions {
+      display: none;
+    }
+    /* La grilla semanal debe repartir el ancho restante con la sidebar */
+    .view-container {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+
+  .side-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    width: 100%;
+    min-height: 44px;
+    padding: 0.55rem 0.7rem;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--color-brown-bark);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s, color 0.15s;
+  }
+  .side-btn:hover {
+    background: rgba(92, 64, 51, 0.08);
+  }
+  .side-btn:focus-visible {
+    outline: 2px solid var(--color-green-dark);
+    outline-offset: 2px;
+  }
+  .side-btn-primary {
+    background: var(--color-green-dark);
+    color: white;
+  }
+  .side-btn-primary:hover {
+    background: var(--color-green-moss);
+  }
+  .side-btn.privacy-on {
+    background: var(--color-green-dark);
+    color: white;
+  }
+  .side-btn.privacy-on:hover {
+    background: var(--color-green-moss);
+  }
+  .side-btn span {
+    /* Los labels largos no rompen la barra: una línea, ellipsis */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .view-container {

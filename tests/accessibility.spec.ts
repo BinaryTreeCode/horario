@@ -73,8 +73,9 @@ test('Modal de actividad (creación): sin violaciones de accesibilidad', async (
 });
 
 test('Ajustes: sin violaciones de accesibilidad', async ({ page }) => {
-  // El botón de ajustes es el último .btn-icon del header-right.
-  await page.locator('.header-right .btn-icon').last().click();
+  // En desktop (≥1024px) las acciones viven en la sidebar; el último botón
+  // es "Abrir ajustes". (En el header solo quedan logo/pestañas/sync.)
+  await page.locator('.actions-sidebar .side-btn').last().click();
   const panel = page.locator('.modal-content');
   await expect(panel).toBeVisible({ timeout: 30_000 });
   await esperarAnimacion(page);
