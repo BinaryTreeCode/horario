@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Activity, Category } from '../lib/types.js';
-  import { computeCategoryStats, totalHours, formatHours } from '../lib/timeStats.js';
+  import { computeCategoryStats, totalHours, formatHours, withFreeTime, DAY_CAPACITY, WEEK_CAPACITY } from '../lib/timeStats.js';
   import { t } from '../lib/i18n';
 
   // Donut SVG propio (~2 KB) en lugar de layerchart (~120 KB gzip):
@@ -27,6 +27,15 @@
 
   const dayTotal = $derived(totalHours(dayStats));
   const weekTotal = $derived(totalHours(weekStats));
+
+  // Espacio libre: horas sin planificar (franja gris del anillo + fila en leyenda).
+  const dayWithFree = $derived(withFreeTime(dayStats, DAY_CAPACITY));
+  const weekWithFree = $derived(withFreeTime(weekStats, WEEK_CAPACITY));
+
+  // % sobre la capacidad total (24h / 168h): contexto real de ocupación.
+  function pct(value: number, capacity: number): string {
+    return Math.round((value / capacity) * 100) + '%';
+  }
 
   // Segmentos del anillo: paths de arco (exterior + interior) proporcionales al valor.
   function ringSegments(stats: { value: number; color: string; key: string }[]) {
@@ -68,7 +77,7 @@
     <h3>{$t('week.hoursToday')}</h3>
     <div class="chart-wrapper">
       <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label={$t('week.hoursTodayAria')}>
-        {#each ringSegments(dayStats) as seg (seg.key)}
+        {#each ringSegments(dayWithFree) as seg (seg.key)}
           <path d={seg.d} fill={seg.color} />
         {/each}
       </svg>
@@ -76,26 +85,25 @@
         <span class="overlay-total">{formatHours(dayTotal)}</span>
         <span class="overlay-sub">{$t('donut.ofDay')}</span>
       </div>
-    </div>
-    <div class="legend">
-      {#each dayStats as stat}
-        <div class="legend-item">
-          <span class="dot" style="background: {stat.color}"></span>
-          <span class="label">{stat.label}</span>
-          <span class="val">
-            {formatHours(stat.value)}
-            <span class="pct">{Math.round((stat.value / (dayTotal || 1)) * 100)}%</span>
-          </span>
-        </div>
-      {/each}
-    </div>
+    </div>      <div class="legend">
+        {#each dayWithFree as stat}
+          <div class="legend-item">
+            <span class="dot {stat.key === '__free__' ? 'dot-free' : ''}" style="background: {stat.color}"></span>
+            <span class="label">{stat.key === '__free__' ? $t('donut.free') : stat.label}</span>
+            <span class="val">
+              {formatHours(stat.value)}
+              <span class="pct">{pct(stat.value, DAY_CAPACITY)}</span>
+            </span>
+          </div>
+        {/each}
+      </div>
   </div>
 
   <div class="stat-card glass-panel">
     <h3>{$t('week.hoursWeek')}</h3>
     <div class="chart-wrapper">
       <svg viewBox="0 0 {SIZE} {SIZE}" role="img" aria-label={$t('week.hoursWeekAria')}>
-        {#each ringSegments(weekStats) as seg (seg.key)}
+        {#each ringSegments(weekWithFree) as seg (seg.key)}
           <path d={seg.d} fill={seg.color} />
         {/each}
       </svg>
@@ -103,19 +111,18 @@
         <span class="overlay-total">{formatHours(weekTotal)}</span>
         <span class="overlay-sub">{$t('donut.ofWeek')}</span>
       </div>
-    </div>
-    <div class="legend">
-      {#each weekStats as stat}
-        <div class="legend-item">
-          <span class="dot" style="background: {stat.color}"></span>
-          <span class="label">{stat.label}</span>
-          <span class="val">
-            {formatHours(stat.value)}
-            <span class="pct">{Math.round((stat.value / (weekTotal || 1)) * 100)}%</span>
-          </span>
-        </div>
-      {/each}
-    </div>
+    </div>      <div class="legend">
+        {#each weekWithFree as stat}
+          <div class="legend-item">
+            <span class="dot {stat.key === '__free__' ? 'dot-free' : ''}" style="background: {stat.color}"></span>
+            <span class="label">{stat.key === '__free__' ? $t('donut.free') : stat.label}</span>
+            <span class="val">
+              {formatHours(stat.value)}
+              <span class="pct">{pct(stat.value, WEEK_CAPACITY)}</span>
+            </span>
+          </div>
+        {/each}
+      </div>
   </div>
 </div>
 
@@ -200,6 +207,11 @@
     width: 10px;
     height: 10px;
     border-radius: 50%;
+  }
+
+  .dot-free {
+    background: #d8d5cd;
+    border: 1px dashed #b5b1a6;
   }
 
   .label {

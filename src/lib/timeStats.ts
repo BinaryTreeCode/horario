@@ -74,6 +74,35 @@ export function computeCategoryStats(
     .filter((s: CategoryStat) => s.value > 0);
 }
 
+/** Capacidad de un día: 24h. De una semana completa: 168h. */
+export const DAY_CAPACITY = 24;
+export const WEEK_CAPACITY = 24 * 7;
+
+/**
+ * Añade la categoría sintética "espacio libre": horas del rango pedido que
+ * ninguna actividad cubre (capacidad − ocupación, nunca negativa).
+ *
+ * La ocupación diaria real ya está libre de dobles conteos (los solapamientos
+ * se reparten, no se suman), así que basta un reparto proporcional simple.
+ */
+export function withFreeTime(
+  stats: CategoryStat[],
+  capacity: number
+): CategoryStat[] {
+  const used = Math.min(capacity, totalHours(stats));
+  const free = capacity - used;
+  if (free <= 0) return stats;
+  return [
+    ...stats,
+    {
+      key: '__free__',
+      label: '__free__',
+      color: 'var(--donut-free, #d8d5cd)',
+      value: free
+    }
+  ];
+}
+
 /** Total de horas de una lista de stats. */
 export function totalHours(stats: CategoryStat[]): number {
   return stats.reduce((acc, s) => acc + s.value, 0);

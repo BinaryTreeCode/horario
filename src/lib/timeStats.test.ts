@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import type { Activity, Category } from './types';
-import { computeCategoryStats, totalHours, formatHours } from './timeStats';
+import { computeCategoryStats, totalHours, formatHours, withFreeTime, DAY_CAPACITY, WEEK_CAPACITY } from './timeStats';
 
 const cats: Category[] = [
   { id: 'c-rutina', label: 'Rutina', color: '#4a7c2f' },
@@ -61,6 +61,46 @@ describe('computeCategoryStats', () => {
     const stats = computeCategoryStats(acts, cats, [0]);
     expect(stats).toHaveLength(1);
     expect(stats[0].key).toBe('c-rutina');
+  });
+});
+
+describe('withFreeTime', () => {
+  it('añade el espacio libre hasta completar la capacidad del día', () => {
+    const acts = [act({ startTime: '08:00', endTime: '10:00', daysOfWeek: [0] })];
+    const stats = withFreeTime(computeCategoryStats(acts, cats, [0]), DAY_CAPACITY);
+    expect(stats).toHaveLength(2);
+    expect(stats[1].key).toBe('__free__');
+    expect(stats[1].value).toBe(22); // 24h − 2h
+  });
+
+  it('la semana usa capacidad de 168h', () => {
+    const acts = [act({ startTime: '08:00', endTime: '18:00', daysOfWeek: [0, 1, 2, 3, 4] })];
+    const stats = withFreeTime(computeCategoryStats(acts, cats, [0, 1, 2, 3, 4, 5, 6]), WEEK_CAPACITY);
+    expect(stats[1].value).toBe(118); // 168 − 50
+  });
+
+  it('no añade libre si la ocupación cubre toda la capacidad', () => {
+    const acts = [act({ startTime: '00:00', endTime: '24:00', daysOfWeek: [0] })];
+    const stats = withFreeTime(computeCategoryStats(acts, cats, [0]), DAY_CAPACITY);
+    expect(stats).toHaveLength(1);
+  });
+
+  it('con solapamientos el libre se calcula sobre ocupación real (sin dobles conteos)', () => {
+    const acts = [
+      act({ categoryId: 'c-rutina', startTime: '08:00', endTime: '10:00', daysOfWeek: [0] }),
+      act({ categoryId: 'c-trabajar', startTime: '08:00', endTime: '10:00', daysOfWeek: [0] })
+    ];
+    const stats = withFreeTime(computeCategoryStats(acts, cats, [0]), DAY_CAPACITY);
+    // 2h reales cubiertas (1h + 1h repartidas), no 4h; libre al final (2 categorías antes)
+    expect(stats).toHaveLength(3);
+    expect(stats[2].key).toBe('__free__');
+    expect(stats[2].value).toBe(22);
+  });
+
+  it('total con libre = capacidad exacta', () => {
+    const acts = [act({ startTime: '09:00', endTime: '09:30', daysOfWeek: [0] })];
+    const stats = withFreeTime(computeCategoryStats(acts, cats, [0]), DAY_CAPACITY);
+    expect(totalHours(stats)).toBe(24);
   });
 });
 
