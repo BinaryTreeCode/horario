@@ -1,6 +1,6 @@
 <script lang="ts">
   import { db, exportData, validateImport, importValidatedData, type ValidationResult } from '../lib/db';
-  import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange } from '../lib/sync';
+  import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync } from '../lib/sync';
   import { establecerClave, olvidarClave } from '../lib/crypto';
   import type { SyncStatus } from '../lib/types';
   import { Cloud, CloudUpload, LogIn, LogOut, RefreshCw, UserPlus } from '@lucide/svelte';
@@ -51,11 +51,25 @@
   let fileInput: HTMLInputElement | null = $state(null);
   let importFileName = $state<string | null>(null);
 
+  let pushPausado = $state(false);
+
   $effect(() => {
     isLoggedIn().then(v => { loggedIn = v; authLoading = false; });
+    pushPausado = isPushPaused();
     const off = onSyncChange((s) => { syncStatus = s; });
     return off;
   });
+
+  /** Reactiva el push tras un import y sube todo a la nube. */
+  async function reanudarPush() {
+    pushPausado = false;
+    try {
+      await resumePushAndSync();
+      toastOk(tNow('settings.pushResumed'));
+    } catch {
+      toastErr(tNow('settings.pushResumeError'));
+    }
+  }
 
   async function handleAuth() {
     authError = '';
@@ -388,18 +402,11 @@
       confirmImport = false;
       clearUndo(); // los snapshots de undo referencian filas que el import reemplazó
 
-      // Con sesión activa: push completo inmediato. Los registros importados suelen
-      // traer updatedAt antiguos (o 0) y no entrarían en el push incremental.
-      if (await isLoggedIn()) {
-        try {
-          await syncNow(true);
-          toastOk(tNow('settings.importedSynced'));
-        } catch {
-          toastErr(tNow('settings.importedLocal'));
-        }
-      } else {
-        toastOk(tNow('settings.imported'));
-      }
+      // Petición explícita: importar NO sincroniza con la nube. El push queda
+      // pausado; el usuario decide subir los datos desde el botón de Ajustes.
+      // El pull automático sigue: leer la nube no pisa lo importado (LWW gana
+      // lo local con updatedAt fresco).
+      toastOk(tNow('settings.importedNoSync'));
     } catch (err: any) {
       toastErr(tNow('settings.importError', { msg: err?.message || tNow('settings.networkError') }));
     }
@@ -572,6 +579,19 @@
               aria-hidden="true"
             />
           </div>
+          {#if pushPausado}
+            <!-- Push pausado tras import: el usuario decide si subir estos datos -->
+            <div class="push-paused glass-panel" role="alert">
+              <CloudUpload size={18} />
+              <div class="push-paused-text">
+                <strong>{$t('settings.pushPausedTitle')}</strong>
+                <p>{$t('settings.pushPausedMsg')}</p>
+              </div>
+              <button class="btn btn-primary" onclick={reanudarPush} disabled={syncStatus === 'syncing'}>
+                {$t('settings.pushResumeBtn')}
+              </button>
+            </div>
+          {/if}
           <div class="danger-zone">
             <button
               class="btn btn-danger btn-backup"
@@ -623,7 +643,7 @@
     ? $t('settings.importMsg', {
         summary: pendingImport.summary,
         warnings: pendingImport.warnings.length ? $t('settings.importWarnings', { list: pendingImport.warnings.join('\n• ') }) : ''
-      })
+      }) + '\n\n☁️ ' + $t('settings.importNoSyncNote')
     : ''}
   confirmText={$t('settings.importBtn')}
   danger
@@ -953,6 +973,37 @@
   }
 
   /* Zona de peligro: Borrar todo, separada del resto de acciones */
+  .push-paused {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 0.9rem;
+    margin: 0.6rem 0;
+    border: 1px solid rgba(45, 90, 39, 0.25);
+    border-radius: 10px;
+    background: rgba(45, 90, 39, 0.06);
+    color: var(--color-brown-bark);
+  }
+  .push-paused-text {
+    flex: 1;
+    min-width: 0;
+  }
+  .push-paused-text strong {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--color-green-dark);
+  }
+  .push-paused-text p {
+    margin: 0.15rem 0 0;
+    font-size: 0.78rem;
+    color: #6b6b6b; /* AA sobre panel claro */
+  }
+  .push-paused .btn {
+    flex-shrink: 0;
+    min-height: 44px;
+    font-size: 0.8rem;
+  }
+
   .danger-zone {
     border-top: 1px dashed rgba(204, 0, 0, 0.35);
     padding-top: 0.85rem;

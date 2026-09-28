@@ -82,6 +82,45 @@ let lastError: string | undefined;
 let lastSyncAt: number | undefined;
 const listeners = new Set<Listener>();
 
+// ── Pausa de push tras importación ──────────────────────────────────────────
+// Al importar un respaldo, el usuario reemplaza TODOS los datos locales. Subir
+// eso a la nube por defecto SOBREESCRIBIRÍA el respaldo remoto con LWW (los
+// registros importados salen con updatedAt fresco). Pausa solicitada: tras un
+// import, el push queda bloqueado hasta que el usuario lo reactive.
+let pushPaused = false;
+
+/** ¿El push está pausado (tras importación)? */
+export function isPushPaused(): boolean {
+  return pushPaused;
+}
+
+/** Restaura la pausa persistida (llamar una vez al iniciar la app, tras abrir la BD). */
+export async function restorePushPause(): Promise<void> {
+  try {
+    const state = await db.syncState.get('1');
+    pushPaused = !!state?.pendingPushPaused;
+  } catch { pushPaused = false; }
+}
+
+/** Pausa el push a la nube (lo llama el import) y persiste el estado. */
+export async function pausePushAfterImport(): Promise<void> {
+  pushPaused = true;
+  await persistState();
+  // persistState escribe la fila completa; marcar la pausa en el campo dedicado.
+  await db.syncState.put({ ...(await db.syncState.get('1')), id: '1', pendingPushPaused: true });
+  setStatus('local');
+}
+
+/** Reactiva el push y lanza un sync completo (sube los datos importados). */
+export async function resumePushAndSync(): Promise<void> {
+  pushPaused = false;
+  await db.syncState.put({ ...(await db.syncState.get('1')), id: '1', pendingPushPaused: false });
+  await persistState();
+  if (await isLoggedIn()) {
+    await syncNow(true).catch(() => { /* estado ya en error/offline */ });
+  }
+}
+
 export function onSyncChange(fn: Listener): () => void {
   listeners.add(fn);
   fn(status, { pending: pendingCount, error: lastError, lastSyncAt });
@@ -102,12 +141,20 @@ export function getSyncStatus(): SyncStatus {
 
 async function persistState() {
   try {
+    // MERGE con lo persistido: lastPushAt/lastServerPullAt son cursores del
+    // dispositivo que NINGÚN setStatus puede borrar (perderlos re-traería la
+    // nube entera al próximo pull y desincronizaría el push incremental).
+    const prev = await db.syncState.get('1');
     const state: SyncState = {
       id: '1',
       pendingChanges: pendingCount,
       lastError,
       lastErrorAt: lastError ? Date.now() : undefined,
       lastPullAt: lastSyncAt,
+      lastPushAt: prev?.lastPushAt,
+      lastServerPullAt: prev?.lastServerPullAt,
+      // Pausa de push persistente: sobrevive recargas y reinicios de la app.
+      pendingPushPaused: prev?.pendingPushPaused ?? false,
     };
     await db.syncState.put(state);
   } catch { /* la UI no debe fallar por esto */ }
@@ -163,7 +210,10 @@ export async function pushChanges(full = false): Promise<number> {
       body: JSON.stringify(payload),
     });
     pendingCount = Math.max(0, pendingCount - res.pushed);
-    await db.syncState.put({ id: '1', lastPushAt: res.serverTime });
+    // MERGE: conservar los demás campos de la fila (persistState hace lo mismo
+    // en la dirección contraria — los cursores nunca se pierden por un put parcial).
+    const prev = await db.syncState.get('1');
+    await db.syncState.put({ ...prev, id: '1', lastPushAt: res.serverTime });
     setStatus(pendingCount > 0 ? 'syncing' : 'synced');
     return res.pushed;
   } catch (err: any) {
@@ -220,7 +270,7 @@ export async function pullChanges(): Promise<{ applied: number }> {
           applied++;
         }
       }
-      await db.syncState.put({ id: '1', lastServerPullAt: res.serverTime, lastPullAt: Date.now() });
+      await db.syncState.put({ ...state, id: '1', lastServerPullAt: res.serverTime, lastPullAt: Date.now() });
     });
 
     lastSyncAt = Date.now();
@@ -239,6 +289,17 @@ let syncing = false;
 /** Push + pull con exclusión mutua. Es la función que invocan los triggers. */
 export async function syncNow(full = false): Promise<void> {
   if (syncing) return;
+  // Push pausado tras import: solo pull (leer la nube no pisa lo importado,
+  // el LWW local gana con updatedAt fresco); nada local viaja arriba.
+  if (pushPaused && !full) {
+    try {
+      await pullChanges();
+    } catch { /* estado ya en error/offline */ }
+    return;
+  }
+  if (pushPaused && full) {
+    return; // pausa explícita: ni push full (lo llama resumePushAndSync tras reactivar)
+  }
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     setStatus('offline');
     return;
@@ -272,6 +333,7 @@ let listenersInstalled = false;
 export function scheduleSync() {
   if (typeof window === 'undefined') return;
   if (status === 'local') return; // sin sesión no sincroniza
+  if (pushPaused) return; // tras import: cambios locales NO viajan (petición explícita)
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     syncNow().catch(() => { /* el estado ya quedó en error/offline */ });
@@ -309,7 +371,9 @@ export async function initialSyncAfterLogin(): Promise<void> {
   await syncNow(true);
 }
 
-/** Se llama tras logout: la app vuelve a modo solo-local. */
+/** Se llama tras logout: la app vuelve a modo solo-local. La pausa de push
+ *  persiste: si el usuario importó sin subir, al volver a entrar tampoco debe
+ *  subir (la decisión fue sobre esos datos, no sobre la sesión). */
 export function resetSyncAfterLogout(): void {
   status = 'local';
   pendingCount = 0;

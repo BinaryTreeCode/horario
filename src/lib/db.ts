@@ -387,8 +387,17 @@ export async function importValidatedData(result: ValidationResult): Promise<voi
     if (result._categories.length) await db.categories.bulkPut(patch(result._categories));
     if (result._settings.length) await db.settings.bulkPut(patch(result._settings));
     if (result._dayOverrides.length) await db.dayOverrides.bulkPut(patch(result._dayOverrides));
-    await db.syncState.put({ id: '1' });
+    // PRESERVAR lastServerPullAt del syncState (no resetear): el cursor de pull
+    // es del dispositivo, no de los datos. Resetearlo haría que el próximo pull
+    // re-trajera la nube entera y el LWW pisara el import con lo remoto.
+    const prev = await db.syncState.get('1');
+    await db.syncState.put({ id: '1', lastServerPullAt: prev?.lastServerPullAt });
   });
+
+  // Petición del usuario: lo importado NO viaja a la nube automáticamente.
+  // Pausa el push; se reactiva manualmente desde Ajustes (resumePushAndSync).
+  const { pausePushAfterImport } = await import('./sync');
+  await pausePushAfterImport();
 }
 
 /**

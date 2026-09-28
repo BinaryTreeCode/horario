@@ -53,6 +53,9 @@ export interface SyncState {
   pendingChanges?: number;
   lastError?: string;
   lastErrorAt?: number;
+  /** Push pausado tras importar: los datos importados NO viajan a la nube
+   *  hasta que el usuario los suba explícitamente desde Ajustes. */
+  pendingPushPaused?: boolean;
 }
 
 export type SyncStatus = 'offline' | 'local' | 'syncing' | 'synced' | 'error';
