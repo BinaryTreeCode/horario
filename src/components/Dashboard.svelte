@@ -14,7 +14,8 @@
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { undoStack, cloneAct } from '../lib/undo';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, ArrowUp, ArrowDown, Download, Upload, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, ArrowUp, ArrowDown, Download, Upload, Cloud, CloudOff, RefreshCw, Database } from '@lucide/svelte';
+  import { portal } from '../lib/portal';
   import { onSyncChange, syncNow } from '../lib/sync';
   import { t, tNow } from '../lib/i18n';
   import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
@@ -113,8 +114,9 @@
     loadSettingsPanel();
   }
 
-  /** Exportar desde la sidebar: descarga el respaldo JSON con toast de éxito/error. */
-  async function exportarDesdeSidebar() {
+  /** Exportar (menú Datos / sidebar): descarga el respaldo con toast de éxito/error. */
+  async function exportarDatos() {
+    menuDatos = false;
     try {
       await descargarRespaldo();
       toastOk(tNow('sidebar.exported'));
@@ -123,10 +125,49 @@
     }
   }
 
-  /** Importar desde la sidebar: abre Ajustes donde vive el flujo con confirmación. */
-  function openSettingsParaImportar() {
+  /** Importar: abre Ajustes donde vive el flujo con confirmación. */
+  function importarDatos() {
+    menuDatos = false;
     openSettings();
   }
+
+  // ── Menú desplegable "Datos" del header ──
+  let menuDatos = $state(false);
+  let menuDatosEl: HTMLElement | undefined = $state();
+  let menuDatosPos = $state({ x: 0, y: 0 });
+
+  function alternarMenuDatos() {
+    if (!menuDatos && menuDatosEl) {
+      // Posicionar bajo el botón ANTES de abrir (el portal manda al body:
+      // sin ancla de layout, las coords deben medirse del botón real).
+      const r = menuDatosEl.querySelector('button')?.getBoundingClientRect();
+      if (r) {
+        const MENU_W = 230;
+        menuDatosPos = {
+          x: Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8)),
+          y: r.bottom + 6
+        };
+      }
+    }
+    menuDatos = !menuDatos;
+  }
+
+  // Click afuera + Esc cierran el menú (patrón del menú contextual existente).
+  $effect(() => {
+    if (!menuDatos) return;
+    const clickAfuera = (e: PointerEvent) => {
+      if (menuDatosEl && !menuDatosEl.contains(e.target as Node)) menuDatos = false;
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') menuDatos = false;
+    };
+    document.addEventListener('pointerdown', clickAfuera);
+    window.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', clickAfuera);
+      window.removeEventListener('keydown', esc);
+    };
+  });
   function preloadModals() {
     ('requestIdleCallback' in window ? requestIdleCallback : (cb: () => void) => setTimeout(cb, 2000))(() => {
       loadSettingsPanel();
@@ -457,6 +498,21 @@
           <Settings size={20} />
         </button>
       </div>
+      <!-- Menú Datos: FUERA de .header-actions para ser visible en AMBAS vistas
+           (en Día el header-actions se oculta y las acciones viven en la
+           sidebar; los datos siempre están a un clic aquí). -->
+      <div class="menu-datos-wrap" bind:this={menuDatosEl}>
+        <button
+          class="btn btn-secondary btn-icon"
+          onclick={alternarMenuDatos}
+          aria-label={$t('sidebar.menuDatos')}
+          aria-expanded={menuDatos}
+          aria-haspopup="menu"
+          title={$t('sidebar.menuDatos')}
+        >
+          <Database size={20} />
+        </button>
+      </div>
       {#if syncStatus !== 'local'}
         <button
           class="sync-badge"
@@ -558,17 +614,6 @@
                 <Settings size={20} />
                 <span>{$t('header.settings')}</span>
               </button>
-              <div class="side-sep" role="presentation"></div>
-              <!-- Subir/bajar datos: exportar descarga el JSON directo; importar abre
-                   Ajustes (el import pide confirmación y vive en su sección de respaldo) -->
-              <button class="side-btn" onclick={exportarDesdeSidebar} title={$t('sidebar.exportTitle')} aria-label={$t('sidebar.export')}>
-                <Download size={20} />
-                <span>{$t('sidebar.export')}</span>
-              </button>
-              <button class="side-btn" onclick={openSettingsParaImportar} title={$t('sidebar.importTitle')} aria-label={$t('sidebar.import')}>
-                <Upload size={20} />
-                <span>{$t('sidebar.import')}</span>
-              </button>
             </aside>
           {:else}
             <div class="modal-loading" role="status">Cargando vista del día…</div>
@@ -613,6 +658,20 @@
   <!-- (FAB móvil retirado a pedido del usuario: tapaba la última columna de
        la grilla semanal. La creación vive en el botón del header y en el
        tap sobre un hueco de la vista Día.) -->
+
+  {#if menuDatos}
+    <!-- Portal a body: el backdrop-filter de .glass-panel ancestro crea
+         containing block y anclaría el menú lejos del botón. Mismo fix que
+         el menú contextual de las vistas. -->
+    <div class="menu-datos glass-panel" role="menu" use:portal style="top: {menuDatosPos.y}px; left: {menuDatosPos.x}px">
+      <button role="menuitem" onclick={exportarDatos} title={$t('sidebar.exportTitle')}>
+        <Download size={16} /> {$t('sidebar.export')}
+      </button>
+      <button role="menuitem" onclick={importarDatos} title={$t('sidebar.importTitle')}>
+        <Upload size={16} /> {$t('sidebar.import')}
+      </button>
+    </div>
+  {/if}
 
   <Toasts />
 </div>
@@ -704,6 +763,50 @@
     align-items: center;
     gap: 0.5rem;
     flex-wrap: wrap;
+  }
+
+  /* Ancla del menú Datos: wrapper inline para que el botón no participe del
+     wrap raro, y para medir su rect a la hora de abrir. */
+  .menu-datos-wrap {
+    display: inline-flex;
+  }
+
+  /* Dropdown de Datos (portal a body, position:fixed): mismo look que el
+     menú contextual de las vistas. */
+  .menu-datos {
+    position: fixed;
+    z-index: 1200;
+    min-width: 230px;
+    padding: 0.35rem;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    animation: menuDatosIn 0.14s ease-out;
+  }
+  @keyframes menuDatosIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .menu-datos button {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 44px; /* regla dura #5 */
+    padding: 0.55rem 0.8rem;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-brown-bark, #5c4033);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+    transition: background 0.15s;
+  }
+  .menu-datos button:hover {
+    background: rgba(92, 64, 51, 0.08);
   }
 
   /* Targets táctiles >= 44px en el header (regla dura #5) */
