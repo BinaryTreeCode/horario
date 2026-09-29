@@ -1,6 +1,43 @@
 import { describe, test, expect } from 'bun:test';
 import { validateImport, EXPORT_FORMAT_VERSION, compactToBackup, type BackupPayload } from './importValidation';
 
+// ── Archivos legacy reales (migración v2/v3 → actual) ──
+// Estructura según git history: v2 = {activities, categories, settings} con
+// ids NUMÉRICOS en activities y sin dayOverrides/image/steps/sync. v3 = v2 +
+// dayOverrides (ids también numéricos). Ninguno lleva updatedAt ni deletedAt.
+const legacyV2 = JSON.stringify({
+  app: 'nature-planner',
+  version: 2,
+  exportDate: '2026-08-01T12:00:00.000Z',
+  activities: [
+    { id: 1, categoryId: 'trabajar', name: 'Trabajo profundo', startTime: '08:00', endTime: '10:00', daysOfWeek: [0, 1] },
+    { id: 2, categoryId: 'trabajar', name: 'Reunión', startTime: '11:00', endTime: '12:00', daysOfWeek: [2] }
+  ],
+  categories: [
+    { id: 'trabajar', label: 'Trabajar', color: '#1a2a44', order: 0 }
+  ],
+  settings: [
+    { id: 'startHour', key: 'startHour', value: 7 },
+    { id: 'endHour', key: 'endHour', value: 23 }
+  ]
+});
+
+const legacyV3 = JSON.stringify({
+  app: 'nature-planner',
+  version: 3,
+  exportDate: '2026-08-15T12:00:00.000Z',
+  activities: [
+    { id: 7, categoryId: 'trabajar', name: 'Con override', startTime: '08:00', endTime: '09:00', daysOfWeek: [3] }
+  ],
+  categories: [
+    { id: 'trabajar', label: 'Trabajar', color: '#1a2a44', order: 0 }
+  ],
+  settings: [],
+  dayOverrides: [
+    { day: 2, activities: [{ id: 7, categoryId: 'trabajar', name: 'Con override', startTime: '09:00', endTime: '10:00', daysOfWeek: [3] }] }
+  ]
+});
+
 const okAct = {
   id: 'a1b2c3d4-0000-4000-8000-000000000001',
   categoryId: 'trabajar',
@@ -14,7 +51,7 @@ const okAct = {
 const validFile = (overrides: Record<string, unknown> = {}) =>
   JSON.stringify({
     app: 'nature-planner',
-    version: 3,
+    version: EXPORT_FORMAT_VERSION,
     exportDate: new Date().toISOString(),
     activities: [okAct],
     categories: [
@@ -70,7 +107,7 @@ describe('validateImport', () => {
   });
 
   test('sin ninguna tabla reconocible → rechazado', () => {
-    const r = validateImport(JSON.stringify({ app: 'nature-planner', version: 3 }));
+    const r = validateImport(JSON.stringify({ app: 'nature-planner', version: EXPORT_FORMAT_VERSION }));
     expect(r.valid).toBe(false);
     expect(r.error).toContain('no contiene datos');
   });
@@ -79,7 +116,7 @@ describe('validateImport', () => {
     const r = validateImport(validFile({ activities: [{ ...okAct, name: '   ' }] }));
     expect(r.valid).toBe(true);
     expect(r.summary.activities).toBe(0);
-    expect(r.warnings[0]).toContain('sin nombre');
+    expect(r.warnings.join(' ')).toContain('sin nombre');
   });
 
   test('hora de inicio inválida → warning y se descarta', () => {
@@ -276,7 +313,7 @@ describe('validateImport', () => {
     expect(r._categories[0].updatedAt).toBe(0);
   });
 
-  test('export v2 sin dayOverrides (legado) → válido, id numérico normalizado a string', () => {
+  test('export v2 sin dayOverrides (legado) → se migra: id numérico 42 → UUID string', () => {
     const r = validateImport(JSON.stringify({
       version: 2,
       activities: [{ ...okAct, id: 42 }],
@@ -285,7 +322,10 @@ describe('validateImport', () => {
     }));
     expect(r.valid).toBe(true);
     expect(r.summary.activities).toBe(1);
-    expect(r._activities[0].id).toBe('42');
+    // El migrador regenera UUID para ids numéricos (identidad sincronizable)
+    expect(typeof r._activities[0].id).toBe('string');
+    expect(r._activities[0].id).not.toBe('42');
+    expect(r.warnings.join(' ')).toContain('migración');
   });
 
   test('archivo completo válido → sin warnings y resumen correcto', () => {
@@ -471,5 +511,90 @@ describe('formato compacto c1 (round-trip)', () => {
     expect(r.warnings).toHaveLength(0);
     expect(r._activities[0].image).toBe('data:image/png;base64,iVBORw0KGgo=');
     expect(r._activities[0].steps).toBeUndefined();
+  });
+});
+
+describe('migración de versiones antiguas', () => {
+  test('v2 → se migra: dayOverrides creado, ids numéricos → string, sync agregado', () => {
+    const r = validateImport(legacyV2);
+    expect(r.valid).toBe(true);
+    expect(r.summary.activities).toBe(2);
+    expect(r.summary.categories).toBe(1);
+    expect(r.summary.dayOverrides).toBe(0);
+    // Ids regenerados como strings únicos
+    const [a1, a2] = r._activities;
+    expect(typeof a1.id).toBe('string');
+    expect(typeof a2.id).toBe('string');
+    expect(a1.id).not.toBe(a2.id);
+    // Campos de sync: datos anteriores al sync = "nunca editados"
+    expect(a1.updatedAt).toBe(0);
+    expect(r._categories[0].updatedAt).toBe(0);
+    // Warning transparente de la migración (v2 pasa por v3→v4)
+    expect(r.warnings.join(' ')).toContain('migración');
+  });
+
+  test('v3 → se migra: dayOverrides preservados con ids remapeados coherentemente', () => {
+    const r = validateImport(legacyV3);
+    expect(r.valid).toBe(true);
+    expect(r.summary.activities).toBe(1);
+    expect(r.summary.dayOverrides).toBe(1);
+    // La actividad del override es LA MISMA que la de la plantilla: el remapeo
+    // numérico→UUID debe preservar esa identidad (7→mismo UUID en ambos lados).
+    expect(r._dayOverrides[0].activities[0].id).toBe(r._activities[0].id);
+    expect(r.warnings.join(' ')).toContain('v3');
+  });
+
+  test('v4 → no se migra (sin warnings de migración)', () => {
+    const r = validateImport(validFile());
+    expect(r.valid).toBe(true);
+    expect(r.warnings.join(' ')).not.toContain('migración');
+  });
+
+  test('compacto c1 con v vieja embebida → sin error de versión tras expandir', () => {
+    // Un export compacto antiguo con v:3 también debe pasar por la cadena
+    // de migración después de expandirse a la estructura completa.
+    const payload: BackupPayload = {
+      activities: [{ ...okAct, id: 'k1' }],
+      categories: [{ id: 'trabajar', label: 'Trabajar', color: '#1a2a44', order: 0, updatedAt: 9 }],
+      settings: [],
+      dayOverrides: []
+    };
+    const compacto = JSON.parse(JSON.stringify(compactToBackup(payload)));
+    compacto.v = 3;
+    const r = validateImport(JSON.stringify(compacto));
+    expect(r.valid).toBe(true);
+    expect(r.summary.activities).toBe(1);
+    expect(r.warnings.join(' ')).toContain('migración');
+  });
+
+  test('versión sin migrador (v99 intermedia inventada no existe; v1 sigue rechazada)', () => {
+    const r = validateImport(JSON.stringify({ app: 'nature-planner', version: 1, activities: [] }));
+    expect(r.valid).toBe(false);
+    expect(r.error).toContain('demasiado antigua');
+  });
+
+  test('ida y vuelta: export actual → import → export → mismo contenido', () => {
+    const payload: BackupPayload = {
+      activities: [{ ...okAct, id: 'x1', steps: [{ id: 's1', title: 'Paso', completed: true }] }],
+      categories: [{ id: 'trabajar', label: 'Trabajar', color: '#1a2a44', order: 0, updatedAt: 5 }],
+      settings: [{ id: 'startHour', key: 'startHour', value: 7, updatedAt: 5 }],
+      dayOverrides: []
+    };
+    const r1 = validateImport(JSON.stringify(compactToBackup(payload)));
+    expect(r1.valid).toBe(true);
+    // Re-exportar lo importado y re-importar: los datos deben ser estables
+    const r2 = validateImport(JSON.stringify(compactToBackup({
+      activities: r1._activities,
+      categories: r1._categories,
+      settings: r1._settings,
+      dayOverrides: r1._dayOverrides
+    })));
+    expect(r2.valid).toBe(true);
+    expect(r2.summary).toEqual(r1.summary);
+    expect(r2._activities[0].name).toBe(payload.activities[0].name);
+    expect(r2._activities[0].steps?.[0].completed).toBe(true);
+    // El compacto no transporta ids (se regeneran en cada import): el
+    // contenido semántico es estable aunque la identidad cambie.
+    expect(typeof r2._activities[0].id).toBe('string');
   });
 });

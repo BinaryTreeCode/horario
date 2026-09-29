@@ -86,6 +86,66 @@ export interface BackupPayload {
   dayOverrides: DayOverride[];
 }
 
+// ── Migración de versiones antiguas ─────────────────────────────────────
+// Cadena pura de pasos: cada función transforma el payload de su versión de
+// entrada al siguiente (v2→v3→v4). Sin dependencias de BD ni navegador, así
+// toda la cadena se testea unitariamente. Un archivo viejo NUNCA se rechaza
+// por "demasiado antiguo" si tiene datos: se migra con warnings transparentes.
+
+const MIGRATION_ORIGIN = 'migración';
+
+/** v2 → v3: v2 no tiene dayOverrides (se crearon en v3). */
+function migrateV2toV3(data: any): any {
+  if (data.dayOverrides === undefined) data.dayOverrides = [];
+  return data;
+}
+
+/** v3 → v4: ids numéricos de activities → UUID string, campos de sync
+ *  (updatedAt/deletedAt) en todas las filas, y mapeo de categoryId
+ *  referencial intacto (en v3 las categorías ya tenían id string). */
+function migrateV3toV4(data: any, warnings: string[], genId: () => string): any {
+  const idMap = new Map<number, string>();
+  for (const a of data.activities ?? []) {
+    if (typeof a?.id === 'number') idMap.set(a.id, genId());
+  }
+  const mapAct = (a: any): any => {
+    if (typeof a?.id === 'number') return { ...a, id: idMap.get(a.id) ?? genId() };
+    return a;
+  };
+  data.activities = (data.activities ?? []).map(mapAct);
+  data.dayOverrides = (data.dayOverrides ?? []).map((o: any) => ({
+    ...o,
+    activities: (o?.activities ?? []).map(mapAct)
+  }));
+  // Campos de sync: el normalizador downstream (normStamp) completa los que
+  // falten, pero los seteamos aquí para que el registro migrado sea fiel:
+  // datos de antes del sync se comportan como "nunca editados" (updatedAt 0).
+  for (const c of data.categories ?? []) { if (c?.updatedAt === undefined) c.updatedAt = 0; }
+  for (const s of data.settings ?? []) { if (s?.updatedAt === undefined) s.updatedAt = 0; }
+  for (const a of data.activities ?? []) { if (a?.updatedAt === undefined) a.updatedAt = 0; }
+  for (const o of data.dayOverrides ?? []) { if (o?.updatedAt === undefined) o.updatedAt = 0; }
+  warnings.push(`${MIGRATION_ORIGIN}: archivo v${data.version} actualizado al formato actual (ids regenerados, campos de sincronización agregados).`);
+  return data;
+}
+
+/** Migra un payload validado en estructura a la versión actual, paso a paso.
+ *  Devuelve el payload migrado y agrega a `warnings` lo que hizo. */
+export function migrateBackup(data: any, warnings: string[], genId: () => string): any {
+  let v = typeof data.version === 'number' ? data.version : EXPORT_FORMAT_VERSION;
+  while (v < EXPORT_FORMAT_VERSION) {
+    if (v === 2) { data = migrateV2toV3(data); v = 3; }
+    else if (v === 3) { data = migrateV3toV4(data, warnings, genId); v = 4; }
+    else {
+      // Hueco en la cadena (versión sin migrador): no adivinamos. El bloque
+      // de rechazo de validateImport informará "demasiado antigua" con el
+      // número exacto, y el usuario sabrá qué archivo es.
+      break;
+    }
+    data.version = v;
+  }
+  return data;
+}
+
 /** Empaqueta datos vivos (sin tombstones) en el formato compacto 'c1'. */
 export function compactToBackup(data: BackupPayload): Record<string, unknown> {
   const cat = data.categories.map(c => [c.id, c.label, c.color, c.order]);
@@ -256,6 +316,17 @@ export function validateImport(jsonString: string): ValidationResult {
   if (typeof data.version === 'number' && data.version < 2) {
     result.error = `La versión del archivo (v${data.version}) es demasiado antigua para importarse.`;
     return result;
+  }
+
+  // Migración transparente v2/v3 → actual ANTES de la validación por campo:
+  // el pipeline de whitelist de abajo trabaja siempre con el formato actual.
+  if (typeof data.version === 'number' && data.version < EXPORT_FORMAT_VERSION) {
+    const prev = data.version;
+    data = migrateBackup(data, warnings, genId);
+    if (data.version !== EXPORT_FORMAT_VERSION) {
+      result.error = `La versión del archivo (v${prev}) es demasiado antigua para importarse.`;
+      return result;
+    }
   }
 
   const hasAnyData =
