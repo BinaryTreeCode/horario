@@ -758,16 +758,25 @@
       const diaVecino = m.day + dir;
       if (diaVecino < 0 || diaVecino > 6) return;
       const yaLoTiene = act.daysOfWeek.includes(diaVecino);
-      let newDays: number[];
+      // Devolución: estirar hacia un día que YA tiene la actividad RETIRA el
+      // día de origen (ej: trabajo activo lun..dom, asa izquierda del domingo
+      // hacia sábado → deja de estar el domingo). Se requiere conservar ≥1 día.
       if (yaLoTiene) {
-        // Estirar hacia un día que ya tiene la actividad = QUIETAR el día de origen
-        // (ej: activa lun+mar, estirar asa derecha de lun hacia mar → deja solo mar).
-        // Hmm — semántica ambigua; en cambio, asa hacia día ya poseído NO cambia
-        // nada (estirar lo que ya está). Regla simple y predecible.
+        if (act.daysOfWeek.length <= 1) {
+          toastErrRepetido(`hres:${act.id}`, '⛔ Debe quedar al menos un día');
+          return;
+        }
+        const newDays = act.daysOfWeek.filter(d => d !== m.day);
+        // commitWeeklyTimes compara por contenido y omite filas no-op; el
+        // cambio de días vía daysChange fuerza la escritura del único cambio.
+        const times = new Map<string, { start: number; end: number }>();
+        times.set(act.id!, { start: parseTime(act.startTime), end: parseTime(act.endTime) });
+        await commitWeeklyTimes(times, `${act.name}: dejar ${days[m.day]}`, { id: act.id!, days: newDays });
+        toastOk(tNow('toast.dayRemoved', { dia: days[m.day] }));
         return;
-      } else {
-        newDays = [...act.daysOfWeek, diaVecino].sort((a, b) => a - b);
       }
+      // Ganancia: el vecino no tiene la actividad → agregarel día.
+      const newDays = [...act.daysOfWeek, diaVecino].sort((a, b) => a - b);
       // Validar el día ganado: ¿cabe el bloque (cascada con empuje)?
       const dur = parseTime(act.endTime) - parseTime(act.startTime);
       const slots = activities
@@ -801,6 +810,33 @@
       { ghost: false }
     );
   }
+
+  // ── Indicadores dinámicos de asas ──
+  // Solo se muestran los gestos que HOY tienen sentido:
+  //  - estirar arriba/abajo: capacidad > 0 en ese lado (si no hay hueco, la
+  //    asa no aparece: sin indicador de acción imposible)
+  //  - asa lateral: siempre útil (gana un día nuevo O retira el propio),
+  //    salvo que la actividad tenga un solo día y el gesto la dejaría sin
+  //    ninguno (retirar el único día no se ofrece).
+  // Se recalcula con activities: al cambiar el día o los datos, reaparecen.
+  const asasPosibles = $derived.by(() => {
+    const mapa = new Map<string, { arriba: boolean; abajo: boolean; izq: boolean; der: boolean }>();
+    for (const act of activities) {
+      // La asa lateral del lado X es útil si existe ALGÚN día que la gesture
+      // afecte: ganar un vecino que no tiene la actividad, o retirar el día
+      // actual (siempre que quede ≥1 día). Se evalúa por tarjeta global:
+      // la misma actividad se estira desde cualquier columna donde aparezca.
+      const puedeRetirar = act.daysOfWeek.length > 1;
+      const ganaAlgo = act.daysOfWeek.length < 7;
+      mapa.set(act.id!, {
+        arriba: capacidadResizeWeekly(activities, act.id!, 'arriba', CODEC, startHour, endHour) > 0,
+        abajo: capacidadResizeWeekly(activities, act.id!, 'abajo', CODEC, startHour, endHour) > 0,
+        izq: ganaAlgo || puedeRetirar,
+        der: ganaAlgo || puedeRetirar
+      });
+    }
+    return mapa;
+  });
 
   /**
    * Cálculo COMPARTIDO por preview y commit del resize (una sola matemática):
@@ -998,26 +1034,34 @@
                   </span>
                 {/if}
               </div>
-                <div
-                  class="resize-handle top"
-                  aria-hidden="true"
-                  onpointerdown={(e) => startResize(e, activity, i, 'arriba')}
-                ></div>
-                <div
-                  class="resize-handle"
-                  aria-hidden="true"
-                  onpointerdown={(e) => startResize(e, activity, i, 'abajo')}
-                ></div>
-                <div
-                  class="resize-handle hres-izq"
-                  aria-hidden="true"
-                  onpointerdown={(e) => startHResize(e, activity, i, 'izq')}
-                ></div>
-                <div
-                  class="resize-handle hres-der"
-                  aria-hidden="true"
-                  onpointerdown={(e) => startHResize(e, activity, i, 'der')}
-                ></div>
+                {#if asasPosibles.get(activity.id!)?.arriba}
+                  <div
+                    class="resize-handle top"
+                    aria-hidden="true"
+                    onpointerdown={(e) => startResize(e, activity, i, 'arriba')}
+                  ></div>
+                {/if}
+                {#if asasPosibles.get(activity.id!)?.abajo}
+                  <div
+                    class="resize-handle"
+                    aria-hidden="true"
+                    onpointerdown={(e) => startResize(e, activity, i, 'abajo')}
+                  ></div>
+                {/if}
+                {#if asasPosibles.get(activity.id!)?.izq}
+                  <div
+                    class="resize-handle hres-izq"
+                    aria-hidden="true"
+                    onpointerdown={(e) => startHResize(e, activity, i, 'izq')}
+                  ></div>
+                {/if}
+                {#if asasPosibles.get(activity.id!)?.der}
+                  <div
+                    class="resize-handle hres-der"
+                    aria-hidden="true"
+                    onpointerdown={(e) => startHResize(e, activity, i, 'der')}
+                  ></div>
+                {/if}
             </button>
           {/each}
         </div>
