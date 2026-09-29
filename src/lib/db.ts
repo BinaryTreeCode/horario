@@ -223,34 +223,44 @@ export function backupToLocalStorage() {
         }
       }
 
-      const backupData = JSON.stringify({
+      const serializar = (conImagenes: boolean) => JSON.stringify({
         app: 'nature-planner',
         version: EXPORT_FORMAT_VERSION,
         exportDate: new Date().toISOString(),
-        activities,
+        activities: conImagenes ? activities : activities.map(a => ({ ...a, image: typeof a.image === 'string' && a.image.startsWith('data:') ? undefined : a.image })),
         categories,
         settings,
-        dayOverrides
+        dayOverrides: conImagenes ? dayOverrides : dayOverrides.map(o => ({ ...o, activities: o.activities.map(a => ({ ...a, image: typeof a.image === 'string' && a.image.startsWith('data:') ? undefined : a.image })) }))
       });
-      localStorage.setItem('nature_planner_backup', backupData);
-      quotaWarned = false;
+      try {
+        localStorage.setItem('nature_planner_backup', serializar(true));
+        quotaWarned = false;
+      } catch (err2: any) {
+        const isQuota =
+          err2?.name === 'QuotaExceededError' ||
+          err2?.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+          err2?.code === 22 ||
+          err2?.code === 1014;
+        if (!isQuota) throw err2;
+        // Quota con imágenes dentro: el respaldo SIN data-URLs de imagen
+        // casi siempre entra (las imágenes viven bien en IndexedDB y, con
+        // sesión, en Vercel Blob). Solo si aún así explota se avisa al usuario.
+        try {
+          localStorage.setItem('nature_planner_backup', serializar(false));
+          quotaWarned = false;
+        } catch {
+          quotaWarned = true;
+          // Toast de error — persistente hasta que el usuario lo cierre (regla
+          // dura de AGENTS.md: nunca alert() nativo). Import diferido para evitar
+          // dependencia circular toast ↔ db.
+          import('./toast').then(async ({ toastErr }) => {
+            const { tNow } = await import('./i18n');
+            toastErr(tNow('toast.quotaPaused'));
+          });
+        }
+      }
     } catch (err: any) {
       console.error('[Backup] Error:', err);
-      const isQuotaError =
-        err?.name === 'QuotaExceededError' ||
-        err?.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-        err?.code === 22 ||
-        err?.code === 1014;
-      if (isQuotaError && !quotaWarned) {
-        quotaWarned = true;
-        // Toast de error — persistente hasta que el usuario lo cierre (regla
-        // dura de AGENTS.md: nunca alert() nativo). Import diferido para evitar
-        // dependencia circular toast ↔ db.
-        import('./toast').then(async ({ toastErr }) => {
-          const { tNow } = await import('./i18n');
-          toastErr(tNow('toast.quotaPaused'));
-        });
-      }
     }
   }, 1000);
 }

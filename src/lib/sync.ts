@@ -1,6 +1,7 @@
 import { db, now } from './db';
 import type { Activity, Category, AppSettings, DayOverride, SyncState, SyncStatus } from './types';
 import { cifrarCampo, descifrarCampo, esCifrado, tieneClave } from './crypto';
+import { esDataUrlImagen, subirABlob } from './routineImages';
 
 // ── Cifrado E2E de campos sensibles ─────────────────────────────────────
 // description, steps e image se cifran en el dispositivo (AES-GCM, clave
@@ -181,9 +182,60 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
  * Recolecta los registros con updatedAt > lastPushAt (o todos si full=true)
  * y los envía al servidor. El servidor hace upsert con guard LWW.
  */
+// ── Migración de data-URLs a Vercel Blob ──────────────────────────────────
+// Las imágenes de rutina antiguas viven como data-URL base64 (hasta 2 MB) DENTRO
+// de la actividad: llenan localStorage ("respaldo automático pausado") y hacen
+// HTTP 413 en el push. Al empujar con sesión activa, cada data-URL se sube una
+// vez a Vercel Blob y la actividad pasa a guardar la URL corta. Idempotente:
+// una URL http(s)/blob ya migrada no se toca.
+
+let migracionImagenesHecha = false;
+
+async function migrarImagenesABlob(): Promise<void> {
+  if (migracionImagenesHecha) return;
+  const actividades = await db.activities.toArray();
+  const pendientes = actividades.filter(a => esDataUrlImagen(a.image));
+  if (pendientes.length === 0) {
+    migracionImagenesHecha = true;
+    return;
+  }
+  const overrides = await db.dayOverrides.toArray();
+  const mapa = new Map<string, string>(); // data-URL → URL de Blob
+  for (const a of pendientes) {
+    try {
+      const url = await subirABlob(a.image!);
+      mapa.set(a.image!, url);
+    } catch {
+      // Sin Blob configurado o error puntual: esa imagen queda como está y
+      // se reintenta en el próximo push (migracionImagenesHecha no se marca).
+    }
+  }
+  if (mapa.size === 0) return; // nada migrado: reintento completo la próxima vez
+
+  const stamp = now();
+  await db.transaction('rw', db.activities, db.dayOverrides, async () => {
+    for (const a of actividades) {
+      const nueva = a.image && mapa.get(a.image);
+      if (nueva) await db.activities.put({ ...a, image: nueva, updatedAt: stamp });
+    }
+    for (const o of overrides) {
+      let cambio = false;
+      const acts = o.activities.map(act => {
+        const nueva = act.image && mapa.get(act.image);
+        if (nueva) { cambio = true; return { ...act, image: nueva }; }
+        return act;
+      });
+      if (cambio) await db.dayOverrides.put({ ...o, activities: acts, updatedAt: stamp });
+    }
+  });
+  migracionImagenesHecha = true;
+}
+
 export async function pushChanges(full = false): Promise<number> {
   const state = (await db.syncState.get('1')) ?? { id: '1' };
   const cursor = full ? 0 : (state.lastPushAt ?? 0);
+
+  await migrarImagenesABlob();
 
   const [activities, categories, settings, dayOverrides] = await Promise.all([
     db.activities.where('updatedAt').above(cursor).toArray(),

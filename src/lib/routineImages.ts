@@ -1,0 +1,71 @@
+/**
+ * Imágenes de rutina: compresión en cliente + subida a Vercel Blob.
+ *
+ * Problema que resuelve: una imagen guardada como data-URL base64 pesa hasta
+ * 2 MB DENTRO de la actividad. Con varias, el respaldo automático a localStorage
+ * explota (quota ~5 MB → "Respaldo automático pausado") y el push de sync
+ * supera el límite de cuerpo de Vercel (HTTP 413).
+ *
+ * Estrategia:
+ * 1. Comprimir SIEMPRE en el cliente: máx 512px, WebP calidad 0.82 → ~100 KB.
+ * 2. Con sesión activa: subir el blob a Vercel Blob vía /api/images y guardar
+ *    SOLO la URL corta en activity.image (pesa ~100 bytes).
+ * 3. Sin sesión: queda la data-URL comprimida (funciona offline/local puro).
+ *
+ * El push además migra data-URLs viejas a Blob antes de armar el payload
+ * (ver sync.ts), así los respaldos ya guardados dejan de romper nada.
+ */
+
+const MAX_DIM = 512; // px, lado mayor
+const QUALITY = 0.82;
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024; // límite del endpoint /api/images
+
+/** Comprime un File/Blob a data-URL WebP (máx 512px el lado mayor).
+ *  Si el navegador no soporta canvas WebP cae a JPEG con la misma calidad. */
+export async function comprimirImagen(file: Blob): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas no disponible');
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  // WebP primero (mucho más chico); Safari viejo no lo codifica → JPEG.
+  let out = canvas.toDataURL('image/webp', QUALITY);
+  if (!out.startsWith('data:image/webp')) {
+    out = canvas.toDataURL('image/jpeg', QUALITY);
+  }
+  return out;
+}
+
+/** ¿Es una data-URL de imagen (a migrar), no una URL http(s)/blob ya liviana? */
+export function esDataUrlImagen(v: unknown): v is string {
+  return typeof v === 'string' && v.startsWith('data:image/');
+}
+
+/** Sube una data-URL (o blob) a Vercel Blob vía /api/images y devuelve la URL.
+ *  Requiere sesión activa (cookie). Lanza si falla: el llamador decide fallback. */
+export async function subirABlob(dataUrl: string): Promise<string> {
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  if (blob.size > MAX_UPLOAD_BYTES) {
+    throw new Error('La imagen excede 2 MB');
+  }
+  const put = await fetch('/api/images', {
+    method: 'PUT',
+    headers: { 'Content-Type': blob.type || 'image/webp' },
+    body: blob,
+    credentials: 'same-origin'
+  });
+  if (!put.ok) {
+    const msg = await put.json().catch(() => ({ error: `HTTP ${put.status}` }));
+    throw new Error(msg?.error ?? `HTTP ${put.status}`);
+  }
+  const data = await put.json();
+  if (!data?.url) throw new Error('Respuesta sin URL');
+  return data.url as string;
+}

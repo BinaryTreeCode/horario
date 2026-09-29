@@ -2,9 +2,11 @@
   import { onMount } from 'svelte';
   import { db, newId } from '../lib/db';
   import type { Activity, Category, ActivityStep } from '../lib/types';
-  import { X, Trash2, CheckCircle, Plus, CheckSquare, Square, ListChecks, Sparkles, Zap, Calendar, ImageIcon, Link2 } from '@lucide/svelte';
+  import { X, Trash2, CheckCircle, Plus, CheckSquare, Square, ListChecks, Sparkles, Zap, Calendar, ImageIcon, Link2, RefreshCw } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
   import { t, tNow } from '../lib/i18n';
+  import { comprimirImagen, subirABlob } from '../lib/routineImages';
+  import { isLoggedIn } from '../lib/sync';
 
   interface Props {
     id: string | null;
@@ -153,7 +155,9 @@
   }
 
   // ── Imagen de la rutina ─────────────────────────────────────────
-  function handleImageFile(e: Event) {
+  let subiendoImagen = $state(false);
+
+  async function handleImageFile(e: Event) {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
@@ -165,14 +169,31 @@
       toastErr(tNow('modal.imageTooBig'));
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      image = reader.result as string;
+    input.value = '';
+    subiendoImagen = true;
+    try {
+      // 1) Comprimir SIEMPRE en cliente (512px/WebP ~100KB): una data-URL
+      //    de 2 MB dentro de la actividad llenaba localStorage ("respaldo
+      //    pausado") y hacía 413 en el push.
+      const comprimida = await comprimirImagen(file);
+      // 2) Con sesión: subir a Vercel Blob y guardar solo la URL (~100 bytes).
+      //    Sin sesión (modo local): queda la data-URL comprimida.
+      if (await isLoggedIn()) {
+        try {
+          image = await subirABlob(comprimida);
+        } catch {
+          image = comprimida; // sin Blob configurado o error → local comprimida
+        }
+      } else {
+        image = comprimida;
+      }
       showImageUrlInput = false;
       imageUrlInput = '';
-    };
-    reader.readAsDataURL(file);
-    input.value = '';
+    } catch (err: any) {
+      toastErr(tNow('toast.couldNotMove') + ': ' + (err?.message || err));
+    } finally {
+      subiendoImagen = false;
+    }
   }
 
   function applyImageUrl() {
@@ -498,9 +519,13 @@
           </button>
         {:else}
           <div class="image-actions">
-            <label class="image-upload-btn">
-              <input type="file" accept="image/*" onchange={handleImageFile} hidden />
-              <ImageIcon size={16} /> {$t('modal.uploadFile')}
+            <label class="image-upload-btn" class:subiendo={subiendoImagen}>
+              <input type="file" accept="image/*" onchange={handleImageFile} hidden disabled={subiendoImagen} />
+              {#if subiendoImagen}
+                <RefreshCw size={16} class="giro" /> {$t('modal.subiendoImagen')}
+              {:else}
+                <ImageIcon size={16} /> {$t('modal.uploadFile')}
+              {/if}
             </label>
             <button type="button" class="image-upload-btn" onclick={() => showImageUrlInput = !showImageUrlInput}>
               <Link2 size={16} /> {$t('modal.useUrl')}
@@ -797,6 +822,16 @@
     color: var(--color-green-dark, #2d5a27);
     cursor: pointer;
     transition: all 0.2s;
+  }
+  .image-upload-btn.subiendo {
+    opacity: 0.75;
+    cursor: wait;
+  }
+  .image-upload-btn .giro {
+    animation: giroSubida 1s linear infinite;
+  }
+  @keyframes giroSubida {
+    to { transform: rotate(360deg); }
   }
 
   .image-upload-btn:hover {
