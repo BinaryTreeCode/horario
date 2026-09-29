@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { db, descargarRespaldo } from '../lib/db';
+    import { db, descargarRespaldo, leerUltimoRespaldo } from '../lib/db';
   import type { Activity } from '../lib/types';
   import { 
     activitiesStore, 
@@ -17,7 +17,7 @@
   import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, ArrowUp, ArrowDown, Download, Upload, Cloud, CloudOff, RefreshCw, Database } from '@lucide/svelte';
   import { portal } from '../lib/portal';
   import { onSyncChange, syncNow } from '../lib/sync';
-  import { t, tNow } from '../lib/i18n';
+  import { t, tNow, idioma } from '../lib/i18n';
   import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
   import { Eye, EyeOff } from '@lucide/svelte';
   import type { SyncStatus } from '../lib/types';
@@ -136,17 +136,42 @@
   let menuDatosEl: HTMLElement | undefined = $state();
   let menuDatosPos = $state({ x: 0, y: 0 });
 
+  // Fecha del último respaldo descargado (pie del menú). Se lee al abrir el
+  // menú para que muestre siempre el valor fresco (incluida la descarga recién
+  // hecha desde el propio menú o desde Ajustes).
+  let ultimoRespaldo = $state<string | null>(null);
+  const fechaUltimoRespaldo = $derived.by(() => {
+    if (!ultimoRespaldo) return null;
+    const d = new Date(ultimoRespaldo);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleDateString(
+      getLocaleActivo(),
+      { day: '2-digit', month: '2-digit', year: 'numeric' }
+    );
+  });
+
+  /** Locale en espejo del idioma de la app (no el del navegador: si el usuario
+   *  eligió español en un navegador en inglés, el menú respeta su elección). */
+  function getLocaleActivo(): string {
+    let lang = 'es';
+    idioma.subscribe(v => (lang = v))();
+    return lang === 'en' ? 'en-US' : 'es-AR';
+  }
+
   function alternarMenuDatos() {
-    if (!menuDatos && menuDatosEl) {
-      // Posicionar bajo el botón ANTES de abrir (el portal manda al body:
-      // sin ancla de layout, las coords deben medirse del botón real).
-      const r = menuDatosEl.querySelector('button')?.getBoundingClientRect();
-      if (r) {
-        const MENU_W = 230;
-        menuDatosPos = {
-          x: Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8)),
-          y: r.bottom + 6
-        };
+    if (!menuDatos) {
+      ultimoRespaldo = leerUltimoRespaldo();
+      if (menuDatosEl) {
+        // Posicionar bajo el botón ANTES de abrir (el portal manda al body:
+        // sin ancla de layout, las coords deben medirse del botón real).
+        const r = menuDatosEl.querySelector('button')?.getBoundingClientRect();
+        if (r) {
+          const MENU_W = 230;
+          menuDatosPos = {
+            x: Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8)),
+            y: r.bottom + 6
+          };
+        }
       }
     }
     menuDatos = !menuDatos;
@@ -670,6 +695,13 @@
       <button role="menuitem" onclick={importarDatos} title={$t('sidebar.importTitle')}>
         <Upload size={16} /> {$t('sidebar.import')}
       </button>
+      <div class="menu-datos-pie" role="presentation">
+        {#if fechaUltimoRespaldo}
+          {$t('sidebar.lastBackup', { fecha: fechaUltimoRespaldo })}
+        {:else}
+          {$t('sidebar.lastBackupNever')}
+        {/if}
+      </div>
     </div>
   {/if}
 
@@ -807,6 +839,17 @@
   }
   .menu-datos button:hover {
     background: rgba(92, 64, 51, 0.08);
+  }
+
+  /* Pie informativo: fecha del último respaldo descargado (no interactivo) */
+  .menu-datos-pie {
+    padding: 0.45rem 0.8rem 0.3rem;
+    margin-top: 0.15rem;
+    border-top: 1px solid rgba(92, 64, 51, 0.14);
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: rgba(92, 64, 51, 0.65);
+    white-space: nowrap;
   }
 
   /* Targets táctiles >= 44px en el header (regla dura #5) */

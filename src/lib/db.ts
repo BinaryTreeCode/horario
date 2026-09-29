@@ -496,6 +496,20 @@ export async function exportData(mode: ExportMode = 'compact'): Promise<string> 
   }
 }
 
+/** Clave localStorage con la fecha ISO del último respaldo descargado
+ *  (la muestra el menú Datos; se registra aquí para cubrir tanto el menú
+ *  como el export de Ajustes, que pasan por esta misma función). */
+export const LAST_BACKUP_KEY = 'nature_planner_lastBackup';
+
+/** Fecha del último respaldo descargado (ISO) o null si nunca se descargó uno. */
+export function leerUltimoRespaldo(): string | null {
+  try {
+    return typeof window !== 'undefined' ? localStorage.getItem(LAST_BACKUP_KEY) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Descarga el respaldo (compartido por Ajustes y la barra lateral).
  *  mode 'compact' (por defecto) = formato posicional chico; 'full' = JSON completo. */
 export async function descargarRespaldo(mode: ExportMode = 'compact'): Promise<void> {
@@ -508,6 +522,12 @@ export async function descargarRespaldo(mode: ExportMode = 'compact'): Promise<v
   a.click();
   // Revocar con delay: revocar inmediatamente puede cortar la descarga en algunos navegadores
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+  // Registrar la fecha del último respaldo solo cuando la descarga ya partió
+  // (localStorage puede lanzar en modo privado / storage bloqueado: jamás
+  // debe romper el export por culpa del indicador).
+  try {
+    localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
+  } catch { /* indicador informativo: fallar silencioso */ }
 }
 
 export async function importValidatedData(result: ValidationResult): Promise<void> {
