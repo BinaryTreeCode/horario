@@ -91,6 +91,10 @@ test('Sin botones por debajo de 44px (regla del proyecto)', async ({ page }) => 
   // Con semillas por defecto el día ya no muestra el estado vacío: la señal
   // de vista cargada es el track del horario.
   await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
+  // La entrada escalonada de las tarjetas anima scale(0.95→1): medir a mitad
+  // de animación reporta botones falsos de <44px en máquina lenta. Esperar al
+  // asentamiento (mismo criterio que las expect de axe tras modales).
+  await esperarAnimacion(page);
   const chicos = await page.evaluate(() => {
     return [...document.querySelectorAll('button')]
       .filter(b => {
