@@ -116,7 +116,7 @@
 
   /** Exportar (menú Datos / sidebar): descarga el respaldo con toast de éxito/error. */
   async function exportarDatos() {
-    menuDatos = false;
+    cerrarMenuDatos();
     try {
       await descargarRespaldo();
       toastOk(tNow('sidebar.exported'));
@@ -127,12 +127,13 @@
 
   /** Importar: abre Ajustes donde vive el flujo con confirmación. */
   function importarDatos() {
-    menuDatos = false;
+    cerrarMenuDatos();
     openSettings();
   }
 
   // ── Menú desplegable "Datos" del header ──
   let menuDatos = $state(false);
+  let menuDatosSaliendo = $state(false); // animación de subida al cerrar
   let menuDatosEl: HTMLElement | undefined = $state();
   let menuDatosPos = $state({ x: 0, y: 0 });
 
@@ -177,17 +178,30 @@
         }
       }
     }
-    menuDatos = !menuDatos;
+    if (menuDatos) {
+      // Cierre animado: el menú sube (menuDatosSaliendo) y se desmonta al
+      // terminar la animación, no antes.
+      menuDatosSaliendo = true;
+      setTimeout(() => { menuDatos = false; menuDatosSaliendo = false; }, 140);
+    } else {
+      menuDatos = true;
+    }
+  }
+  /** Cierra el menú directo (Esc / click-afuera / acción) con la misma animación. */
+  function cerrarMenuDatos() {
+    if (!menuDatos || menuDatosSaliendo) return;
+    menuDatosSaliendo = true;
+    setTimeout(() => { menuDatos = false; menuDatosSaliendo = false; }, 140);
   }
 
   // Click afuera + Esc cierran el menú (patrón del menú contextual existente).
   $effect(() => {
     if (!menuDatos) return;
     const clickAfuera = (e: PointerEvent) => {
-      if (menuDatosEl && !menuDatosEl.contains(e.target as Node)) menuDatos = false;
+      if (menuDatosEl && !menuDatosEl.contains(e.target as Node)) cerrarMenuDatos();
     };
     const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') menuDatos = false;
+      if (e.key === 'Escape') cerrarMenuDatos();
     };
     document.addEventListener('pointerdown', clickAfuera);
     window.addEventListener('keydown', esc);
@@ -558,7 +572,17 @@
     <!-- Portal a body: el backdrop-filter de .glass-panel ancestro crea
          containing block y anclaría el menú lejos del botón. Mismo fix que
          el menú contextual de las vistas. -->
-    <div class="menu-datos glass-panel" role="menu" use:portal style="top: {menuDatosPos.y}px; left: {menuDatosPos.x}px">
+    <!-- Animación CSS propia (menuDatosAnim) y NO transition:fly: fly lee la
+         opacity computada del nodo al crearse, y un nodo recién portado al
+         body (use:portal) computa 0 → animaba 0→0 y el menú quedaba
+         invisible. La CSS keyframes no depende del estado previo. -->
+    <div
+      class="menu-datos glass-panel menuDatosAnim"
+      class:menuDatosSaliendo={menuDatosSaliendo}
+      role="menu"
+      use:portal
+      style="top: {menuDatosPos.y}px; left: {menuDatosPos.x}px"
+    >
       <button role="menuitem" onclick={exportarDatos} title={$t('sidebar.exportTitle')}>
         <Download size={16} /> {$t('sidebar.export')}
       </button>
@@ -706,11 +730,23 @@
     display: flex;
     flex-direction: column;
     box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-    animation: menuDatosIn 0.14s ease-out;
+  }
+  /* Subida/bajada del dropdown: baja al abrir (desde -8px), sube al cerrar
+     (hacia -8px). Sin depender de la opacity computada al montar: keyframes
+     explícitos 0→1 y 1→0. */
+  .menuDatosAnim {
+    animation: menuDatosIn 0.16s ease-out;
+  }
+  .menuDatosAnim.menuDatosSaliendo {
+    animation: menuDatosOut 0.14s ease-in forwards;
   }
   @keyframes menuDatosIn {
-    from { opacity: 0; transform: translateY(-4px); }
+    from { opacity: 0; transform: translateY(-8px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes menuDatosOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-8px); }
   }
   .menu-datos button {
     display: flex;
