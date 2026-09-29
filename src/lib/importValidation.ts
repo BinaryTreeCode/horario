@@ -38,6 +38,19 @@ export function isValidImage(v: unknown): v is string {
   );
 }
 
+/** Placeholder de imagen binaria del export .npz (ver exportarRespaldoBinario
+ *  en db.ts): { "i": índice de entrada en el ZIP, "f": mime }. El lector
+ *  (backupFile.ts) lo reconstruye como data-URL ANTES de validateImport, así
+ *  que aquí SOLO debería aparecer si alguien editó el .npz a mano. Se acepta
+ *  con warning: la fila conserva datos, solo pierde la imagen. */
+export function isPlaceholderImagen(v: unknown): v is { i: number; f: string } {
+  return (
+    typeof v === 'object' && v !== null &&
+    Number.isInteger((v as any).i) && (v as any).i >= 0 &&
+    typeof (v as any).f === 'string' && /^[a-z]+\/[a-z0-9.+-]+$/i.test((v as any).f)
+  );
+}
+
 /** Acepta UUID string (v4) o número (formatos v2/v3 legacy). */
 function isValidId(v: unknown): v is string | number {
   return (typeof v === 'string' && v.length > 0 && v.length <= 64) || typeof v === 'number';
@@ -363,7 +376,9 @@ export function validateImport(jsonString: string): ValidationResult {
       warnings.push(`Actividad #${i + 1}${a?.name ? ` "${a.name}"` : ''}: ${problems.join(', ')}. Será ignorada.`);
       continue;
     }
-    if (a?.image !== undefined && a.image !== null && !isValidImage(a.image)) {
+    if (isPlaceholderImagen(a?.image)) {
+      warnings.push(`Actividad #${i + 1} "${a.name}": imagen binaria del respaldo no pudo reconstruirse (archivo editado o dañado). Se guardará sin imagen.`);
+    } else if (a?.image !== undefined && a.image !== null && !isValidImage(a.image)) {
       warnings.push(`Actividad #${i + 1} "${a.name}": imagen con formato no reconocido. Se guardará sin imagen.`);
     }
     _activities.push({
@@ -479,7 +494,9 @@ export function validateImport(jsonString: string): ValidationResult {
     const validOvActs: Activity[] = [];
     for (const [j, a] of o.activities.entries()) {
       if (isValidActivityData(a)) {
-        if (a?.image !== undefined && a.image !== null && !isValidImage(a.image)) {
+        if (isPlaceholderImagen(a?.image)) {
+          warnings.push(`Edición temporal del día ${o.day + 1}: actividad #${j + 1} "${a.name}": imagen binaria del respaldo no pudo reconstruirse (archivo editado o dañado). Se guardará sin imagen.`);
+        } else if (a?.image !== undefined && a.image !== null && !isValidImage(a.image)) {
           warnings.push(`Edición temporal del día ${o.day + 1}: actividad #${j + 1} "${a.name}": imagen con formato no reconocido. Se guardará sin imagen.`);
         }
         validOvActs.push({

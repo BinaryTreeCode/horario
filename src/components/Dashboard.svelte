@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { db, descargarRespaldo, leerUltimoRespaldo } from '../lib/db';
+    import { db, exportarRespaldoBinario, leerUltimoRespaldo } from '../lib/db';
   import type { Activity } from '../lib/types';
   import { 
     activitiesStore, 
@@ -129,11 +129,12 @@
     loadSettingsPanel();
   }
 
-  /** Exportar (menú Datos / sidebar): descarga el respaldo con toast de éxito/error. */
+  /** Exportar (menú Datos / sidebar): descarga el respaldo con toast de éxito/error.
+   *  Usa el formato binario .npz (imágenes recompresidas como binario ZIP). */
   async function exportarDatos() {
     cerrarMenuDatos();
     try {
-      await descargarRespaldo();
+      await exportarRespaldoBinario();
       toastOk(tNow('sidebar.exported'));
     } catch (err: any) {
       toastErr(tNow('settings.exportError', { msg: err?.message || err }));

@@ -506,6 +506,105 @@ export async function exportData(mode: ExportMode = 'compact'): Promise<string> 
   }
 }
 
+/**
+ * Exportación BINARIA (.npz): el mismo JSON compacto + las imágenes inline
+ * movidas a entradas binarias del ZIP (fflate). Ahorra la inflación base64
+ * (+33%), el overhead de escape JSON y comprime el JSON con DEFLATE.
+ *
+ * Recomprime primero cada data-URL de imagen a 256px/WebP (~15–30 KB) para
+ * que el respaldo sirva de resguardo, no de archivo pesado. Las imágenes en
+ * la nube (URL http) o las que fallen al recomprimir viajan como texto
+ * dentro del JSON, intactas.
+ *
+ * El .npz se importa con el MISMO pipeline de siempre (validateImport →
+ * confirmación → importValidatedData): el validador acepta el ZIP si trae
+ * un payload válido en `d`.
+ */
+export async function exportarRespaldoBinario(mode: ExportMode = 'compact'): Promise<void> {
+  if (typeof window === 'undefined') throw new Error('Solo navegador');
+  const { zipSync, strToU8 } = await import('fflate');
+  const { recomprimirParaRespaldo, esDataUrlImagen, UMBRAL_BINARIO } =
+    await import('./routineImages');  const payload = await exportData(mode); // JSON con data-URLs inline
+  const parsed = JSON.parse(payload);
+
+  // Acceso uniforme a las actividades en AMBOS formatos de export:
+  // full usa activities/dayOverrides (objetos), compacto usa acts/ovs
+  // (filas posicionales con la imagen en el índice 7).
+  const actsDe = (d: any): any[] => d.activities ?? d.acts ?? [];
+  const ovActsDe = (d: any): any[] => [
+    ...(d.dayOverrides ?? []).flatMap((o: any) => o.activities ?? []),
+    ...(d.ovs ?? []).flatMap((o: any) => o[1] ?? [])
+  ];
+  const imgDe = (a: any) => (Array.isArray(a) ? a[7] : a?.image);
+  const setImg = (a: any, v: unknown) => {
+    if (Array.isArray(a)) {
+      while (a.length < 8) a.push(null); // ranura 7 con nulls intermedios (documentado en c1)
+      a[7] = v;
+    } else if (a) {
+      a.image = v;
+    }
+  };
+
+  // Recolectar TODAS las data-URLs únicas (actividades y overrides comparten
+  // imágenes → una sola entrada por imagen distinta).
+  const urls = new Set<string>();
+  const colectar = (a: any) => { if (esDataUrlImagen(imgDe(a))) urls.add(imgDe(a)); };
+  for (const a of actsDe(parsed)) colectar(a);
+  for (const a of ovActsDe(parsed)) colectar(a);
+
+  // Recomprimir en paralelo: { original → versión liviana } solo si compensa
+  // (una data-URL en texto pesa length*1.03 bytes aprox. — pct-encoding).
+  const pares = (
+    await Promise.all(
+      [...urls].map(async url => {
+        const r = await recomprimirParaRespaldo(url);
+        return r && r.bytes < url.length * 1.03 && r.bytes < UMBRAL_BINARIO
+          ? ([url, r.url] as const)
+          : null;
+      })
+    )
+  ).filter(Boolean) as ReadonlyArray<readonly [string, string]>;
+
+  // d = payload JSON (con placeholders {"i":idx,"f":mime}), imgs = binarios puros.
+  const urlAIndice = new Map(pares.map(([url], i) => [url, i] as const));
+  const placeholderABytes = new Map<number, Uint8Array>();
+  for (let i = 0; i < pares.length; i++) {
+    const blob = await (await fetch(pares[i][1])).blob();
+    placeholderABytes.set(i, new Uint8Array(await blob.arrayBuffer()));
+  }
+  const asignar = (a: any) => {
+    const idx = urlAIndice.get(imgDe(a));
+    if (idx !== undefined) {
+      // Placeholder estructural {"i":<índice>,"f":<mime>}: sobrevive a
+      // JSON.stringify y no colisiona con URLs http reales. El import lo
+      // reconstruye a data-URL (backupFile.ts).
+      const url = pares[idx][1];
+      const mime = url.slice(5, url.indexOf(';')) || 'image/webp';
+      setImg(a, { i: idx, f: mime });
+    }
+  };
+  for (const a of actsDe(parsed)) asignar(a);
+  for (const a of ovActsDe(parsed)) asignar(a);
+
+  const jsonFinal = JSON.stringify(parsed);
+  const zip: Record<string, Uint8Array> = {
+    d: strToU8(jsonFinal),
+    ...Object.fromEntries([...placeholderABytes].map(([idx, bytes]) => [`${idx}.bin`, bytes]))
+  };
+  // Nivel 6: buen ratio sin achicharrar el hilo (el JSON domina y ya está
+  // minificado; las imágenes WebP/JPEG no comprimen más).
+  const zipped = zipSync(zip, { level: 6 });
+
+  const blob = new Blob([zipped], { type: 'application/zip' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `planificador-datos-${new Date().toISOString().split('T')[0]}.npz`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  try { localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString()); } catch { /* indicador informativo */ }
+}
+
 /** Clave localStorage con la fecha ISO del último respaldo descargado
  *  (la muestra el menú Datos; se registra aquí para cubrir tanto el menú
  *  como el export de Ajustes, que pasan por esta misma función). */

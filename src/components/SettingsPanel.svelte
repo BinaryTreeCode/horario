@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { db, descargarRespaldo, validateImport, importValidatedData, type ValidationResult } from '../lib/db';
+  import { db, descargarRespaldo, exportarRespaldoBinario, validateImport, importValidatedData, type ValidationResult } from '../lib/db';
+  import { leerRespaldo } from '../lib/backupFile';
   import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync } from '../lib/sync';
   import { establecerClave, olvidarClave } from '../lib/crypto';
   import type { SyncStatus } from '../lib/types';
@@ -378,12 +379,13 @@
     }
   }
 
-  // Formato del respaldo: compacto posicional (por defecto) o JSON completo
-  let exportMode = $state<'compact' | 'full'>('compact');
+  // Formato del respaldo: binario .npz (por defecto) o JSON completo
+  let exportMode = $state<'binario' | 'full'>('binario');
 
   async function handleExport() {
     try {
-      await descargarRespaldo(exportMode);
+      if (exportMode === 'binario') await exportarRespaldoBinario();
+      else await descargarRespaldo('full');
     } catch (err: any) {
       toastErr(tNow('settings.exportError', { msg: err.message }));
     }
@@ -412,7 +414,9 @@
     };
     reader.onload = async (e) => {
       try {
-        const text = e.target?.result as string;
+        // .npz (ZIP con imágenes binarias) → data-URLs reconstruidas;
+        // .json → el mismo texto. Un solo pipeline después.
+        const text = await leerRespaldo(file);
 
         // 1) Validar ANTES de tocar la base de datos
         const validation = validateImport(text);
@@ -442,7 +446,7 @@
         toastErr(tNow('settings.importError', { msg: err?.message || tNow('settings.networkError') }));
       }
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   }
 
   async function doImport() {
@@ -612,8 +616,8 @@
           <fieldset class="export-mode">
             <legend>{$t('settings.exportMode')}</legend>
             <label class="export-option">
-              <input type="radio" name="exportMode" value="compact" bind:group={exportMode} />
-              <span>{$t('settings.exportCompact')}</span>
+              <input type="radio" name="exportMode" value="binario" bind:group={exportMode} />
+              <span>{$t('settings.exportBinario')}</span>
             </label>
             <label class="export-option">
               <input type="radio" name="exportMode" value="full" bind:group={exportMode} />

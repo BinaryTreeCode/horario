@@ -69,3 +69,55 @@ export async function subirABlob(dataUrl: string): Promise<string> {
   if (!data?.url) throw new Error('Respuesta sin URL');
   return data.url as string;
 }
+
+// ── Recompresión para respaldos exportados ──────────────────────────────────
+
+/** Meta (bytes) que deja de pesarse como texto: se exporta como binario ZIP. */
+const UMBRAL_BINARIO = 40 * 1024;
+
+/**
+ * Recomprime una data-URL de imagen al tamaño mínimo razonable para un
+ * respaldo (máx 256px, WebP 0.7 ≈ 15–30 KB). Reutiliza el mismo pipeline
+ * canvas que `comprimirImagen`, pero partiendo de la data-URL ya guardada.
+ *
+ * Devuelve { url, bytes } donde `bytes` es el tamaño binario REAL (data-URL →
+ * blob, que decodifica el base64; evita sobrestimar ~33% como length/4*3).
+ * Devuelve null si algo falla (imagen corrupta, canvas caído): la imagen
+ * original viaja intacta en el JSON — jamás se pierde un respaldo por comprimir.
+ */
+export async function recomprimirParaRespaldo(
+  dataUrl: string
+): Promise<{ url: string; bytes: number } | null> {
+  try {
+    const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+    const scale = Math.min(1, 256 / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    // Mismo orden que comprimirImagen: WebP si el navegador codifica; el
+    // fallback JPEG es indistinguible a 256px con calidad 0.72.
+    let out = canvas.toDataURL('image/webp', 0.7);
+    if (!out.startsWith('data:image/webp')) out = canvas.toDataURL('image/jpeg', 0.72);
+    const blob = await (await fetch(out)).blob();
+    return { url: out, bytes: blob.size };
+  } catch {
+    return null;
+  }
+}
+
+/** Tamaño binario real de una data-URL (el navegador decodifica el base64). */
+export async function bytesDeDataUrl(dataUrl: string): Promise<number> {
+  try {
+    return (await (await fetch(dataUrl)).blob()).size;
+  } catch {
+    return dataUrl.length; // peor caso: estimo por longitud de texto
+  }
+}
+
+export { UMBRAL_BINARIO };

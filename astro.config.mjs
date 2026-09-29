@@ -17,7 +17,10 @@ export default defineConfig({
       cssMinify: 'lightningcss'
     },
     optimizeDeps: {
-      include: ['dexie', '@lucide/svelte', 'svelte-dnd-action']
+      include: ['dexie', '@lucide/svelte', 'svelte-dnd-action'],
+      // fflate (export .npz): el optimizador no puede escribirlo en
+      // OneDrive (archivo bloqueado por sync) → se sirve desde fuente.
+      exclude: ['fflate']
     }
   }
 });
