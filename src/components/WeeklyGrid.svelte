@@ -668,6 +668,20 @@
     startY: number;
   }
 
+  // ── Resize HORIZONTAL (estirar a días vecinos) ──
+  // Asa izquierda/derecha de la tarjeta: al arrastrar hacia el día vecino,
+  // la actividad GANA ese día (lunes → martes). Al arrastrar de vuelta,
+  // lo pierde. La hora no cambia: es un gesto de días, no de horario. La
+  // validación es por conflictos en el día ganado (la cascada del resolve
+  // empuja si hay espacio; ⛔ si no cabe) y el gesto con umbral de medio
+  // día: cruzar el borde decide, jiggle no escribe.
+  interface WeekHResizeMeta {
+    day: number;            // día de origen (donde está la tarjeta)
+    lado: 'izq' | 'der';    // asa agarrada
+    startX: number;         // clientX inicial
+    ganado: boolean;        // ya se cruzó el borde (commit 1 vez)
+  }
+
   const weekResizeHooks: DragHooks = {
     onActivate(t) {
       draggedActivityId = t.activityId; // excluye la tarjeta del clustering
@@ -724,6 +738,66 @@
       e,
       { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { day: dayIndex, lado, origStart: parseTime(activity.startTime), origEnd: parseTime(activity.endTime), startY: e.clientY } satisfies WeekResizeMeta },
       weekResizeHooks,
+      { ghost: false }
+    );
+  }
+
+  // ── Resize horizontal: asas laterales (ganar/perder el día vecino) ──
+  const hResizeHooks: DragHooks = {
+    async onDrop(t, clientX) {
+      const m = t.meta as WeekHResizeMeta;
+      const act = activities.find(a => a.id === t.activityId);
+      if (!act) return;
+      // ¿Cruzó el borde de columna? Calcular el día destino según el asa y el delta:
+      const cols = [...document.querySelectorAll('.day-column')];
+      const colAncho = cols[m.day]?.getBoundingClientRect().width ?? 0;
+      const delta = clientX - m.startX;
+      const cruzo = Math.abs(delta) > colAncho * 0.5; // umbral: media columna
+      if (!cruzo) return; // jiggle: nada se escribe
+      const dir = m.lado === 'der' ? 1 : -1;
+      const diaVecino = m.day + dir;
+      if (diaVecino < 0 || diaVecino > 6) return;
+      const yaLoTiene = act.daysOfWeek.includes(diaVecino);
+      let newDays: number[];
+      if (yaLoTiene) {
+        // Estirar hacia un día que ya tiene la actividad = QUIETAR el día de origen
+        // (ej: activa lun+mar, estirar asa derecha de lun hacia mar → deja solo mar).
+        // Hmm — semántica ambigua; en cambio, asa hacia día ya poseído NO cambia
+        // nada (estirar lo que ya está). Regla simple y predecible.
+        return;
+      } else {
+        newDays = [...act.daysOfWeek, diaVecino].sort((a, b) => a - b);
+      }
+      // Validar el día ganado: ¿cabe el bloque (cascada con empuje)?
+      const dur = parseTime(act.endTime) - parseTime(act.startTime);
+      const slots = activities
+        .filter(a => a.daysOfWeek.includes(diaVecino))
+        .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
+      const inicio = parseTime(act.startTime);
+      const res = resolveDayCascade(
+        slots,
+        { id: act.id!, start: inicio, end: inicio + dur },
+        inicio,
+        true,
+        startHour,
+        endHour
+      );
+      if (!res.valido) { toastErrRepetido(`hres:${act.id}`, '⛔ No cabe: el día vecino está lleno a esa hora'); return; }
+      // Commit: mismas horas en el nuevo día + empuje en cadena del día ganado
+      const times = new Map<string, { start: number; end: number }>();
+      for (const s of res.slots) times.set(s.id, { start: s.start, end: s.end });
+      await commitWeeklyTimes(times, `${act.name} → ${days[diaVecino]}`, { id: act.id!, days: newDays });
+      toastOk(tNow('toast.dayExtended', { dia: days[diaVecino] }));
+    }
+  };
+
+  function startHResize(e: PointerEvent, activity: Activity, dayIndex: number, lado: 'izq' | 'der') {
+    e.stopPropagation();
+    e.preventDefault();
+    engine.beginImmediate(
+      e,
+      { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { day: dayIndex, lado, startX: e.clientX, ganado: false } satisfies WeekHResizeMeta },
+      hResizeHooks,
       { ghost: false }
     );
   }
@@ -933,6 +1007,16 @@
                   class="resize-handle"
                   aria-hidden="true"
                   onpointerdown={(e) => startResize(e, activity, i, 'abajo')}
+                ></div>
+                <div
+                  class="resize-handle hres-izq"
+                  aria-hidden="true"
+                  onpointerdown={(e) => startHResize(e, activity, i, 'izq')}
+                ></div>
+                <div
+                  class="resize-handle hres-der"
+                  aria-hidden="true"
+                  onpointerdown={(e) => startHResize(e, activity, i, 'der')}
                 ></div>
             </button>
           {/each}
@@ -1465,6 +1549,48 @@
   .activity-item:hover .resize-handle::after,
   .activity-item:focus-visible .resize-handle::after {
     opacity: 1;
+  }
+
+  /* ── Asas horizontales (estirar a días vecinos) ──
+     Franjas laterales angostas, separadas de las verticales (las esquinas
+     quedan para el resize vertical: fricción mínima entre gestos). */
+  .resize-handle.hres-izq {
+    left: 0;
+    right: auto;
+    top: 30%;
+    bottom: 30%;
+    width: 8px;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    cursor: ew-resize;
+  }
+  .resize-handle.hres-der {
+    left: auto;
+    right: 0;
+    top: 30%;
+    bottom: 30%;
+    width: 8px;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    cursor: ew-resize;
+  }
+  .resize-handle.hres-izq::after,
+  .resize-handle.hres-der::after {
+    left: 2px;
+    right: 2px;
+    top: 20%;
+    bottom: 20%;
+    width: 3px;
+    height: auto;
+  }
+  .resize-handle.hres-izq::after {
+    left: 2px;
+  }
+  .resize-handle.hres-der::after {
+    left: auto;
+    right: 2px;
   }
 
   .activity-item:hover {
