@@ -1725,6 +1725,20 @@
     .time-bar {
       left: -0.5rem;
     }
+    /* En móvil el chip de hora se salía por la izquierda (right:15px lo
+       ancla al dot sobre la columna de horas): anclarlo AL BORDE IZQUIERDO
+       del track, con la flecha mirando a la derecha. */
+    .time-bar-label {
+      right: auto;
+      left: 0.25rem;
+      border-radius: 4px 0 4px 4px;
+    }
+    .time-bar-label::after {
+      right: auto;
+      left: -4px;
+      border-left: none;
+      border-right: 4px solid #c53030;
+    }
     /* Banner apilado pero con acciones a ancho completo y 44px táctiles */
     .override-banner {
       flex-direction: column;

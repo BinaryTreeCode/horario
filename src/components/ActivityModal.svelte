@@ -1115,6 +1115,8 @@
     font-weight: 600;
     color: var(--color-green-dark);
     box-sizing: border-box;
+    /* regla dura #5: a 16px de fuente + padding 0.8rem da ~41px en móvil */
+    min-height: 44px;
   }
 
   .time-controls-box {
@@ -1320,6 +1322,8 @@
     border-radius: 4px;
     cursor: pointer;
     color: var(--color-brown-bark);
+    /* regla dura #5: target táctil completo (medía ~27px) */
+    min-height: 44px;
   }
 
   .modal-footer {
