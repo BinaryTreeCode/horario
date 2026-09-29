@@ -13,8 +13,8 @@
 
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
-  import { undoStack } from '../lib/undo';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Download, Upload, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
+  import { undoStack, redoStack } from '../lib/undo';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Download, Upload, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
   import { portal } from '../lib/portal';
   import { onSyncChange, syncNow } from '../lib/sync';
   import { t, tNow, idioma } from '../lib/i18n';
@@ -25,8 +25,19 @@
   let currentView = $state('week'); // 'week' | 'day'
 
   // ── Deshacer global (Ctrl+Z / ⌘Z) ───────────────────────────────────
-  let stackCount = 0;
+  let stackCount = $state(0);
+  let redoCount = $state(0);
   undoStack.subscribe(s => { stackCount = s.length; });
+  redoStack.subscribe(s => { redoCount = s.length; });
+
+  /** Ejecuta deshacer/rehacer (compartido por teclado y botones del header). */
+  function ejecutarUndo(redo: boolean) {
+    // pop del op + ejecución en chunk diferido (undoRun no va al bundle inicial)
+    import('../lib/undoRun')
+      .then(m => (redo ? m.popAndRedo() : m.popAndUndo()))
+      .then(label => { if (label) toastOk(redo ? `↻ ${label}` : tNow('toast.undone', { label })); })
+      .catch(err => toastErr(tNow('toast.couldNotMove') + ': ' + (err?.message || err)));
+  }
 
   function isTextEntryTarget(t: EventTarget | null): boolean {
     const el = t as HTMLElement | null;
@@ -42,11 +53,7 @@
     if (showActivityModal || showSettings || isTextEntryTarget(e.target)) return;
     const redo = e.shiftKey;
     e.preventDefault();
-    // pop del op + ejecución en chunk diferido (undoRun no va al bundle inicial)
-    import('../lib/undoRun')
-      .then(m => (redo ? m.popAndRedo() : m.popAndUndo()))
-      .then(label => { if (label) toastOk(redo ? `↻ ${label}` : tNow('toast.undone', { label })); })
-      .catch(err => toastErr(tNow('toast.couldNotMove') + ': ' + (err?.message || err)));
+    ejecutarUndo(redo);
   }
 
   $effect(() => {
@@ -441,6 +448,26 @@
       <!-- Acciones del header: visibles en móvil/tablet siempre, y en desktop
            solo en Semana (en Día viven en la barra lateral dentro del panel). -->
       <div class="header-actions">
+        <!-- Deshacer / Rehacer: mismos guards y misma ejecución que Ctrl+Z
+             (ejecutarUndo). Deshabilitados cuando su pila está vacía. -->
+        <button
+          class="btn btn-secondary btn-icon"
+          onclick={() => ejecutarUndo(false)}
+          disabled={stackCount === 0}
+          aria-label={$t('header.undo')}
+          title={$t('header.undo')}
+        >
+          <Undo2 size={20} />
+        </button>
+        <button
+          class="btn btn-secondary btn-icon"
+          onclick={() => ejecutarUndo(true)}
+          disabled={redoCount === 0}
+          aria-label={$t('header.redo')}
+          title={$t('header.redo')}
+        >
+          <Redo2 size={20} />
+        </button>
         <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label={$t('header.adjustUp')} title={$t('header.adjustUpTitle')}>
           <ChevronsUp size={20} /> <span class="hide-mobile">{$t('header.adjustUp')}</span>
         </button>
