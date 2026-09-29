@@ -1,33 +1,64 @@
 import { db } from './db';
-import { undoStack, redoStack, pushUndo, type UndoOp, type RowChange, type OverrideChange } from './undo';
+import { undoStack, redoStack, pushUndo, type UndoOp, type RowChange, type OverrideChange, type CatChange, type SettingChange } from './undo';
 import { computeRestores } from './undoPlan';
-import type { Activity, DayOverride } from './types';
+import type { Activity, Category, AppSettings, DayOverride } from './types';
 
 /**
  * Ejecución del undo (chunk separado, se baja solo al primer Ctrl+Z):
  * lee el estado ACTUAL de las filas del op, calcula el plan de restauración
- * y lo escribe en una transacción.
+ * y lo escribe en una transacción. Cubre actividades, overrides, categorías
+ * y ajustes (rango horario).
  */
 async function runUndo(op: UndoOp): Promise<string> {
   const actIds = new Set(op.rows.map(r => r.after?.id ?? r.before?.id).filter(Boolean) as string[]);
   const ovDays = new Set((op.overrides ?? []).map(o => o.day));
+  const catIds = new Set((op.cats ?? []).map(c => c.after?.id ?? c.before?.id).filter(Boolean) as string[]);
+  const setKeys = new Set((op.settings ?? []).map(s => s.key));
   const currentActs = new Map<string, Activity | undefined>();
   const currentOv = new Map<number, DayOverride | undefined>();
+  const currentCats = new Map<string, Category | undefined>();
+  const currentSets = new Map<string, AppSettings | undefined>();
   await Promise.all([
     ...[...actIds].map(async id => currentActs.set(id, await db.activities.get(id))),
-    ...[...ovDays].map(async day => currentOv.set(day, await db.dayOverrides.get(day)))
+    ...[...ovDays].map(async day => currentOv.set(day, await db.dayOverrides.get(day))),
+    ...[...catIds].map(async id => currentCats.set(id, await db.categories.get(id))),
+    ...[...setKeys].map(async k => currentSets.set(k, await db.settings.get(k)))
   ]);
 
   const plan = computeRestores(op, currentActs, currentOv);
 
-  await db.transaction('rw', db.activities, db.dayOverrides, async () => {
+  // Categorías y ajustes: restauración directa del snapshot "before" con el
+  // mismo guard (la fila debe estar exactamente como la dejó la op).
+  const catWrites: Category[] = [];
+  const catDels: string[] = [];
+  let catSkipped = 0;
+  for (const { before, after } of op.cats ?? []) {
+    const cur = after ? currentCats.get(after.id!) : undefined;
+    if (after && cur?.updatedAt !== after.updatedAt) { catSkipped++; continue; }
+    if (before) catWrites.push({ ...before, updatedAt: Date.now() });
+    else if (after) catDels.push(after.id!);
+  }
+  const setWrites: AppSettings[] = [];
+  let setSkipped = 0;
+  for (const { key, before, after } of op.settings ?? []) {
+    const cur = after ? currentSets.get(key) : undefined;
+    if (after && cur?.updatedAt !== after.updatedAt) { setSkipped++; continue; }
+    if (before) setWrites.push({ ...before, updatedAt: Date.now() });
+    else if (after) setWrites.push({ id: key, key, value: null, updatedAt: Date.now() });
+  }
+
+  await db.transaction('rw', db.activities, db.dayOverrides, db.categories, db.settings, async () => {
     await Promise.all(plan.acts.map(a => db.activities.put(a)));
     if (plan.delActs.length) await db.activities.bulkDelete(plan.delActs);
     await Promise.all(plan.overrides.map(o => db.dayOverrides.put(o)));
     if (plan.delOverrides.length) await db.dayOverrides.bulkDelete(plan.delOverrides);
+    if (catWrites.length) await db.categories.bulkPut(catWrites);
+    if (catDels.length) await db.categories.bulkDelete(catDels);
+    if (setWrites.length) await db.settings.bulkPut(setWrites);
   });
 
-  return plan.skipped === 0 ? op.label : `${op.label} (parcial)`;
+  const skipped = plan.skipped + catSkipped + setSkipped;
+  return skipped === 0 ? op.label : `${op.label} (parcial)`;
 }
 
 /** Pop atómico del op superior del stack + ejecución. Null si no hay nada. */
@@ -52,8 +83,12 @@ export async function popAndUndo(): Promise<string | null> {
 async function snapshotForRedo(op: UndoOp) {
   const actIds = new Set(op.rows.map(r => r.after?.id ?? r.before?.id).filter(Boolean) as string[]);
   const ovDays = new Set((op.overrides ?? []).map(o => o.day));
+  const catIds = new Set((op.cats ?? []).map(c => c.after?.id ?? c.before?.id).filter(Boolean) as string[]);
+  const setKeys = new Set((op.settings ?? []).map(s => s.key));
   const rows: RowChange[] = [];
   const overrides: OverrideChange[] = [];
+  const cats: CatChange[] = [];
+  const settings: SettingChange[] = [];
   await Promise.all([
     ...[...actIds].map(async id => {
       const before = await db.activities.get(id) ?? null;
@@ -64,9 +99,19 @@ async function snapshotForRedo(op: UndoOp) {
       const before = await db.dayOverrides.get(day) ?? null;
       const after = op.overrides!.find(o => o.day === day)?.after ?? null;
       overrides.push({ day, before, after });
+    }),
+    ...[...catIds].map(async id => {
+      const before = await db.categories.get(id) ?? null;
+      const after = op.cats!.find(c => (c.after?.id ?? c.before?.id) === id)?.after ?? null;
+      cats.push({ before, after });
+    }),
+    ...[...setKeys].map(async k => {
+      const before = await db.settings.get(k) ?? null;
+      const after = op.settings!.find(s => s.key === k)?.after ?? null;
+      settings.push({ key: k, before, after });
     })
   ]);
-  redoStack.update(s => [...s.slice(-(19)), { label: op.label, rows, overrides }]);
+  redoStack.update(s => [...s.slice(-(19)), { label: op.label, rows, overrides, cats, settings }]);
 }
 
 /**
@@ -84,8 +129,10 @@ export async function popAndRedo(): Promise<string | null> {
   const now = Date.now();
   const rows: RowChange[] = [];
   const overrides: OverrideChange[] = [];
+  const cats: CatChange[] = [];
+  const settings: SettingChange[] = [];
   const updates: Promise<unknown>[] = [];
-  await db.transaction('rw', db.activities, db.dayOverrides, async () => {
+  await db.transaction('rw', db.activities, db.dayOverrides, db.categories, db.settings, async () => {
     for (const { before, after } of op!.rows) {
       const id = after?.id ?? before?.id;
       if (!id) continue;
@@ -113,8 +160,35 @@ export async function popAndRedo(): Promise<string | null> {
         updates.push(db.dayOverrides.delete(day));
       }
     }
+    // Categorías y ajustes: espejo del undo (rehacer = volver al "after").
+    for (const { before, after } of op!.cats ?? []) {
+      const id = after?.id ?? before?.id;
+      if (!id) continue;
+      const cur = await db.categories.get(id) ?? null;
+      if (before && cur?.updatedAt !== before.updatedAt) continue;
+      if (after) {
+        const applied = { ...after, updatedAt: now };
+        cats.push({ before: cur, after: applied });
+        updates.push(db.categories.put(applied));
+      } else if (cur) {
+        cats.push({ before: cur, after: null });
+        updates.push(db.categories.delete(id));
+      }
+    }
+    for (const { key, before, after } of op!.settings ?? []) {
+      const cur = await db.settings.get(key) ?? null;
+      if (before && cur?.updatedAt !== before.updatedAt) continue;
+      if (after) {
+        const applied = { ...after, updatedAt: now };
+        settings.push({ key, before: cur, after: applied });
+        updates.push(db.settings.put(applied));
+      } else if (cur) {
+        settings.push({ key, before: cur, after: null });
+        updates.push(db.settings.delete(key));
+      }
+    }
     await Promise.all(updates);
   });
-  pushUndo({ label: op.label, rows, overrides });
+  pushUndo({ label: op.label, rows, overrides, cats, settings });
   return op.label;
 }

@@ -69,6 +69,14 @@
     loadDonutCharts(); // los donuts salen del chunk inicial (lazy como los modales)
     loadDailyView(); // la vista Día es excluyente con la Semana: precarga idle
   });
+
+  /** Carga el chunk de Día AHORA (click en la pestaña o día de la grilla):
+   *  sin esperar al idle callback, que puede demorar hasta 2s en máquina
+   *  cargada y la pestaña quedaba en "Cargando vista del día…". */
+  function irAVistaDia() {
+    currentView = 'day';
+    loadDailyView();
+  }
   
   let showSettings = $state(false);
   let showActivityModal = $state(false);
@@ -233,7 +241,7 @@
 
   function handleDaySelect(day: number) {
     selectedDay = day;
-    currentView = 'day';
+    irAVistaDia();
   }
 
   async function coverGapsAbove() {
@@ -421,7 +429,7 @@
             aria-selected={currentView === 'day'}
             aria-controls="view-panel"
             class:active={currentView === 'day'}
-            onclick={() => currentView = 'day'}
+            onclick={irAVistaDia}
             aria-label={$t('header.viewDay')}
           >
             <Clock size={18} /> {$t('header.day')}
@@ -525,7 +533,20 @@
               onEditActivity={(id, initialData) => openActivityModal(id, selectedDay, initialData)}
             />
           {:else}
-            <div class="modal-loading" role="status">Cargando vista del día…</div>
+            <!-- Esqueleto EN el panel (no overlay fixed): mantiene el layout y
+                 comunica progreso sin tapar el header ni la grilla. Mismo alto
+                 aproximado que el track del día para no saltar al montar. -->
+            <div class="daily-skeleton" role="status" aria-label={$t('header.viewDay')}>
+              <div class="skel-header">
+                <div class="skel-chip"></div>
+                <div class="skel-line"></div>
+              </div>
+              <div class="skel-track">
+                {#each Array(8) as _, i}
+                  <div class="skel-block" style="animation-delay: {i * 90}ms"></div>
+                {/each}
+              </div>
+            </div>
           {/if}
         </div>
       {/if}
@@ -814,6 +835,66 @@
     font-size: 0.95rem;
     background: rgba(240, 246, 240, 0.6);
     backdrop-filter: blur(2px);
+  }
+
+  /* ── Esqueleto de carga de la vista Día ──
+     Bloques que pulsan dentro del panel: layout estable (no overlay),
+     sensación de progreso y sin salto al montar el track real. */
+  .daily-skeleton {
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-height: 60vh;
+  }
+  .skel-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .skel-chip {
+    width: 110px;
+    height: 32px;
+    border-radius: 16px;
+    background: rgba(92, 64, 51, 0.08);
+    animation: skelPulso 1.2s ease-in-out infinite;
+  }
+  .skel-line {
+    flex: 1;
+    max-width: 320px;
+    height: 14px;
+    border-radius: 7px;
+    background: rgba(92, 64, 51, 0.06);
+    animation: skelPulso 1.2s ease-in-out 150ms infinite;
+  }
+  .skel-track {
+    position: relative;
+    flex: 1;
+    border-left: 2px solid rgba(92, 64, 51, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    padding-left: 56px;
+  }
+  .skel-block {
+    height: 64px;
+    border-radius: 10px;
+    border-left: 4px solid rgba(92, 64, 51, 0.12);
+    background: rgba(92, 64, 51, 0.05);
+    animation: skelPulso 1.2s ease-in-out infinite;
+    /* anchos variados: parece contenido real, no una lista clonada */
+  }
+  .skel-block:nth-child(3n) { width: 72%; }
+  .skel-block:nth-child(3n + 1) { width: 88%; }
+  .skel-block:nth-child(3n + 2) { width: 55%; }
+  @keyframes skelPulso {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skel-chip, .skel-line, .skel-block {
+      animation: none;
+    }
   }
 
   .sync-banner {

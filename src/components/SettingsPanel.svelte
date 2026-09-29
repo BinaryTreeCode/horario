@@ -193,7 +193,16 @@
 
   async function saveSettings() {
     try {
+      const { pushUndo, cloneAct } = await import('../lib/undo');
       const stampSet = Date.now();
+      // Snapshots antes/después para el undo de ajustes y categorías
+      const setBefore: Record<string, any> = {};
+      for (const k of ['startHour', 'endHour']) {
+        setBefore[k] = (await db.settings.get(k)) ?? null;
+      }
+      const catsBefore = await db.categories.toArray();
+      const catsBeforeMap = new Map(catsBefore.map(c => [c.id, c]));
+
       await db.settings.put({ id: 'startHour', key: 'startHour', value: startHour, updatedAt: stampSet });
       await db.settings.put({ id: 'endHour', key: 'endHour', value: endHour, updatedAt: stampSet });
 
@@ -203,22 +212,26 @@
       const keptIds = new Set(snapshot.map(c => c.id));
       const existing = await db.categories.toArray();
       const removed = existing.filter(c => !keptIds.has(c.id));
+      const orphans: any[] = [];
+      const dirtyOverrides: any[] = [];
 
       // Reasignar actividades (y overrides) que usaban categorías eliminadas
       if (removed.length > 0) {
         const removedIds = new Set(removed.map(c => c.id));
         await db.transaction('rw', db.activities, db.categories, db.dayOverrides, async () => {
           const acts = await db.activities.toArray();
-          const orphans = acts.filter(a => removedIds.has(a.categoryId));
-          if (orphans.length > 0) {
+          const orphs = acts.filter(a => removedIds.has(a.categoryId));
+          if (orphs.length > 0) {
             const stamp = Date.now();
-            await db.activities.bulkPut(orphans.map(a => ({ ...a, categoryId: 'rutina', updatedAt: stamp })));
+            orphans.push(...orphs);
+            await db.activities.bulkPut(orphs.map(a => ({ ...a, categoryId: 'rutina', updatedAt: stamp })));
           }
           const overrides = await db.dayOverrides.toArray();
-          const dirtyOverrides = overrides.filter(o => o.activities?.some(a => removedIds.has(a.categoryId)));
-          if (dirtyOverrides.length > 0) {
+          const dirty = overrides.filter(o => o.activities?.some(a => removedIds.has(a.categoryId)));
+          if (dirty.length > 0) {
             const stampOv = Date.now();
-            await db.dayOverrides.bulkPut(dirtyOverrides.map(o => ({
+            dirtyOverrides.push(...dirty);
+            await db.dayOverrides.bulkPut(dirty.map(o => ({
               ...o,
               activities: o.activities.map(a => removedIds.has(a.categoryId) ? { ...a, categoryId: 'rutina' } : a),
               updatedAt: stampOv
@@ -233,6 +246,52 @@
 
       if (snapshot.length > 0) {
         await db.categories.bulkPut(snapshot);
+      }
+
+      // ── Undo de la operación completa de Ajustes ──
+      // Ajustes: antes/después de cada clave tocada.
+      const settingsChanges = (['startHour', 'endHour'] as const)
+        .map(k => ({
+          key: k,
+          before: setBefore[k],
+          after: { id: k, key: k, value: k === 'startHour' ? startHour : endHour, updatedAt: stampSet }
+        }))
+        .filter(ch => ch.before?.value !== ch.after.value);
+      // Categorías: creadas/modificadas (label/color/orden) y eliminadas.
+      const catChanges = [];
+      for (const c of snapshot) {
+        const b = catsBeforeMap.get(c.id);
+        if (!b || b.label !== c.label || b.color !== c.color || b.order !== c.order) {
+          catChanges.push({ before: b ?? null, after: c });
+        }
+      }
+      for (const r of removed) {
+        // El "after" real es el tombstone ya escrito (con su updatedAt del
+        // guard): releer para que el guard del undo lo acepte.
+        const tombstone = await db.categories.get(r.id);
+        catChanges.push({ before: r, after: tombstone ?? { ...r, deletedAt: r.deletedAt } });
+      }
+      // Huérfanas reasignadas a 'rutina': el undo las devuelve a su categoría.
+      // El "after" se releer de BD (el bulkPut le puso updatedAt nuevo — el
+      // guard del undo compara contra eso).
+      const orphanChanges = [];
+      for (const o of orphans) {
+        // o fue capturado ANTES del bulkPut: conserva la categoría ORIGINAL
+        // (ejercicio) — es exactamente el "before" que el undo debe restaurar.
+        const after = await db.activities.get(o.id!);
+        orphanChanges.push({
+          before: o,
+          after: after ?? { ...o, categoryId: 'rutina' }
+        });
+      }
+      if (settingsChanges.length > 0 || catChanges.length > 0 || orphanChanges.length > 0) {
+        pushUndo({
+          label: tNow('settings.saved'),
+          settings: settingsChanges,
+          cats: catChanges,
+          rows: orphanChanges,
+          overrides: []
+        });
       }
 
       toastOk(tNow('settings.saved'));

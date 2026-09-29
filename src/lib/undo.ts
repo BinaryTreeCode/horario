@@ -1,11 +1,15 @@
 import { writable } from 'svelte/store';
-import type { Activity, DayOverride } from './types';
+import type { Activity, Category, AppSettings, DayOverride } from './types';
 
 /**
  * Undo genérico por snapshots: cada mutación captura las filas afectadas
  * antes y después de escribir. Deshacer restaura el "antes" SOLO si la fila
  * actual sigue siendo la del "después" (guard por updatedAt) — si el usuario
  * mutó esa fila de nuevo tras la operación, se descarta en vez de pisarlo.
+ *
+ * Cubre TODAS las operaciones de datos: actividades, overrides, categorías
+ * (crear/eliminar/reordenar) y ajustes (rango horario). "Borrar todo" e
+ * importar NO son deshacibles por diseño (clearUndo).
  *
  * La EJECUCIÓN del undo (lectura, plan y transacción Dexie) vive en
  * undoRun.ts y se carga con import dinámico: este módulo sí va al chunk de
@@ -25,10 +29,23 @@ export interface OverrideChange {
   after: DayOverride | null;
 }
 
+export interface CatChange {
+  before: Category | null;
+  after: Category | null;
+}
+
+export interface SettingChange {
+  key: string;
+  before: AppSettings | null;
+  after: AppSettings | null;
+}
+
 export interface UndoOp {
   label: string;
   rows: RowChange[];
   overrides?: OverrideChange[];
+  cats?: CatChange[];
+  settings?: SettingChange[];
 }
 
 const MAX = 20;
