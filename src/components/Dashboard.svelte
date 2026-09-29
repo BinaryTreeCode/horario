@@ -13,8 +13,8 @@
 
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
-  import { undoStack, cloneAct } from '../lib/undo';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, ArrowUp, ArrowDown, Download, Upload, Cloud, CloudOff, RefreshCw, Database } from '@lucide/svelte';
+  import { undoStack } from '../lib/undo';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Download, Upload, Cloud, CloudOff, RefreshCw, Database } from '@lucide/svelte';
   import { portal } from '../lib/portal';
   import { onSyncChange, syncNow } from '../lib/sync';
   import { t, tNow, idioma } from '../lib/i18n';
@@ -373,87 +373,10 @@
     }
   }
 
-  /**
-   * Subir/Bajar TODO como bloque: desplaza todas las actividades ±deltaH
-   * conservando los huecos ENTRE ellas. En vista Día opera sobre el override
-   * temporal del día; en Semana sobre la plantilla (cada actividad se mueve en
-   * TODOS sus días). Si algún bloque resultante desborda el rango del día →
-   * ⛔ y nada se escribe (mismo contrato que el nudge de teclado).
-   */
-  async function shiftAll(deltaH: number) {
-    const startH = settingsObj.startHour;
-    const endH = settingsObj.endHour;
-    const stamp = Date.now();
-    const snap = (v: number) => Math.round(v * 4) / 4; // cuantía de 15 min
-
-    if (currentView === 'day') {
-      const overrides = $state.snapshot($dayOverridesStore) || [];
-      const currentOverride = overrides.find(o => o.day === selectedDay);
-      const acts = (currentOverride?.activities?.length
-        ? currentOverride.activities.map(a => ({ ...a }))
-        : ($state.snapshot($activitiesStore) || []).filter((a: Activity) => a.daysOfWeek.includes(selectedDay)).map((a: Activity) => ({ ...a })))
-        .filter((a: any) => !a.deletedAt);
-      if (acts.length === 0) return;
-
-      const { commitCambios } = await import('../lib/commit');
-      // Validación: el bloque entero debe caber en el rango del día.
-      let minStart = Infinity, maxEnd = -Infinity;
-      for (const a of acts) {
-        minStart = Math.min(minStart, parseTime(a.startTime));
-        maxEnd = Math.max(maxEnd, parseTime(a.endTime));
-      }
-      const newMin = snap(minStart + deltaH);
-      const newMax = snap(maxEnd + deltaH);
-      if (newMin < startH - 1e-9 || newMax > endH + 1e-9) {
-        toastErr('⛔ No cabe: el bloque desbordaría el día');
-        return;
-      }
-      for (const a of acts) {
-        a.startTime = formatTime(snap(parseTime(a.startTime) + deltaH));
-        a.endTime = formatTime(snap(parseTime(a.endTime) + deltaH));
-      }
-      await commitCambios({
-        label: `${tNow('header.shiftUp')} / ${tNow('header.shiftDown')}`,
-        ovs: [{ day: selectedDay, activities: acts }]
-      });
-      return;
-    }
-
-    // Vista Semana: plantilla master, cada actividad en TODOS sus días.
-    const list = ($state.snapshot($activitiesStore) || []).filter((a: any) => !a.deletedAt);
-    if (list.length === 0) return;
-
-    let minStart = Infinity, maxEnd = -Infinity;
-    for (const a of list) {
-      minStart = Math.min(minStart, parseTime(a.startTime));
-      maxEnd = Math.max(maxEnd, parseTime(a.endTime));
-    }
-    const newMin = snap(minStart + deltaH);
-    const newMax = snap(maxEnd + deltaH);
-    if (newMin < startH - 1e-9 || newMax > endH + 1e-9) {
-      toastErr('⛔ No cabe: el bloque desbordaría el día');
-      return;
-    }
-
-    const acts: Activity[] = [];
-    for (const before of list) {
-      const t0 = formatTime(snap(parseTime(before.startTime) + deltaH));
-      const t1 = formatTime(snap(parseTime(before.endTime) + deltaH));
-      if (t0 !== before.startTime || t1 !== before.endTime) {
-        acts.push({ ...cloneAct(before), startTime: t0, endTime: t1 });
-      }
-    }
-    if (acts.length === 0) return;
-    try {
-      const { commitCambios } = await import('../lib/commit');
-      await commitCambios({
-        label: tNow('header.shiftUp') + ' / ' + tNow('header.shiftDown'),
-        acts
-      });
-    } catch (err: any) {
-      toastErr(tNow('toast.couldNotMove') + ': ' + (err.message || err));
-    }
-  }
+  /* (Subir/Bajar Todo retirado a pedido del usuario: los botones ↑↓ del
+     header y de la sidebar de Día se eliminaron. La lógica shiftAll quedó
+     sin usos y se removió; el deshacer de commitCambios conserva el soporte
+     de sus labels por si un op antiguo queda en la pila.) */
 </script>
 
 <div class="dashboard" class:privacy-mode={$modoPrivacidad}>
@@ -498,12 +421,6 @@
         </button>
         <button class="btn btn-secondary" onclick={coverGapsBelow} aria-label={$t('header.adjustDown')} title={$t('header.adjustDownTitle')}>
           <ChevronsDown size={20} /> <span class="hide-mobile">{$t('header.adjustDown')}</span>
-        </button>
-        <button class="btn btn-secondary btn-icon" onclick={() => shiftAll(-0.25)} aria-label={$t('header.shiftUp')} title={$t('header.shiftAllTitle', { scope: currentView === 'day' ? $t('header.shiftScopeDay') : $t('header.shiftScopeWeek') })}>
-          <ArrowUp size={20} />
-        </button>
-        <button class="btn btn-secondary btn-icon" onclick={() => shiftAll(0.25)} aria-label={$t('header.shiftDown')} title={$t('header.shiftAllTitle', { scope: currentView === 'day' ? $t('header.shiftScopeDay') : $t('header.shiftScopeWeek') })}>
-          <ArrowDown size={20} />
         </button>
         <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label={$t('header.newActivity')}>
           <Plus size={20} /> <span class="hide-mobile">{$t('header.newActivity')}</span>
@@ -610,15 +527,6 @@
               <button class="side-btn" onclick={coverGapsBelow} title={$t('header.adjustDownTitle')} aria-label={$t('header.adjustDown')}>
                 <ChevronsDown size={20} />
                 <span>{$t('header.adjustDown')}</span>
-              </button>
-              <div class="side-sep" role="presentation"></div>
-              <button class="side-btn" onclick={() => shiftAll(-0.25)} title={$t('header.shiftAllTitle', { scope: $t('header.shiftScopeDay') })} aria-label={$t('header.shiftUp')}>
-                <ArrowUp size={20} />
-                <span>{$t('header.shiftUp')}</span>
-              </button>
-              <button class="side-btn" onclick={() => shiftAll(0.25)} title={$t('header.shiftAllTitle', { scope: $t('header.shiftScopeDay') })} aria-label={$t('header.shiftDown')}>
-                <ArrowDown size={20} />
-                <span>{$t('header.shiftDown')}</span>
               </button>
               <button class="side-btn side-btn-primary" onclick={() => openActivityModal(null, selectedDay)} aria-label={$t('header.newActivity')}>
                 <Plus size={20} />
