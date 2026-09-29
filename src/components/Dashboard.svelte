@@ -14,7 +14,7 @@
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { undoStack } from '../lib/undo';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Download, Upload, Cloud, CloudOff, RefreshCw, Database } from '@lucide/svelte';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Download, Upload, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
   import { portal } from '../lib/portal';
   import { onSyncChange, syncNow } from '../lib/sync';
   import { t, tNow, idioma } from '../lib/i18n';
@@ -452,7 +452,7 @@
           aria-haspopup="menu"
           title={$t('sidebar.menuDatos')}
         >
-          <Database size={20} />
+          <Cloud size={20} />
         </button>
       </div>
       {#if syncStatus !== 'local'}
