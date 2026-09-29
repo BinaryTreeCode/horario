@@ -797,6 +797,21 @@
     flex-wrap: wrap;
   }
 
+  /* Escritorio angosto / zoom del navegador (≤1200px): los botones con texto
+     pasan a solo-ícono. Con texto, el grupo necesita ~645px y entre ~770 y
+     ~1150px no entra junto al logo+pestañas: flex-wrap lo partía en dos filas
+     y se veía una columna apilada a la derecha (bug en desktop). aria-label +
+     title conservan el significado; los targets siguen ≥44px (regla dura #5). */
+  @media (max-width: 1200px) {
+    .header-actions .hide-mobile {
+      display: none;
+    }
+    .btn-plus {
+      padding-left: 0.5rem;
+      padding-right: 0.5rem;
+    }
+  }
+
   /* Ancla del menú Datos: wrapper inline para que el botón no participe del
      wrap raro, y para medir su rect a la hora de abrir. */
   .menu-datos-wrap {
