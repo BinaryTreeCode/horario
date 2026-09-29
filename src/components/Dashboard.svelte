@@ -167,9 +167,12 @@
         const r = menuDatosEl.querySelector('button')?.getBoundingClientRect();
         if (r) {
           const MENU_W = 230;
+          const MENU_H = 200; // altura máx estimada (4 items + pie); solo para el clamp
           menuDatosPos = {
             x: Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8)),
-            y: r.bottom + 6
+            // Clamp vertical: con el header parcialmente scrolleado el botón
+            // puede quedar cerca/abajo del viewport y el menú salía recortado.
+            y: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - MENU_H - 8))
           };
         }
       }
