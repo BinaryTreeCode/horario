@@ -31,8 +31,7 @@ const es: Catalogo = {
   'header.adjustDownTitle': 'Empuja todas las actividades hacia el final del día, preservando los huecos entre ellas',
   'header.newActivity': 'Nueva Actividad',
   'header.settings': 'Abrir ajustes',
-  'header.privacy': 'Modo privacidad: ocultar el contenido de las actividades',
-  'header.privacyShort': 'Privacidad',
+  'header.privacy': 'Modo privacidad',
   'header.viewWeek': 'Ver semana',
   'header.viewDay': 'Ver día',
 
@@ -283,8 +282,7 @@ const en: Catalogo = {
   'header.adjustDownTitle': 'Push all activities toward the end of the day, preserving the gaps between them',
   'header.newActivity': 'New Activity',
   'header.settings': 'Open settings',
-  'header.privacy': 'Privacy mode: hide activity contents',
-  'header.privacyShort': 'Privacy',
+  'header.privacy': 'Privacy mode',
   'header.viewWeek': 'View week',
   'header.viewDay': 'View day',
 

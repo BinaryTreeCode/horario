@@ -415,7 +415,7 @@
     <div class="header-right">
       <!-- Acciones del header: visibles en móvil/tablet siempre, y en desktop
            solo en Semana (en Día viven en la barra lateral dentro del panel). -->
-      <div class="header-actions" class:header-actions-hidden-desktop={currentView === 'day'}>
+      <div class="header-actions">
         <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label={$t('header.adjustUp')} title={$t('header.adjustUpTitle')}>
           <ChevronsUp size={20} /> <span class="hide-mobile">{$t('header.adjustUp')}</span>
         </button>
@@ -425,17 +425,8 @@
         <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label={$t('header.newActivity')}>
           <Plus size={20} /> <span class="hide-mobile">{$t('header.newActivity')}</span>
         </button>
-        <!-- Modo privacidad: desenfoca el contenido de las actividades (mirones/capturas) -->
-        <button
-          class="btn btn-secondary btn-icon"
-          class:privacy-on={$modoPrivacidad}
-          onclick={alternarPrivacidad}
-          aria-label={$t('header.privacy')}
-          aria-pressed={$modoPrivacidad}
-          title={$t('header.privacy')}
-        >
-          {#if $modoPrivacidad}<EyeOff size={20} />{:else}<Eye size={20} />{/if}
-        </button>
+        <!-- (Modo privacidad retirado del header: vive como ítem del menú
+             Datos. Header mínimo: compactar ×2, nueva actividad, ajustes.) -->
         <button class="btn btn-secondary btn-icon" onclick={openSettings} aria-label={$t('header.settings')}>
           <Settings size={20} />
         </button>
@@ -504,50 +495,18 @@
           </div>
         </div>
       {:else}
-        <!-- Vista Día (solo desktop): la barra de acciones vive DENTRO del panel,
-             a la derecha; el horario corre un poco a la izquierda para hacerle
-             lugar. En móvil la barra no existe (header manda) y el panel es uno. -->
+        <!-- Vista Día: mismas acciones que Semana (header único, sin sidebar
+             duplicada: escritorio edita, móvil ve). -->
         <div class="day-layout glass-panel">
           {#if DailyViewComp}
-            <div class="day-view-host">
-              <DailyViewComp 
-                day={selectedDay}
-                activities={$activitiesStore || []} 
-                categories={$categoriesStore || []} 
-                settings={settingsObj}
-                dayOverrides={$dayOverridesStore || []}
-                onEditActivity={(id, initialData) => openActivityModal(id, selectedDay, initialData)}
-              />
-            </div>
-            <aside class="actions-sidebar" aria-label={$t('header.settings')}>
-              <button class="side-btn" onclick={coverGapsAbove} title={$t('header.adjustUpTitle')} aria-label={$t('header.adjustUp')}>
-                <ChevronsUp size={20} />
-                <span>{$t('header.adjustUp')}</span>
-              </button>
-              <button class="side-btn" onclick={coverGapsBelow} title={$t('header.adjustDownTitle')} aria-label={$t('header.adjustDown')}>
-                <ChevronsDown size={20} />
-                <span>{$t('header.adjustDown')}</span>
-              </button>
-              <button class="side-btn side-btn-primary" onclick={() => openActivityModal(null, selectedDay)} aria-label={$t('header.newActivity')}>
-                <Plus size={20} />
-                <span>{$t('header.newActivity')}</span>
-              </button>
-              <button
-                class="side-btn"
-                class:privacy-on={$modoPrivacidad}
-                onclick={alternarPrivacidad}
-                aria-label={$t('header.privacy')}
-                aria-pressed={$modoPrivacidad}
-                title={$t('header.privacy')}
-              >
-                {#if $modoPrivacidad}<EyeOff size={20} />{:else}<Eye size={20} />{/if}
-                <span>{$t('header.privacyShort')}</span>
-              </button>
-              <button class="side-btn" onclick={openSettings} aria-label={$t('header.settings')} title={$t('header.settings')}>
-                <Settings size={20} />
-                <span>{$t('header.settings')}</span>
-              </button>
-            </aside>
+            <DailyViewComp 
+              day={selectedDay}
+              activities={$activitiesStore || []} 
+              categories={$categoriesStore || []} 
+              settings={settingsObj}
+              dayOverrides={$dayOverridesStore || []}
+              onEditActivity={(id, initialData) => openActivityModal(id, selectedDay, initialData)}
+            />
           {:else}
             <div class="modal-loading" role="status">Cargando vista del día…</div>
           {/if}
@@ -602,6 +561,12 @@
       </button>
       <button role="menuitem" onclick={importarDatos} title={$t('sidebar.importTitle')}>
         <Upload size={16} /> {$t('sidebar.import')}
+      </button>
+      <div class="menu-datos-sep" role="presentation"></div>
+      <button role="menuitemcheckbox" aria-checked={$modoPrivacidad} onclick={alternarPrivacidad} title={$t('header.privacy')}>
+        {#if $modoPrivacidad}<EyeOff size={16} />{:else}<Eye size={16} />{/if}
+        <span class="menu-item-flex">{$t('header.privacy')}</span>
+        {#if $modoPrivacidad}<span class="menu-check">✓</span>{/if}
       </button>
       <div class="menu-datos-pie" role="presentation">
         {#if fechaUltimoRespaldo}
@@ -764,6 +729,23 @@
     background: rgba(92, 64, 51, 0.08);
   }
 
+  .menu-datos button[role="menuitemcheckbox"] {
+    justify-content: flex-start;
+  }
+  .menu-item-flex {
+    flex: 1;
+    text-align: left;
+  }
+  .menu-check {
+    color: var(--color-green-dark);
+    font-weight: 700;
+  }
+  .menu-datos-sep {
+    height: 1px;
+    margin: 0.35rem 0.5rem;
+    background: rgba(92, 64, 51, 0.14);
+  }
+
   /* Pie informativo: fecha del último respaldo descargado (no interactivo) */
   .menu-datos-pie {
     padding: 0.45rem 0.8rem 0.3rem;
@@ -868,112 +850,13 @@
     min-height: 44px;
   }
 
-  /* Modo privacidad activo: el ojo cerrado se destaca (fondo verde, no gris)
-     para que se vea de un vistazo que el contenido está oculto. */
-  .btn-icon.privacy-on {
-    background: var(--color-green-dark);
-    color: white;
-  }
-  .btn-icon.privacy-on:hover {
-    background: var(--color-green-moss);
-  }
+  /* (Barra lateral de acciones de Día retirada: el header es único en ambas
+     vistas — escritorio edita con el mismo header que móvil.) */
 
   .dashboard-main {
     flex: 1;
     display: flex;
     flex-direction: column;
-  }
-
-  /* ── Barra lateral de acciones (solo ≥1024px, SOLO vista Día) ──
-     En Día vive DENTRO del panel, a la derecha del horario; en Semana las
-     acciones vuelven al header y la barra no existe. En móvil nunca se
-     muestra: las acciones quedan en el header en ambas vistas. */
-  .actions-sidebar {
-    display: none;
-  }
-
-  /* En desktop con vista Día el header queda solo con logo/pestañas/sync */
-  @media (min-width: 1024px) {
-    .header-actions-hidden-desktop {
-      display: none;
-    }
-  }
-
-  @media (min-width: 1024px) {
-    .day-layout {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.9rem;
-    }
-    /* El horario cede ~190px: corre a la izquierda para que la barra entre
-       sin apretarlo de más (min-width 0 permite encoger). */
-    .day-view-host {
-      flex: 1;
-      min-width: 0;
-    }
-    .actions-sidebar {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-      width: 172px;
-      flex-shrink: 0;
-      padding: 0.75rem 0.6rem;
-      position: sticky;
-      top: 1.5rem;
-      align-self: flex-start;
-    }
-  }
-
-  .side-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    width: 100%;
-    min-height: 44px;
-    padding: 0.55rem 0.7rem;
-    border: none;
-    border-radius: 10px;
-    background: transparent;
-    color: var(--color-brown-bark);
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.15s, color 0.15s;
-  }
-  .side-btn:hover {
-    background: rgba(92, 64, 51, 0.08);
-  }
-  .side-btn:focus-visible {
-    outline: 2px solid var(--color-green-dark);
-    outline-offset: 2px;
-  }
-  .side-btn-primary {
-    background: var(--color-green-dark);
-    color: white;
-  }
-  .side-btn-primary:hover {
-    background: var(--color-green-moss);
-  }
-  .side-btn.privacy-on {
-    background: var(--color-green-dark);
-    color: white;
-  }
-  .side-btn.privacy-on:hover {
-    background: var(--color-green-moss);
-  }
-  .side-btn span {
-    /* Los labels largos no rompen la barra: una línea, ellipsis */
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Separador entre acciones de compactar y de desplazamiento en bloque */
-  .side-sep {
-    height: 1px;
-    margin: 0.35rem 0.4rem;
-    background: rgba(92, 64, 51, 0.14);
   }
 
   .view-container {

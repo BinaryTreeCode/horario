@@ -73,12 +73,11 @@ test('Modal de actividad (creación): sin violaciones de accesibilidad', async (
 });
 
 test('Ajustes: sin violaciones de accesibilidad', async ({ page }) => {
-  // En desktop (≥1024px) con vista Día las acciones viven en la sidebar DENTRO
-  // del panel; el último botón es "Abrir ajustes". (En Semana y en móvil
-  // quedan en el header.)
-  await page.locator(TAB_DIA).click();
-  await expect(page.locator('.actions-sidebar .side-btn').first()).toBeVisible({ timeout: 30_000 });
-  await page.locator('.actions-sidebar .side-btn').last().click();
+  // El header es visible en AMBAS vistas (la sidebar de Día fue retirada);
+  // el botón de ajustes es el último del grupo de acciones.
+  const btnAjustes = page.locator('.header-actions button[aria-label="Open settings"], .header-actions button[aria-label="Abrir ajustes"]');
+  await expect(btnAjustes).toBeVisible({ timeout: 30_000 });
+  await btnAjustes.click();
   const panel = page.locator('.modal-content');
   await expect(panel).toBeVisible({ timeout: 30_000 });
   await esperarAnimacion(page);
