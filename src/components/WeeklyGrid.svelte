@@ -1118,20 +1118,23 @@
        en 320/425px (2 días en pantalla y scroll eterno). En móvil angosto el
        piso baja: 66px en ≤768px, 56px en ≤480px — el día SIEMPRE cabe en su
        mínimo y el scroll solo aparece cuando no caben los 7 días. */
-    grid-template-columns: repeat(7, clamp(88px, calc(14.2857% - 1px), 220px));
+    /* Techo de columna 300px (antes 220): a 2560px la grilla quedaba con
+       ~570px muertos dentro del panel; 300px × 7 ≈ 2100px llena mejor un
+       ultrawide sin volver las columnas absurdas de anchas en 1536px. */
+    grid-template-columns: repeat(7, clamp(88px, calc(14.2857% - 1px), 300px));
     gap: 1px;
     background: rgba(0,0,0,0.06);
   }
   @container weekly-grid (width < 768px) {
     .days-columns {
-      grid-template-columns: repeat(7, clamp(66px, calc(14.2857% - 1px), 220px));
+      grid-template-columns: repeat(7, clamp(66px, calc(14.2857% - 1px), 300px));
     }
   }
   @container weekly-grid (width < 480px) {
     .days-columns {
       /* Piso 60px (antes 56): con el padding fino da el ancho justo para que
          "Almuerzo" completo entre en una línea a 0.7rem. */
-      grid-template-columns: repeat(7, clamp(60px, calc(14.2857% - 1px), 220px));
+      grid-template-columns: repeat(7, clamp(60px, calc(14.2857% - 1px), 300px));
     }
   }
 

@@ -587,10 +587,11 @@
 <style>
   .dashboard {
     /* Escalado por ancho de pantalla: 1400px de piso en desktop común,
-       1560px en pantallas grandes y 1800px en ultrawide (2560+) para que
+       1560px en pantallas grandes y 2000px en ultrawide (2560+) para que
        el contenido crezca con la pantalla en vez de dejar franjas muertas
-       a los lados (QHD/21:9). clamp fluido: nada brusco entre breakpoints. */
-    max-width: clamp(1400px, 78vw, 1800px);
+       a los lados (a 2560px el tope 1800 dejaba 380px vacíos POR LADO).
+       clamp fluido: nada brusco entre breakpoints. */
+    max-width: clamp(1400px, 86vw, 2000px);
     /* width 100%: sin esto, siendo grid item de .app-layout con margin auto,
        el navegador lo encoge a fit-content y el clamp no llega a usarse. */
     width: 100%;
@@ -868,9 +869,9 @@
 
   .week-layout {
     display: grid;
-    /* Sidebar de donuts fluida: 320px de piso, 360px en pantallas grandes —
-       en ultrawide la grilla semanal se queda el resto (igual legible). */
-    grid-template-columns: 1fr clamp(320px, 24vw, 360px);
+    /* Sidebar de donuts fluida: 320px de piso, hasta 420px en ultrawide —
+       en 2560px los 360px se veían enanos junto a la grilla. */
+    grid-template-columns: 1fr clamp(320px, 17vw, 420px);
     gap: 1.5rem;
     height: 100%;
   }

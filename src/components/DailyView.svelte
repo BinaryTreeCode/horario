@@ -1188,13 +1188,16 @@
   }
   @media (min-width: 1536px) {
     .daily-container {
-      max-width: 900px;
+      /* Escala con la pantalla hasta un tope: 900px se quedaba chico en
+         2560px (ultrawide) dejando ~1660px muertos. clamp: crece 1px por
+         cada 2px de viewport entre 1536 y 2412, techo 1200px. */
+      max-width: clamp(900px, 58vw, 1200px);
       margin-left: auto;
       margin-right: auto;
       width: 100%;
     }
     .daily-header {
-      max-width: 900px;
+      max-width: clamp(900px, 58vw, 1200px);
       margin-left: auto;
       margin-right: auto;
       width: 100%;
