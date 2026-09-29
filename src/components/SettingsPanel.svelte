@@ -642,7 +642,7 @@
             <input
               bind:this={fileInput}
               type="file"
-              accept=".json,.txt,application/json,text/plain"
+              accept=".npz,.json,.txt,application/json,text/plain,application/zip"
               onchange={handleImport}
               class="sr-only"
               tabindex="-1"
