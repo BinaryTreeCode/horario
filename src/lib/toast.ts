@@ -84,9 +84,14 @@ let lastErrTime = 0;
 const VENTANA_REINTENTO_MS = 4000;
 
 /**
- * Error de gesto con puerta de repetición: 1er fallo → silencioso (el rojo
- * del fantasma ya avisa); 2º fallo CONSECUTIVO de la misma acción (misma
- * firma dentro de 4s) → toast con la descripción del motivo.
+ * Error de gesto con puerta de repetición: 1er fallo → toast BREVE con el
+ * motivo (el usuario debe saber por qué el bloque vuelve: con un día lleno
+ * el silencio se siente como "el drag se rompió"); si insiste y repite la
+ * misma falla dentro de la ventana, el toast se renueva.
+ *
+ * Antes el 1er fallo era SILENCIOSO (se confiaba en el rojo del fantasma),
+ * pero el rojo solo se ve MIENTRAS se arrastra: al soltar desaparece sin
+ * explicación y el usuario reporta "el drag and drop se rompe".
  * @param firma  identidad de la acción fallida (p. ej. `mover:Lunes`)
  * @param motivo descripción clara de por qué no se pudo
  */
@@ -95,5 +100,7 @@ export function toastErrRepetido(firma: string, motivo: string) {
   const esReintento = firma === lastErrFirma && now - lastErrTime <= VENTANA_REINTENTO_MS;
   lastErrFirma = firma;
   lastErrTime = now;
-  if (esReintento) toastErr(motivo);
+  // Siempre avisar: el auto-cierre a 3.2s evita la spam y el anti-duplicado
+  // del store de toasts colapsa repeticiones idénticas consecutivas.
+  toastErr(motivo);
 }

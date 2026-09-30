@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { db, descargarRespaldo, exportarRespaldoBinario, validateImport, importValidatedData, type ValidationResult } from '../lib/db';
+  import { db, descargarRespaldo, exportarRespaldoBinario, estimarRespaldo, exportData, validateImport, importValidatedData, type StatsRespaldo, type ValidationResult } from '../lib/db';
   import { leerRespaldo } from '../lib/backupFile';
   import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync } from '../lib/sync';
   import { establecerClave, olvidarClave } from '../lib/crypto';
@@ -382,6 +382,34 @@
   // Formato del respaldo: binario .npz (por defecto) o JSON completo
   let exportMode = $state<'binario' | 'full'>('binario');
 
+  // Estimación del tamaño del respaldo (exacta: es el archivo que se
+  // descargaría). Se calcula al abrir el panel y al cambiar de formato.
+  let estimacion = $state<StatsRespaldo | null>(null);
+  let estimando = $state(false);
+  let estimacionModo: 'binario' | 'full' | null = null; // evita estimar dos veces el mismo modo
+
+  $effect(() => {
+    const modo = exportMode;
+    if (estimacionModo === modo || estimando) return;
+    estimacionModo = modo;
+    estimando = true;
+    (modo === 'binario'
+      ? estimarRespaldo('compact')
+      : exportData('full').then(texto => ({
+          bytes: texto.length,
+          imagenesRecomprimidas: 0,
+          imagenesIntactas: 0,
+          bytesSinTratar: texto.length
+        }))
+    )
+      .then(e => { estimacion = e; })
+      .catch(() => { estimacion = null; }) // nunca bloquea el export
+      .finally(() => { estimando = false; });
+  });
+
+  const fmtTam = (b: number) =>
+    b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+
   async function handleExport() {
     try {
       if (exportMode === 'binario') await exportarRespaldoBinario();
@@ -628,6 +656,15 @@
             <button class="btn btn-secondary btn-backup" onclick={handleExport}>
               <Download size={18} /> {$t('settings.exportJson')}
             </button>
+            {#if estimando || (estimacion && estimacionModo !== exportMode)}
+              <span class="export-estimacion" aria-live="polite">{$t('settings.estimating')}</span>
+            {:else if estimacion}
+              <span class="export-estimacion" aria-live="polite">
+                {$t('settings.estimateSize', { size: fmtTam(estimacion.bytes) })}{#if exportMode === 'binario' && estimacion.imagenesRecomprimidas > 0}
+                  · {$t('settings.estimateImages', { n: estimacion.imagenesRecomprimidas })}
+                {/if}
+              </span>
+            {/if}
             
             <button
               class="btn btn-secondary btn-backup import-btn"
@@ -1069,6 +1106,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     width: 100%;
+  }
+
+  /* Estimación del tamaño del respaldo, junto al botón de exportar */
+  .export-estimacion {
+    font-size: 0.75rem;
+    color: var(--color-brown-bark);
+    text-align: center;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
   }
 
   /* Zona de peligro: Borrar todo, separada del resto de acciones */

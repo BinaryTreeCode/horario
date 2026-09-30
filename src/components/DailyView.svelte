@@ -133,6 +133,10 @@
    *  ción en cada pointermove cerca del límite = zumbido frenético (y con
    *  el shake moviendo el bloque, el :hover titila = salto de z-index). */
   let shakeInvalid = $state(false);
+  /** Tarjeta que sacude el shake: por ID y separado del drag — al soltar un
+   *  drop rechazado el id de drag ya se limpió y sin esto el rechazo no
+   *  dejaría rastro visible ("el drag se rompió y no pasa nada"). */
+  let shakeId = $state<string | null>(null);
   let shakeTimer: ReturnType<typeof setTimeout> | null = null;
   function setInvalid(v: boolean) {
     if (v && !dragInvalid) {
@@ -442,12 +446,22 @@
       const res = computeLayoutForDrop(clientY, t.activityId);
       if (!res || !res.valido) {
         // ⛔ Sin reemplazos ni huecos imposibles: el bloque vuelve a su sitio.
-        // 1er fallo → silencioso (el rojo ya avisó); al insistir → toast con
-        // el motivo (puerta de repetición, pedido del usuario).
+        // Toast SIEMPRE con el motivo (toastErrRepetido avisa desde el 1er
+        // fallo): con el día lleno casi todo movimiento desborda y el
+        // silencio se siente como "el drag se rompió". Además el shake corre
+        // UNA vez tras soltar: el rojo del drag desaparece con el fantasma y
+        // sin este one-shot el rechazo no deja rastro visible.
         if (res) toastErrRepetido(`mover-dia:${day}`, res.motivo);
         draggedActivityId = null;
         dropPreview = null;
         setInvalid(false);
+        // Shake one-shot sobre la TARJETA (por id, no por estado de drag):
+        // el rechazo deja rastro visible tras soltar. Fallback por si
+        // animationend no corre.
+        shakeInvalid = true;
+        shakeId = t.activityId;
+        if (shakeTimer) clearTimeout(shakeTimer);
+        shakeTimer = setTimeout(() => { shakeInvalid = false; shakeId = null; }, 400);
         dragHint = '';
         firmaPreview = '';
         return;
@@ -899,9 +913,9 @@
           class:is-short={activity.durationMins <= 20}
           class:dragging={draggedActivityId === activity.id}
           class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
-          class:shake-invalid={draggedActivityId === activity.id && shakeInvalid}
+          class:shake-invalid={(draggedActivityId === activity.id || shakeId === activity.id) && shakeInvalid}
           class:flash-commit={flashId === activity.id}
-          onanimationend={(e) => { if (e.animationName === 'shake-x') shakeInvalid = false; }}
+          onanimationend={(e) => { if (e.animationName === 'shake-x') { shakeInvalid = false; shakeId = null; } }}
           onpointerdown={(e) => handlePointerDown(e, activity)}
           oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
           onclick={() => onEditActivity(activity.id!, activity)}

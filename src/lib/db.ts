@@ -520,11 +520,26 @@ export async function exportData(mode: ExportMode = 'compact'): Promise<string> 
  * confirmación → importValidatedData): el validador acepta el ZIP si trae
  * un payload válido en `d`.
  */
-export async function exportarRespaldoBinario(mode: ExportMode = 'compact'): Promise<void> {
+export interface StatsRespaldo {
+  /** Tamaño final del archivo (bytes reales del ZIP, o del texto en .json). */
+  bytes: number;
+  /** Data-URLs de imagen recompresidas a binario dentro del archivo. */
+  imagenesRecomprimidas: number;
+  /** Imágenes que ya viajaban livianas (URL http/blob) y no se tocaron. */
+  imagenesIntactas: number;
+  /** Bytes del JSON SIN tratar imágenes (referencia para el % ahorrado). */
+  bytesSinTratar: number;
+}
+
+/** Pipeline común de export y estimación: construye el .npz sin descargarlo.
+ *  Devuelve el ZIP listo y las estadísticas del tratamiento de imágenes. */
+async function buildRespaldoBinario(mode: ExportMode): Promise<{ zipped: Uint8Array; stats: StatsRespaldo }> {
   if (typeof window === 'undefined') throw new Error('Solo navegador');
   const { zipSync, strToU8 } = await import('fflate');
   const { recomprimirParaRespaldo, esDataUrlImagen, UMBRAL_BINARIO } =
-    await import('./routineImages');  const payload = await exportData(mode); // JSON con data-URLs inline
+    await import('./routineImages');
+  const payload = await exportData(mode); // JSON con data-URLs inline
+  const bytesSinTratar = payload.length;
   const parsed = JSON.parse(payload);
 
   // Acceso uniforme a las actividades en AMBOS formatos de export:
@@ -594,7 +609,32 @@ export async function exportarRespaldoBinario(mode: ExportMode = 'compact'): Pro
   // Nivel 6: buen ratio sin achicharrar el hilo (el JSON domina y ya está
   // minificado; las imágenes WebP/JPEG no comprimen más).
   const zipped = zipSync(zip, { level: 6 });
+  return {
+    zipped,
+    stats: {
+      bytes: zipped.length,
+      imagenesRecomprimidas: pares.length,
+      imagenesIntactas: urls.size - pares.length,
+      bytesSinTratar
+    }
+  };
+}
 
+/**
+ * Estima el respaldo .npz SIN descargar nada: ejecuta el mismo pipeline
+ * (export → recomprimir imágenes → zip) y devuelve tamaño + imágenes
+ * tratadas. La estimación es EXACTA, no aproximada: es el archivo que se
+ * descargaría. Para la UI: cachear por modo (los datos no cambian debajo).
+ */
+export async function estimarRespaldo(mode: ExportMode = 'compact'): Promise<StatsRespaldo> {
+  const { zipped, stats } = await buildRespaldoBinario(mode);
+  void zipped;
+  return stats;
+}
+
+/** Exporta el .npz y devuelve las estadísticas (para el toast del menú Datos). */
+export async function exportarRespaldoBinario(mode: ExportMode = 'compact'): Promise<StatsRespaldo> {
+  const { zipped, stats } = await buildRespaldoBinario(mode);
   const blob = new Blob([zipped], { type: 'application/zip' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -603,6 +643,7 @@ export async function exportarRespaldoBinario(mode: ExportMode = 'compact'): Pro
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
   try { localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString()); } catch { /* indicador informativo */ }
+  return stats;
 }
 
 /** Clave localStorage con la fecha ISO del último respaldo descargado

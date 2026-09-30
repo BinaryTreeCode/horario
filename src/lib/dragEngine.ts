@@ -94,7 +94,14 @@ const EDGE_SPEED = 12;       // px por frame
 
 function safe(fn: () => void) {
   try {
-    fn();
+    const r = fn();
+    // Los hooks onDrop son async: un rechazo (BD ocupada, fila huérfana tras
+    // un import…) era una promesa rechazada que NADIE recogía → el gesto
+    // quedaba a medio cerrar (tarjeta fantasma pegada, vista "congelada":
+    // "el drag and drop se rompe y no me deja avanzar"). Se captura aquí.
+    if (r && typeof (r as Promise<void>).catch === 'function') {
+      (r as Promise<void>).catch(err => console.error('[drag-engine] hook async error', err));
+    }
   } catch (err) {
     console.error('[drag-engine] hook error', err);
   }
