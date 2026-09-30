@@ -755,9 +755,13 @@
    *  null = sin gesto/no cruza umbral/borde del arreglo; si decide, devuelve
    *  la acción y el día afectado. Regla bidireccional: el asa der arrastrada
    *  HACIA LA DERECHA o la izq HACIA LA IZQUIERDA apuntan al vecino externo
-   *  (gana si no lo tiene / retira el día actual si el vecino ya lo tiene);
-   *  el asa arrastrada HACIA ADENTRO (der← / izq→) RETIRA el día actual
-   *  directamente — "devolverse" con el mismo largador. */
+   *  y GANAN el día si la actividad no lo tiene; el asa arrastrada HACIA
+   *  ADENTRO (der← / izq→) RETIRA el día actual — "devolverse" con el mismo
+   *  largador. Si el vecino YA tiene la actividad (el bloque continúa
+   *  horizontalmente), el gesto no hace NADA: el límite para estirar hacia
+   *  ese lado es el borde del bloque (su último/primer día), no un día
+   *  intermedio — el mismo largador de una columna del medio no puede ni
+   *  estirar ni retirar mirando hacia el bloque que ya sigue. */
   function resolverHResize(m: WeekHResizeMeta, clientX: number): { accion: 'ganar' | 'retirar'; diaAfectado: number; diaOrigen: number } | null {
     const act = activities.find(a => a.id === m.activityId);
     if (!act) return null;
@@ -776,14 +780,7 @@
     }
     const diaVecino = m.day + dirAsa;
     if (diaVecino < 0 || diaVecino > 6) return null;
-    const yaLoTiene = act.daysOfWeek.includes(diaVecino);
-    if (yaLoTiene) {
-      // El vecino ya lo tiene → el gesto retira el día de origen (devolución
-      // por estirar "de vuelta": trabajo lun..dom, asa izq del domingo hacia
-      // sábado → deja de estar el domingo).
-      if (act.daysOfWeek.length <= 1) return null;
-      return { accion: 'retirar', diaAfectado: m.day, diaOrigen: m.day };
-    }
+    if (act.daysOfWeek.includes(diaVecino)) return null; // el bloque ya sigue hacia allá: nada que hacer
     return { accion: 'ganar', diaAfectado: diaVecino, diaOrigen: m.day };
   }
 
