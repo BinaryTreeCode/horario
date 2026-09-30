@@ -680,6 +680,7 @@
     lado: 'izq' | 'der';    // asa agarrada
     startX: number;         // clientX inicial
     ganado: boolean;        // ya se cruzó el borde (commit 1 vez)
+    activityId: string;     // copia local: resolverHResize no ve t.activityId
   }
 
   const weekResizeHooks: DragHooks = {
@@ -743,39 +744,78 @@
   }
 
   // ── Resize horizontal: asas laterales (ganar/perder el día vecino) ──
+  // ── Preview del hResize: qué hará el gesto si se suelta ahora ──
+  // Activo = se cruzó el umbral (media columna). 'haciaFuera' = el asa se
+  // aleja de la tarjeta (gana/retira el vecino, según quién lo tenga);
+  // 'haciaDentro' = se dirige a la propia tarjeta (retira el día actual).
+  // La vista pinta la columna afectada y el rótulo con esta info.
+  let hresPreview = $state<{ accion: 'ganar' | 'retirar'; diaAfectado: number; x: number; y: number } | null>(null);
+
+  /** Resuelve qué haría el gesto (compartido por preview y commit):
+   *  null = sin gesto/no cruza umbral/borde del arreglo; si decide, devuelve
+   *  la acción y el día afectado. Regla bidireccional: el asa der arrastrada
+   *  HACIA LA DERECHA o la izq HACIA LA IZQUIERDA apuntan al vecino externo
+   *  (gana si no lo tiene / retira el día actual si el vecino ya lo tiene);
+   *  el asa arrastrada HACIA ADENTRO (der← / izq→) RETIRA el día actual
+   *  directamente — "devolverse" con el mismo largador. */
+  function resolverHResize(m: WeekHResizeMeta, clientX: number): { accion: 'ganar' | 'retirar'; diaAfectado: number; diaOrigen: number } | null {
+    const act = activities.find(a => a.id === m.activityId);
+    if (!act) return null;
+    const cols = [...document.querySelectorAll('.day-column')];
+    const colAncho = cols[m.day]?.getBoundingClientRect().width ?? 0;
+    if (colAncho <= 0) return null;
+    const delta = clientX - m.startX;
+    const cruzo = Math.abs(delta) > colAncho * 0.5; // umbral: media columna
+    if (!cruzo) return null;
+    const dirAsa = m.lado === 'der' ? 1 : -1;      // hacia afuera
+    const haciaDentro = Math.sign(delta) === -dirAsa; // arrastre opuesto al lado del asa
+    if (haciaDentro) {
+      // Devolverse: retirar el día actual (mismo largador, dirección interna).
+      if (act.daysOfWeek.length <= 1) return null; // retirar el único día no se ofrece
+      return { accion: 'retirar', diaAfectado: m.day, diaOrigen: m.day };
+    }
+    const diaVecino = m.day + dirAsa;
+    if (diaVecino < 0 || diaVecino > 6) return null;
+    const yaLoTiene = act.daysOfWeek.includes(diaVecino);
+    if (yaLoTiene) {
+      // El vecino ya lo tiene → el gesto retira el día de origen (devolución
+      // por estirar "de vuelta": trabajo lun..dom, asa izq del domingo hacia
+      // sábado → deja de estar el domingo).
+      if (act.daysOfWeek.length <= 1) return null;
+      return { accion: 'retirar', diaAfectado: m.day, diaOrigen: m.day };
+    }
+    return { accion: 'ganar', diaAfectado: diaVecino, diaOrigen: m.day };
+  }
+
   const hResizeHooks: DragHooks = {
+    onActivate(t) {
+      draggedActivityId = t.activityId;
+      hresPreview = null;
+    },
+    onMove(t, clientX, _y) {
+      const m = t.meta as WeekHResizeMeta;
+      const r = resolverHResize(m, clientX);
+      hresPreview = r ? { accion: r.accion, diaAfectado: r.diaAfectado, x: clientX, y: _y } : null;
+    },
     async onDrop(t, clientX) {
       const m = t.meta as WeekHResizeMeta;
       const act = activities.find(a => a.id === t.activityId);
+      hresPreview = null;
       if (!act) return;
-      // ¿Cruzó el borde de columna? Calcular el día destino según el asa y el delta:
-      const cols = [...document.querySelectorAll('.day-column')];
-      const colAncho = cols[m.day]?.getBoundingClientRect().width ?? 0;
-      const delta = clientX - m.startX;
-      const cruzo = Math.abs(delta) > colAncho * 0.5; // umbral: media columna
-      if (!cruzo) return; // jiggle: nada se escribe
-      const dir = m.lado === 'der' ? 1 : -1;
-      const diaVecino = m.day + dir;
-      if (diaVecino < 0 || diaVecino > 6) return;
-      const yaLoTiene = act.daysOfWeek.includes(diaVecino);
-      // Devolución: estirar hacia un día que YA tiene la actividad RETIRA el
-      // día de origen (ej: trabajo activo lun..dom, asa izquierda del domingo
-      // hacia sábado → deja de estar el domingo). Se requiere conservar ≥1 día.
-      if (yaLoTiene) {
-        if (act.daysOfWeek.length <= 1) {
-          toastErrRepetido(`hres:${act.id}`, '⛔ Debe quedar al menos un día');
-          return;
-        }
-        const newDays = act.daysOfWeek.filter(d => d !== m.day);
+      const r = resolverHResize(m, clientX);
+      if (!r) return; // jiggle / borde del arreglo / único día: nada se escribe
+      if (r.accion === 'retirar') {
+        const newDays = act.daysOfWeek.filter(d => d !== r.diaOrigen);
         // commitWeeklyTimes compara por contenido y omite filas no-op; el
         // cambio de días vía daysChange fuerza la escritura del único cambio.
         const times = new Map<string, { start: number; end: number }>();
         times.set(act.id!, { start: parseTime(act.startTime), end: parseTime(act.endTime) });
-        await commitWeeklyTimes(times, `${act.name}: dejar ${days[m.day]}`, { id: act.id!, days: newDays });
-        toastOk(tNow('toast.dayRemoved', { dia: days[m.day] }));
+        await commitWeeklyTimes(times, `${act.name}: dejar ${days[r.diaOrigen]}`, { id: act.id!, days: newDays });
+        toastOk(tNow('toast.dayRemoved', { dia: days[r.diaOrigen] }));
         return;
       }
-      // Ganancia: el vecino no tiene la actividad → agregarel día.
+      // Ganancia: el vecino no tiene la actividad → agregar el día.
+      const diaVecino = r.diaAfectado;
       const newDays = [...act.daysOfWeek, diaVecino].sort((a, b) => a - b);
       // Validar el día ganado: ¿cabe el bloque (cascada con empuje)?
       const dur = parseTime(act.endTime) - parseTime(act.startTime);
@@ -797,6 +837,10 @@
       for (const s of res.slots) times.set(s.id, { start: s.start, end: s.end });
       await commitWeeklyTimes(times, `${act.name} → ${days[diaVecino]}`, { id: act.id!, days: newDays });
       toastOk(tNow('toast.dayExtended', { dia: days[diaVecino] }));
+    },
+    onCancel() {
+      hresPreview = null;
+      draggedActivityId = null;
     }
   };
 
@@ -805,7 +849,7 @@
     e.preventDefault();
     engine.beginImmediate(
       e,
-      { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { day: dayIndex, lado, startX: e.clientX, ganado: false } satisfies WeekHResizeMeta },
+      { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { day: dayIndex, lado, startX: e.clientX, ganado: false, activityId: activity.id! } satisfies WeekHResizeMeta },
       hResizeHooks,
       { ghost: false }
     );
@@ -972,7 +1016,9 @@
   <div class="days-columns">
     {#each days as day, i}
       {@const dayData = getDayActivitiesWithLayout(i, dropPreview?.day === i ? dropPreview.slots : undefined, draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i) ? draggedActivityId : null)}
-      <div class="day-column" class:col-dragging={draggedActivityId !== null} class:col-hoy={i === hoyIdx}>
+      <div class="day-column" class:col-dragging={draggedActivityId !== null} class:col-hoy={i === hoyIdx}
+        class:col-hres-ganar={hresPreview?.accion === 'ganar' && hresPreview.diaAfectado === i}
+        class:col-hres-retirar={hresPreview?.accion === 'retirar' && hresPreview.diaAfectado === i}>
         <!-- Nombre completo SIEMPRE accesible: en columna angosta el header muestra
              la abreviatura (Mié/Sáb) y el title lleva el nombre entero. Sin
              nombres cortados a medias jamás. -->
@@ -1079,6 +1125,18 @@
       style="left: {dragGhostXY.x - grabDX}px; top: {dragGhostXY.y - grabDY}px; width: {grabW}px; height: {grabH}px; --bg-color: {ghostColor}">
       <div class="df-title"><span>{ghostActivity.name}</span></div>
       <span class="df-hora">{dragGhostHora}</span>
+    </div>
+  {/if}
+
+  {#if hresPreview && ghostActivity}
+    <!-- Rótulo del hResize: qué pasaría si se suelta AHORA. Igual que
+         .drag-float: portal + fixed para escapar de overflow y scroll.
+         Anclado al pointer del motor (posición viva en cada gesto). -->
+    <div class="hres-float" use:portal class:hres-ganar={hresPreview.accion === 'ganar'} class:hres-retirar={hresPreview.accion === 'retirar'} aria-hidden="true"
+      style="left: {hresPreview.x}px; top: {hresPreview.y}px">
+      <span class="hf-senial" aria-hidden="true">{hresPreview.accion === 'ganar' ? '+' : '−'}</span>
+      {days[hresPreview.diaAfectado]}
+      <span class="hf-act">{ghostActivity.name}</span>
     </div>
   {/if}
 
@@ -1349,6 +1407,54 @@
      outline no ocupa espacio de layout). */
   .day-column.col-hoy .slots-grid {
     box-shadow: inset 2px 0 0 rgba(74, 124, 68, 0.25), inset -2px 0 0 rgba(74, 124, 68, 0.25);
+  }
+
+  /* ── Preview del hResize (asas laterales) ──
+     Mientras el gesto cruza el umbral, la columna afectada se marca ANTES
+     de soltar: verde = la actividad ganaría este día; rojo tenue = este día
+     se retiraría. Espejo del feedback del drag vertical (drop-preview). */
+  .day-column.col-hres-ganar .slots-grid {
+    box-shadow: inset 0 0 0 3px rgba(74, 124, 68, 0.55);
+    background: rgba(74, 124, 68, 0.06);
+  }
+  .day-column.col-hres-retirar .slots-grid {
+    box-shadow: inset 0 0 0 3px rgba(224, 69, 58, 0.5);
+    background: rgba(224, 69, 58, 0.06);
+  }
+
+  /* Rótulo flotante del hResize: acción + día + actividad, anclado al puntero.
+     Portal + fixed: le afectan ni el overflow del panel ni el scroll. */
+  .hres-float {
+    position: fixed;
+    z-index: 1000;
+    pointer-events: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--color-green-dark, #2f6b2f);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18), 0 12px 28px rgba(0, 0, 0, 0.32);
+    transform: translate(14px, -50%);
+    will-change: transform, left, top;
+    white-space: nowrap;
+    max-width: 70vw;
+  }
+  .hres-float .hf-senial {
+    font-size: 0.9rem;
+    line-height: 1;
+  }
+  .hres-float .hf-act {
+    font-weight: 600;
+    opacity: 0.85;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hres-float.hres-retirar {
+    background: #e0453a;
   }
 
   .day-temp-badge {
