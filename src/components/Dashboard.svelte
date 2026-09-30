@@ -95,34 +95,42 @@
   let DonutChartsComp: typeof import('./DonutCharts.svelte').default | null = $state(null);
   let DailyViewComp: typeof import('./DailyView.svelte').default | null = $state(null);
 
-  let loadPromiseSettings: Promise<void> | null = $state(null);
-  let loadPromiseDonut: Promise<void> | null = $state(null);
-  let loadPromiseActivity: Promise<void> | null = $state(null);
-  let loadPromiseDaily: Promise<void> | null = $state(null);
+  // Holders de las promesas de carga (compatibles con el helper cargarChunk).
+  const loadSettings = { v: null as Promise<void> | null };
+  const loadDonut = { v: null as Promise<void> | null };
+  const loadActivity = { v: null as Promise<void> | null };
+  const loadDaily = { v: null as Promise<void> | null };
 
+  /** Carga de chunks lazy con REINTENTO: si la promesa se cachea rechazada
+   *  (red intermitente, deploy de Vercel a mitad de navegación), el usuario
+   *  quedaba clavado en el esqueleto para siempre: "el día no carga al
+   *  primer intento" y había que recargar la página. Al fallar, la promesa
+   *  cacheada se descarta (variable = null) y el próximo click (o la
+   *  precarga idle) vuelve a intentar. */
+  function cargarChunk(
+    holder: { v: Promise<void> | null },
+    hacer: () => Promise<void>
+  ): Promise<void> {
+    if (holder.v) return holder.v;
+    const p = hacer().catch((err) => {
+      console.error('[dashboard] carga lazy falló, se permite reintento', err);
+      if (holder.v === p) holder.v = null; // descartar SOLO si sigue siendo la nuestra
+      throw err; // propagar a {#await} si hay
+    });
+    holder.v = p;
+    return p;
+  }
   function loadSettingsPanel() {
-    loadPromiseSettings ??= (async () => {
-      SettingsPanelComp = (await import('./SettingsPanel.svelte')).default;
-    })();
-    return loadPromiseSettings;
+    return cargarChunk(loadSettings, () => import('./SettingsPanel.svelte').then(m => { SettingsPanelComp = m.default; }));
   }
   function loadActivityModal() {
-    loadPromiseActivity ??= (async () => {
-      ActivityModalComp = (await import('./ActivityModal.svelte')).default;
-    })();
-    return loadPromiseActivity;
+    return cargarChunk(loadActivity, () => import('./ActivityModal.svelte').then(m => { ActivityModalComp = m.default; }));
   }
   function loadDonutCharts() {
-    loadPromiseDonut ??= (async () => {
-      DonutChartsComp = (await import('./DonutCharts.svelte')).default;
-    })();
-    return loadPromiseDonut;
+    return cargarChunk(loadDonut, () => import('./DonutCharts.svelte').then(m => { DonutChartsComp = m.default; }));
   }
   function loadDailyView() {
-    loadPromiseDaily ??= (async () => {
-      DailyViewComp = (await import('./DailyView.svelte')).default;
-    })();
-    return loadPromiseDaily;
+    return cargarChunk(loadDaily, () => import('./DailyView.svelte').then(m => { DailyViewComp = m.default; }));
   }
   function openSettings() {
     showSettings = true;
@@ -590,7 +598,7 @@
 
   <!-- Modals -->
   {#if showSettings}
-    {#await loadPromiseSettings ?? Promise.resolve()}
+    {#await loadSettingsPanel()}
       <div class="modal-loading" role="status">Cargando ajustes…</div>
     {:then}
       {#if SettingsPanelComp}
@@ -604,7 +612,7 @@
   {/if}
 
   {#if showActivityModal}
-    {#await loadPromiseActivity ?? Promise.resolve()}
+    {#await loadActivityModal()}
       <div class="modal-loading" role="status">Cargando…</div>
     {:then}
       {#if ActivityModalComp}
