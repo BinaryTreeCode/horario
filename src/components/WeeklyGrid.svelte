@@ -755,20 +755,22 @@
   // aleja de la tarjeta (gana/retira el vecino, según quién lo tenga);
   // 'haciaDentro' = se dirige a la propia tarjeta (retira el día actual).
   // La vista pinta la columna afectada y el rótulo con esta info.
-  let hresPreview = $state<{ accion: 'ganar' | 'retirar'; diaAfectado: number; x: number; y: number } | null>(null);
+  let hresPreview = $state<{ accion: 'ganar' | 'retirar'; dias: number[]; x: number; y: number } | null>(null);
 
   /** Resuelve qué haría el gesto (compartido por preview y commit):
    *  null = sin gesto/no cruza umbral/borde del arreglo; si decide, devuelve
-   *  la acción y el día afectado. Regla bidireccional: el asa der arrastrada
-   *  HACIA LA DERECHA o la izq HACIA LA IZQUIERDA apuntan al vecino externo
-   *  y GANAN el día si la actividad no lo tiene; el asa arrastrada HACIA
-   *  ADENTRO (der← / izq→) RETIRA el día actual — "devolverse" con el mismo
-   *  largador. Si el vecino YA tiene la actividad (el bloque continúa
-   *  horizontalmente), el gesto no hace NADA: el límite para estirar hacia
-   *  ese lado es el borde del bloque (su último/primer día), no un día
-   *  intermedio — el mismo largador de una columna del medio no puede ni
-   *  estirar ni retirar mirando hacia el bloque que ya sigue. */
-  function resolverHResize(m: WeekHResizeMeta, clientX: number): { accion: 'ganar' | 'retirar'; diaAfectado: number; diaOrigen: number } | null {
+   *  la acción y los días afectados. Reglas:
+   *  - Asa hacia AFUERA a un día que NO tiene la actividad: GANA ese día.
+   *  - Asa hacia ADENTRO (hacia el bloque): BARRIDO de retiro. El dedo dice
+   *    HASTA dónde: "de Domingo a Jueves" elimina los días CRUZADOS
+   *    (Sábado y Viernes) — el día bajo el dedo queda como nuevo borde y el
+   *    día del asa se conserva. Menos de una columna cruzada = el gesto
+   *    clásico de siempre: retirar SOLO el día del asa. Límites: solo se
+   *    retiran días que la actividad tiene, y jamás queda sin ningún día.
+   *  - El vecino exterior YA tiene la actividad: hacia afuera no hay gesto,
+   *    pero el asa sigue visible porque el barrido hacia adentro sí existe
+   *    (asaLateralUtil). */
+  function resolverHResize(m: WeekHResizeMeta, clientX: number): { accion: 'ganar' | 'retirar'; dias: number[]; diaOrigen: number } | null {
     const act = activities.find(a => a.id === m.activityId);
     if (!act) return null;
     const cols = [...document.querySelectorAll('.day-column')];
@@ -780,14 +782,36 @@
     const dirAsa = m.lado === 'der' ? 1 : -1;      // hacia afuera
     const haciaDentro = Math.sign(delta) === -dirAsa; // arrastre opuesto al lado del asa
     if (haciaDentro) {
-      // Devolverse: retirar el día actual (mismo largador, dirección interna).
+      // Devolverse: BARRIDO de retiro hacia adentro.
       if (act.daysOfWeek.length <= 1) return null; // retirar el único día no se ofrece
-      return { accion: 'retirar', diaAfectado: m.day, diaOrigen: m.day };
+      const dirIn = -dirAsa;
+      const set = new Set(act.daysOfWeek);
+      const n = Math.floor(Math.abs(delta) / colAncho); // columnas COMPLETAS cruzadas
+      let dias: number[] = [];
+      if (n === 0) {
+        // Umbral de media columna (dedo aún dentro de la primera columna):
+        // gesto clásico — retirar SOLO el día del asa.
+        dias = [m.day];
+      } else {
+        // Barrido: los días cruzados entre el asa y el dedo (EXTREMOS
+        // EXCLUSIVOS): el día bajo el dedo queda como nuevo borde y el día
+        // del asa se conserva. Solo días que la actividad tiene.
+        for (let k = 1; k <= n; k++) {
+          const d = m.day + k * dirIn;
+          if (d < 0 || d > 6) break;
+          if (set.has(d)) dias.push(d);
+        }
+        if (dias.length === 0) dias = [m.day]; // corrida rota: vale el gesto clásico
+      }
+      // Jamás deja el bloque sin días.
+      const maxQuitar = act.daysOfWeek.length - 1;
+      if (dias.length > maxQuitar) dias = dias.slice(0, maxQuitar);
+      return { accion: 'retirar', dias, diaOrigen: m.day };
     }
     const diaVecino = m.day + dirAsa;
     if (diaVecino < 0 || diaVecino > 6) return null;
-    if (act.daysOfWeek.includes(diaVecino)) return null; // el bloque ya sigue hacia allá: nada que hacer
-    return { accion: 'ganar', diaAfectado: diaVecino, diaOrigen: m.day };
+    if (act.daysOfWeek.includes(diaVecino)) return null; // el bloque ya sigue hacia allá: sin gesto hacia afuera
+    return { accion: 'ganar', dias: [diaVecino], diaOrigen: m.day };
   }
 
   const hResizeHooks: DragHooks = {
@@ -798,7 +822,7 @@
     onMove(t, clientX, _y) {
       const m = t.meta as WeekHResizeMeta;
       const r = resolverHResize(m, clientX);
-      hresPreview = r ? { accion: r.accion, diaAfectado: r.diaAfectado, x: clientX, y: _y } : null;
+      hresPreview = r ? { accion: r.accion, dias: r.dias, x: clientX, y: _y } : null;
     },
     async onDrop(t, clientX) {
       const m = t.meta as WeekHResizeMeta;
@@ -808,17 +832,20 @@
       const r = resolverHResize(m, clientX);
       if (!r) return; // jiggle / borde del arreglo / único día: nada se escribe
       if (r.accion === 'retirar') {
-        const newDays = act.daysOfWeek.filter(d => d !== r.diaOrigen);
+        const quitados = r.dias;
+        const newDays = act.daysOfWeek.filter(d => !quitados.includes(d));
         // commitWeeklyTimes compara por contenido y omite filas no-op; el
         // cambio de días vía daysChange fuerza la escritura del único cambio.
         const times = new Map<string, { start: number; end: number }>();
         times.set(act.id!, { start: parseTime(act.startTime), end: parseTime(act.endTime) });
-        await commitWeeklyTimes(times, `${act.name}: dejar ${days[r.diaOrigen]}`, { id: act.id!, days: newDays });
-        toastOk(tNow('toast.dayRemoved', { dia: days[r.diaOrigen] }));
+        await commitWeeklyTimes(times, `${act.name}: dejar ${quitados.map(d => days[d]).join(', ')}`, { id: act.id!, days: newDays });
+        toastOk(quitados.length === 1
+          ? tNow('toast.dayRemoved', { dia: days[quitados[0]] })
+          : tNow('toast.daysRemoved', { dias: quitados.map(d => days[d]).join(', ') }));
         return;
       }
       // Ganancia: el vecino no tiene la actividad → agregar el día.
-      const diaVecino = r.diaAfectado;
+      const diaVecino = r.dias[0];
       const newDays = [...act.daysOfWeek, diaVecino].sort((a, b) => a - b);
       // Validar el día ganado: ¿cabe el bloque (cascada con empuje)?
       const dur = parseTime(act.endTime) - parseTime(act.startTime);
@@ -868,18 +895,17 @@
   // Se recalcula con activities: al cambiar el día o los datos, reaparecen.
   /**
    * ¿La asa lateral de ESTA tarjeta (columna concreta i) ofrece algo?
-   * Regla del usuario: si el día vecino exterior YA tiene la actividad (el
-   * bloque continúa hacia ese lado), la asa NO se muestra — el gesto hacia
-   * afuera sería no-op y una asa muerta en los límites internos de un bloque
-   * continuo solo confunde. Retirar el día sigue disponible en los BORDES
-   * del bloque (asa exterior arrastrada hacia adentro). En el borde del
-   * arreglo (izq de Lunes / der de Domingo) la asa solo existe para retirar.
+   * Hacia afuera: ganar el vecino si no lo tiene. Hacia adentro: SIEMPRE
+   * hay gesto cuando puedeRetirar — retirar el día del asa (media columna)
+   * o el BARRIDO que elimina los días cruzados (nuevo). Por eso el asa se
+   * muestra aunque el vecino exterior ya tenga la actividad: el barrido la
+   * hace viva (antes era un asa muerta y se ocultaba).
    */
   function asaLateralUtil(act: Activity, i: number, lado: 'izq' | 'der'): boolean {
     const puedeRetirar = act.daysOfWeek.length > 1;
     const vecino = lado === 'der' ? i + 1 : i - 1;
-    if (vecino < 0 || vecino > 6) return puedeRetirar; // borde del arreglo: solo retirar
-    return !act.daysOfWeek.includes(vecino); // vecino ya lo tiene → asa oculta
+    const ganaVecino = vecino >= 0 && vecino <= 6 && !act.daysOfWeek.includes(vecino);
+    return ganaVecino || puedeRetirar;
   }
   const asasPosibles = $derived.by(() => {
     const mapa = new Map<string, { arriba: boolean; abajo: boolean; izq: boolean; der: boolean; retirar: boolean }>();
@@ -1079,8 +1105,8 @@
     {#each days as day, i}
       {@const dayData = getDayActivitiesWithLayout(i, dropPreview?.day === i ? dropPreview.slots : undefined, draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i) ? draggedActivityId : null)}
       <div class="day-column" class:col-dragging={draggedActivityId !== null} class:col-hoy={i === hoyIdx}
-        class:col-hres-ganar={hresPreview?.accion === 'ganar' && hresPreview.diaAfectado === i}
-        class:col-hres-retirar={hresPreview?.accion === 'retirar' && hresPreview.diaAfectado === i}>
+        class:col-hres-ganar={hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i)}
+        class:col-hres-retirar={hresPreview?.accion === 'retirar' && hresPreview.dias.includes(i)}>
         <!-- Nombre completo SIEMPRE accesible: en columna angosta el header muestra
              la abreviatura (Mié/Sáb) y el title lleva el nombre entero. Sin
              nombres cortados a medias jamás. -->
@@ -1225,7 +1251,7 @@
     <div class="hres-float" use:portal class:hres-ganar={hresPreview.accion === 'ganar'} class:hres-retirar={hresPreview.accion === 'retirar'} aria-hidden="true"
       style="left: {hresPreview.x}px; top: {hresPreview.y}px">
       <span class="hf-senial" aria-hidden="true">{hresPreview.accion === 'ganar' ? '+' : '−'}</span>
-      {days[hresPreview.diaAfectado]}
+      {hresPreview.dias.map(d => days[d]).join(', ')}
       <span class="hf-act">{ghostActivity.name}</span>
     </div>
   {/if}
