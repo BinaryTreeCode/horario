@@ -745,7 +745,7 @@
 
 <ConfirmDialog
   bind:open={confirmImport}
-  title="¿Importar este archivo?"
+  title={$t('settings.importTitle')}
   message={pendingImport
     ? $t('settings.importMsg', {
         summary: pendingImport.summary,
