@@ -1513,16 +1513,20 @@
 
   .activity-image-thumb {
     flex-shrink: 0;
-    border: none;
+    border: 2px solid rgba(255, 255, 255, 0.9);
     padding: 0;
     background: none;
     cursor: zoom-in;
-    border-radius: 6px;
+    border-radius: 50%;
     overflow: hidden;
-    width: 30px;
-    height: 30px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    width: 24px;
+    height: 24px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     transition: transform 0.15s;
+  }
+  .activity-image-thumb:focus-visible {
+    outline: 2px solid var(--color-green-dark, #2f6b2f);
+    outline-offset: 2px;
   }
 
   .activity-image-thumb:hover {

@@ -1066,16 +1066,19 @@
               <div class="activity-title">
                 <span>{activity.name}</span>
                 {#if activity.image}
-                  <span
-                    class="grid-steps-icon grid-image-icon"
-                    role="button"
-                    tabindex="0"
+                  <!-- Miniatura REAL de la imagen (igual que la vista Día):
+                       el icono genérico no decía qué imagen era; la foto misma
+                       sí, y a 18px no roba espacio a tarjetas cortas. -->
+                  <button
+                    type="button"
+                    class="grid-image-thumb"
+                    aria-label={$t('dayView.viewImage', { name: activity.name })}
                     title={$t('menu.viewImage')}
                     onclick={(e) => { e.stopPropagation(); viewingImageActivity = activity; }}
-                    onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); viewingImageActivity = activity; } }}
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); viewingImageActivity = activity; } }}
                   >
-                    <ImageIcon size={10} />
-                  </span>
+                    <img src={activity.image} alt="" loading="lazy" />
+                  </button>
                 {/if}
                 {#if activity.steps && activity.steps.length > 0}
                   <span class="grid-steps-icon">
@@ -1840,14 +1843,34 @@
     flex-shrink: 0;
   }
 
-  .grid-image-icon {
-    cursor: pointer;
-    transition: all 0.15s;
+  /* Miniatura de imagen de la tarjeta (Semana): círculo de la foto real con
+     anillo blanco para destacar sobre cualquier color de categoría. Mismo
+     concepto que .activity-image-thumb de la vista Día. */
+  .grid-image-thumb {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    overflow: hidden;
+    padding: 0;
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    cursor: zoom-in;
+    background: none;
+    transition: transform 0.15s;
   }
-
-  .grid-image-icon:hover {
-    background: rgba(255, 255, 255, 0.5);
-    transform: scale(1.1);
+  .grid-image-thumb:hover {
+    transform: scale(1.2);
+  }
+  .grid-image-thumb:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+  }
+  .grid-image-thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   .custom-context-menu {
