@@ -8,6 +8,7 @@
   import type { Category } from '../lib/types';
   import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck, Languages } from '@lucide/svelte';
   import { idioma, cambiarIdioma, t, IDIOMAS_DISPONIBLES } from '../lib/i18n';
+  import { formatTime as horaReloj } from '../lib/stores';
   import { dndzone } from 'svelte-dnd-action';
   import { flip } from 'svelte/animate';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -162,19 +163,22 @@
     localCategories = e.detail.items.map((item: any, index: number) => ({ ...item, order: index, updatedAt: Date.now() }));
   }
 
-  // Reactive derived options
+  /** Opciones cada 30 min: el slider de asas puede dejar valores intermedios
+   *  (paso 0.25h) y el select SIEMPRE debe poder mostrar la hora actual. */
   const startOptions = $derived(
-    Array.from({ length: 24 }, (_, i) => ({
-      value: i,
-      label: `${i % 12 || 12}:00 ${i < 12 ? 'AM' : 'PM'} ${i === 12 ? '(Mediodía)' : ''}`
-    }))
+    Array.from({ length: 48 }, (_, i) => {
+      const v = i * 0.5;
+      const h = Math.floor(v), m = v % 1 ? '30' : '00';
+      return { value: v, label: `${h % 12 || 12}:${m} ${h < 12 ? 'AM' : 'PM'}${h === 12 ? ' (Mediodía)' : ''}` };
+    })
   );
 
   const endOptions = $derived(
-    Array.from({ length: 25 }, (_, i) => ({
-      value: i,
-      label: `${i % 12 || 12}:00 ${i < 12 ? 'AM' : (i === 24 ? 'AM' : 'PM')} ${i === 12 ? '(Mediodía)' : (i === 24 ? '(Medianoche)' : '')}`
-    })).filter(opt => opt.value > startHour)
+    Array.from({ length: 49 }, (_, i) => {
+      const v = i * 0.5;
+      const h = Math.floor(v), m = v % 1 ? '30' : '00';
+      return { value: v, label: `${h % 12 || 12}:${m} ${h < 12 ? 'AM' : 'PM'}${h === 12 ? ' (Mediodía)' : h === 24 ? ' (Medianoche)' : ''}` };
+    }).filter(opt => opt.value > startHour)
   );
 
   // Sync with props once they are available
@@ -497,7 +501,36 @@
       toastErr(tNow('settings.importError', { msg: err?.message || tNow('settings.networkError') }));
     }
   }
+
+  /**
+   * Barra de rango ARRASTRABLE (pedido del usuario): dos asas directamente
+   * sobre la barra verde. Dos <input type="range"> nativos superpuestos:
+   * teclado (flechas, Home/End), táctil y lector de pantalla gratis — sin
+   * reinventar el gesto. Los selects de arriba quedan sincronizados (dos
+   * caminos al mismo estado, el que toque el usuario).
+   */
+  const PASO_SLIDER = 0.25; // 15 min
+  let asaActiva = $state<'inicio' | 'fin' | null>(null);
+
+  function alArrastrarInicio(e: Event) {
+    const v = Number((e.currentTarget as HTMLInputElement).value);
+    // Empujar el fin SOLO si el inicio lo alcanza (mínimo 1h de rango).
+    if (v > endHour - 1) endHour = Math.min(24, v + 1);
+    startHour = Math.min(v, endHour - 1);
+  }
+
+  function alArrastrarFin(e: Event) {
+    const v = Number((e.currentTarget as HTMLInputElement).value);
+    // Empujar el inicio SOLO si el fin lo alcanza (mínimo 1h de rango).
+    if (v < startHour + 1) startHour = Math.max(0, v - 1);
+    endHour = Math.max(v, startHour + 1);
+  }
 </script>
+
+<svelte:window
+  onpointerup={() => { asaActiva = null; }}
+  onpointercancel={() => { asaActiva = null; }}
+/>
 
 <div class="modal-overlay" onclick={onClose}>
   <div class="modal-content glass-panel" tabindex="-1" bind:this={panelEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
@@ -592,8 +625,41 @@
           </div>
           
           <div class="range-visual">
-            <div class="range-bar-total">
-              <div class="range-bar-active" style="left: {(startHour / 24) * 100}%; width: {((endHour - startHour) / 24) * 100}%"></div>
+            <div class="range-slider">
+              <div class="range-bar-total" class:arrastrando={asaActiva !== null}>
+                <div class="range-bar-active" style="left: {(startHour / 24) * 100}%; width: {((endHour - startHour) / 24) * 100}%"></div>
+              </div>
+              <!-- Asas superpuestas: cada input cubre la barra completa; el
+                   z-index dinámico hace pasar arriba al asa cercana al cruce. -->
+              <input
+                type="range"
+                class="range-handle asa-inicio"
+                min={0}
+                max={24}
+                step={PASO_SLIDER}
+                value={startHour}
+                aria-label={$t('settings.startsAt')}
+                aria-valuetext={horaReloj(startHour)}
+                oninput={alArrastrarInicio}
+                onpointerdown={() => { asaActiva = 'inicio'; }}
+                style="z-index: {startHour > (startHour + endHour) / 2 - 1 ? 4 : 5}"
+              />
+              <input
+                type="range"
+                class="range-handle asa-fin"
+                min={0}
+                max={24}
+                step={PASO_SLIDER}
+                value={endHour}
+                aria-label={$t('settings.endsAt')}
+                aria-valuetext={horaReloj(endHour)}
+                oninput={alArrastrarFin}
+                onpointerdown={() => { asaActiva = 'fin'; }}
+                style="z-index: {startHour > (startHour + endHour) / 2 - 1 ? 5 : 4}"
+              />
+              <div class="range-burbuja" class:visible={asaActiva !== null} style="left: {(asaActiva === 'fin' ? endHour : startHour) / 24 * 100}%">
+                {horaReloj(asaActiva === 'fin' ? endHour : startHour)}
+              </div>
             </div>
             <div class="range-labels">
               <span>0h</span>
@@ -886,12 +952,112 @@
     margin-top: 0.5rem;
   }
 
+  /* Contenedor del gesto: barra + asas + burbuja comparten anclaje, así el
+     thumb SIEMPRE cae sobre la pista. */
+  .range-slider {
+    position: relative;
+    height: 28px;
+    display: flex;
+    align-items: center;
+  }
+
   .range-bar-total {
     height: 8px;
     background: rgba(0,0,0,0.1);
     border-radius: 4px;
     position: relative;
     overflow: hidden;
+    width: 100%;
+  }
+
+  .range-handle {
+    /* Input crudo invisible: queda SOLO el thumb nativo (asa redonda). */
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 100%;
+    height: 28px;
+    margin: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    pointer-events: none; /* el track no roba el gesto */
+  }
+  .range-handle:focus {
+    outline: none;
+  }
+  /* Pista del navegador declarada: 8px centrada en los 28px del input —
+     sin esto Chromium ancla el thumb a SU track por defecto y el círculo
+     se pinta desalineado de la barra visual. */
+  .range-handle::-webkit-slider-runnable-track {
+    height: 8px;
+    background: transparent;
+  }
+  /* El thumb SÍ recibe el gesto (target táctil ≥28px de alto). */
+  .range-handle::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    pointer-events: auto;
+    width: 22px;
+    height: 22px;
+    margin-top: -7px; /* centra el thumb en el track declarado de 8px */
+    border-radius: 50%;
+    background: var(--color-green-dark, #2f6b2f);
+    border: 3px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    cursor: grab;
+    transition: transform 0.15s;
+  }
+  .range-handle::-moz-range-track {
+    height: 8px;
+    background: transparent;
+  }
+  .range-handle::-moz-range-thumb {
+    pointer-events: auto;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--color-green-dark, #2f6b2f);
+    border: 3px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    cursor: grab;
+  }
+  .range-handle:active::-webkit-slider-thumb {
+    cursor: grabbing;
+    transform: scale(1.15);
+  }
+  .range-handle:focus-visible::-webkit-slider-thumb {
+    outline: 3px solid var(--color-green-dark, #2f6b2f);
+    outline-offset: 2px;
+  }
+  /* Cerca del cruce, la asa que se acerca pasa arriba (elegido en markup). */
+  .asa-inicio { z-index: 5; }
+  .asa-fin { z-index: 4; }
+
+  /* Burbuja de hora durante el arrastre: sobre el asa activa. */
+  .range-burbuja {
+    position: absolute;
+    top: -18px;
+    transform: translateX(-50%);
+    background: var(--color-brown-bark, #4a3728);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 6px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s, left 0.1s linear;
+    white-space: nowrap;
+    z-index: 6;
+  }
+  .range-burbuja.visible {
+    opacity: 1;
+  }
+
+  /* Barra con gesto activo: leve realce de la pista. */
+  .range-bar-total.arrastrando .range-bar-active {
+    filter: brightness(1.08);
   }
 
   .range-bar-active {
