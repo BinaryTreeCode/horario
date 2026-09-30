@@ -933,6 +933,31 @@
   // Lightbox para ver la imagen de la rutina
   let viewingImageActivity = $state<Activity | null>(null);
 
+  // ── Popover de imagen al pasar el mouse (Semana) ──
+  // Hover sobre la miniatura muestra la foto ampliada SIN click; el click
+  // sigue abriendo el lightbox. Portal + fixed: no le afecta el overflow de
+  // la tarjeta/columna. Retraso de entrada para no parpadear al pasar el
+  // mouse de paso; el touch no tiene hover: ahí el gesto sigue siendo tap.
+  let imgPopover = $state<{ activity: Activity; x: number; y: number } | null>(null);
+  let imgPopoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function mostrarImgPopover(e: MouseEvent, activity: Activity) {
+    // Sin hover (táctil) no hay popover: ahí el gesto es el tap → lightbox.
+    if (matchMedia('(hover: none)').matches) return;
+    if (imgPopoverTimer) { clearTimeout(imgPopoverTimer); imgPopoverTimer = null; }
+    // currentTarget muere con el dispatch (null dentro del setTimeout): el
+    // rect se captura AHORA, el timeout solo decide cuándo pintarlo.
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    imgPopoverTimer = setTimeout(() => {
+      imgPopover = { activity, x: r.left + r.width / 2, y: r.top };
+    }, 180);
+  }
+  function ocultarImgPopover(inmediato = false) {
+    if (imgPopoverTimer) { clearTimeout(imgPopoverTimer); imgPopoverTimer = null; }
+    if (inmediato) imgPopover = null;
+    else imgPopoverTimer = setTimeout(() => { imgPopover = null; }, 80);
+  }
+
   const activityHasImage = $derived(
     contextMenu.activityId !== null &&
     !!activities.find(a => a.id === contextMenu.activityId)?.image
@@ -1073,9 +1098,14 @@
                     type="button"
                     class="grid-image-thumb"
                     aria-label={$t('dayView.viewImage', { name: activity.name })}
+                    aria-describedby={imgPopover?.activity.id === activity.id ? 'img-popover' : undefined}
                     title={$t('menu.viewImage')}
-                    onclick={(e) => { e.stopPropagation(); viewingImageActivity = activity; }}
-                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); viewingImageActivity = activity; } }}
+                    onclick={(e) => { e.stopPropagation(); ocultarImgPopover(true); viewingImageActivity = activity; }}
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); ocultarImgPopover(true); viewingImageActivity = activity; } }}
+                    onmouseenter={(e) => mostrarImgPopover(e, activity)}
+                    onmouseleave={() => ocultarImgPopover()}
+                    onfocus={(e) => mostrarImgPopover(e, activity)}
+                    onblur={() => ocultarImgPopover(true)}
                   >
                     <img src={activity.image} alt="" loading="lazy" />
                   </button>
@@ -1131,6 +1161,17 @@
       style="left: {dragGhostXY.x - grabDX}px; top: {dragGhostXY.y - grabDY}px; width: {grabW}px; height: {grabH}px; --bg-color: {ghostColor}">
       <div class="df-title"><span>{ghostActivity.name}</span></div>
       <span class="df-hora">{dragGhostHora}</span>
+    </div>
+  {/if}
+
+  {#if imgPopover}
+    <!-- Popover de imagen (hover/foco sobre la miniatura): foto ampliada sin
+         click. Anclado al centro-superior de la miniatura; portal como los
+         demás overlays (overflow de tarjeta/columna no lo recorta). -->
+    <div class="img-popover" id="img-popover" role="tooltip" use:portal
+      style="left: {imgPopover.x}px; top: {imgPopover.y}px">
+      <img src={imgPopover.activity.image} alt="" />
+      <span class="img-popover-name">{imgPopover.activity.name}</span>
     </div>
   {/if}
 
@@ -1871,6 +1912,45 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  /* Popover de imagen (hover): foto ampliada + nombre, anclada encima de la
+     miniatura. pointer-events none: el mouse puede "salir" hacia él sin que
+     parpadee; desaparece al salir de la miniatura. */
+  .img-popover {
+    position: fixed;
+    z-index: 1000;
+    transform: translate(-50%, calc(-100% - 8px));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 6px;
+    border-radius: 10px;
+    background: white;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.12);
+    pointer-events: none;
+    animation: img-pop-in 0.15s ease;
+  }
+  @keyframes img-pop-in {
+    from { opacity: 0; transform: translate(-50%, calc(-100% - 4px)); }
+    to { opacity: 1; transform: translate(-50%, calc(-100% - 8px)); }
+  }
+  .img-popover img {
+    width: 120px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 6px;
+    display: block;
+  }
+  .img-popover-name {
+    max-width: 124px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--color-brown-bark, #4a3728);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .custom-context-menu {
