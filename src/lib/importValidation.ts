@@ -202,6 +202,12 @@ function decAct(row: unknown, what: string, n: number, warnings: string[], catLi
     return null;
   }
   const [name, start, end, days, catIdx, desc, steps, image] = row;
+  if (isPlaceholderImagen(image)) {
+    // Placeholder binario del .npz que leerRespaldo no pudo reconstruir
+    // (binario ausente = archivo editado o dañado): se informa y la fila
+    // continúa sin imagen (mismo trato que en el formato full).
+    warnings.push(`${what} #${n + 1} "${name}": imagen binaria del respaldo no pudo reconstruirse (archivo editado o dañado). Se guardará sin imagen.`);
+  }
   const act: any = { name, startTime: start, endTime: end, daysOfWeek: days };
   if (typeof catIdx === 'number' && catIdx >= 0 && catList[catIdx]) {
     act.categoryId = catList[catIdx].id;

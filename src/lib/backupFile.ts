@@ -41,9 +41,14 @@ export async function leerRespaldo(file: File): Promise<string> {
     const im = esFila ? a[7] : a?.image;
     if (im && typeof im === 'object' && Number.isInteger(im.i)) {
       const bytes = entries[`${im.i}.bin`];
-      const dataUrl = bytes ? `data:${im.f || 'image/webp'};base64,${aBase64(bytes)}` : undefined;
-      if (esFila) a[7] = dataUrl;
-      else a.image = dataUrl;
+      if (bytes) {
+        const dataUrl = `data:${im.f || 'image/webp'};base64,${aBase64(bytes)}`;
+        if (esFila) a[7] = dataUrl;
+        else a.image = dataUrl;
+      }
+      // Binario ausente: DEJAR el placeholder intacto (no null/undefined —
+      // en JSON se indistinguible de "sin imagen"). El validador lo detecta
+      // (isPlaceholderImagen) y emite el warning con la fila conservada.
     }
   };
   // Formato compacto (acts/ovs) Y full (activities/dayOverrides).
