@@ -1094,14 +1094,14 @@
                     onpointerdown={(e) => startResize(e, activity, i, 'abajo')}
                   ></div>
                 {/if}
-                {#if asasPosibles.get(activity.id!)?.izq}
+                {#if i > 0 && asasPosibles.get(activity.id!)?.izq}
                   <div
                     class="resize-handle hres-izq"
                     aria-hidden="true"
                     onpointerdown={(e) => startHResize(e, activity, i, 'izq')}
                   ></div>
                 {/if}
-                {#if asasPosibles.get(activity.id!)?.der}
+                {#if i < 6 && asasPosibles.get(activity.id!)?.der}
                   <div
                     class="resize-handle hres-der"
                     aria-hidden="true"
