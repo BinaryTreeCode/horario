@@ -139,6 +139,19 @@ function empujarAbajo(arr: BloqueM[], i: number): void {
 const enRango = (arr: BloqueM[], minM: number, maxM: number) =>
   arr.every(b => b.inicio >= minM - EPS && finDe(b) <= maxM + EPS);
 
+/**
+ * Candado de rango TOLERANTE con bloques pre-fuera-de-rango: un bloque que
+ * YA estaba fuera del rango configurado antes del gesto (p. ej. Rutina 6:45
+ * con inicio de día a las 7:00) no invalida movimientos que NO lo empeoran
+ * — comparación contra el estado ORIGINAL del día. Sin esto, un solo bloque
+ * pre-desborde hacía que CUALQUIER mover/nudge del día se rechazara con ⛔
+ * aunque el gesto no lo tocara (mismo criterio que resolveResizeDay d6f9c2f).
+ */
+const enRangoTolerante = (arr: BloqueM[], originales: BloqueM[], minM: number, maxM: number) => {
+  const estabaFuera = new Set(originales.filter(b => b.inicio < minM - EPS || finDe(b) > maxM + EPS).map(b => b.id));
+  return arr.every(b => estabaFuera.has(b.id) || (b.inicio >= minM - EPS && finDe(b) <= maxM + EPS));
+};
+
 const cerrar = (arr: BloqueM[]): Slot[] => [...arr].sort(porInicio).map(aHoras);
 
 /**
@@ -206,7 +219,7 @@ export function resolveDayCascade(
       bb.inicio = relC < ZONA ? cercano.inicio : finDe(cercano);
       N.splice(idx, 0, bb);
       empujarAbajo(N, idx);
-      const valido = enRango(N, minM, maxM);
+      const valido = enRangoTolerante(N, ordenados, minM, maxM);
       return {
         slots: cerrar(N),
         valido,
@@ -225,7 +238,7 @@ export function resolveDayCascade(
     const N = otros.map(x => ({ ...x }));
     N.splice(idx, 0, bb);
     reempaquetar(ordenados, N);
-    const valido = enRango(N, minM, maxM);
+    const valido = enRangoTolerante(N, ordenados, minM, maxM);
     return {
       slots: cerrar(N),
       valido,
@@ -273,7 +286,7 @@ export function resolveDayCascade(
     bb.inicio = relC < ZONA ? cercano.inicio : finDe(cercano);
     N.splice(idx, 0, bb);
     empujarAbajo(N, idx);
-    const valido = enRango(N, minM, maxM);
+    const valido = enRangoTolerante(N, ordenados, minM, maxM);
     return {
       slots: cerrar(N),
       valido,
@@ -296,7 +309,7 @@ export function resolveDayCascade(
     N[k].inicio = t;
     t += N[k].dur;
   }
-  const valido = enRango(N, minM, maxM);
+  const valido = enRangoTolerante(N, ordenados, minM, maxM);
   return {
     slots: cerrar(N),
     valido,
@@ -433,7 +446,7 @@ export function resolveNudgeDay(
   const out = resolvePared(ordenados, movedId, { inicio, dur: mio.dur });
   return {
     slots: cerrar(out),
-    valido: enRango(out, minM, maxM),
+    valido: enRangoTolerante(out, ordenados, minM, maxM),
     motivo: '',
     accion: 'hueco',
     movido: { id: movedId, start: inicio / 60, end: (inicio + mio.dur) / 60 }
@@ -620,7 +633,15 @@ export function propagateWeekly(
     for (const day of aCerrar) {
       const nombreDia = DIAS_SEMANA[day] ?? `día ${day}`;
       const slotsDia = slotsOn(day);
-      const fuera = slotsDia.find(s => s.start < startHour - EPS || s.end > endHour + EPS);
+      // Tolerante con pre-desborde: un bloque que YA estaba fuera del rango
+      // configurado no invalida el mover (solo se rechaza un desborde NUEVO).
+      const estabaFuera = new Set(
+        activities.filter(a => isOnDay(a, day))
+          .map(a => ({ id: a.id!, start: codec.parse(a.startTime), end: codec.parse(a.endTime) }))
+          .filter(s => s.start < startHour - EPS || s.end > endHour + EPS)
+          .map(s => s.id)
+      );
+      const fuera = slotsDia.find(s => !estabaFuera.has(s.id) && (s.start < startHour - EPS || s.end > endHour + EPS));
       if (fuera) return rechazar(`⛔ No cabe: la cadena desbordaría ${nombreDia}`);
       for (let i = 0; i < slotsDia.length; i++) {
         for (let j = i + 1; j < slotsDia.length; j++) {
@@ -662,7 +683,15 @@ export function propagateWeekly(
     for (const day of aCerrar) {
       const nombreDia = DIAS_SEMANA[day] ?? `día ${day}`;
       const slotsDia = slotsOn(day);
-      const fuera = slotsDia.find(s => s.start < startHour - EPS || s.end > endHour + EPS);
+      // Tolerante con pre-desborde: un bloque que YA estaba fuera del rango
+      // configurado no invalida el mover (solo se rechaza un desborde NUEVO).
+      const estabaFuera = new Set(
+        activities.filter(a => isOnDay(a, day))
+          .map(a => ({ id: a.id!, start: codec.parse(a.startTime), end: codec.parse(a.endTime) }))
+          .filter(s => s.start < startHour - EPS || s.end > endHour + EPS)
+          .map(s => s.id)
+      );
+      const fuera = slotsDia.find(s => !estabaFuera.has(s.id) && (s.start < startHour - EPS || s.end > endHour + EPS));
       if (fuera) return rechazar(`⛔ No cabe: la cadena desbordaría ${nombreDia}`);
       for (let i = 0; i < slotsDia.length; i++) {
         for (let j = i + 1; j < slotsDia.length; j++) {

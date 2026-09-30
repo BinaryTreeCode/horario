@@ -724,7 +724,11 @@
     const MENU_H = 130;
     const cx = Math.min(x, window.innerWidth - MENU_W - 8);
     const cy = Math.min(y, window.innerHeight - MENU_H - 8);
-    contextMenu = { show: true, x: Math.max(4, cx), y: Math.max(4, cy), activityId };
+    // emptyMenuHour: null EXPLÍCITO — la plantilla distingue el menú de
+    // actividad del menú de hueco con `!== null`; sin la propiedad quedaba
+    // undefined y el click derecho sobre una tarjeta mostraba "Crear
+    // actividad a las…" en vez del menú de la actividad.
+    contextMenu = { show: true, x: Math.max(4, cx), y: Math.max(4, cy), activityId, emptyMenuHour: null };
   }
 
   function closeContextMenu() {

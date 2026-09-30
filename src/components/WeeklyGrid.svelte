@@ -866,6 +866,21 @@
   //    salvo que la actividad tenga un solo día y el gesto la dejaría sin
   //    ninguno (retirar el único día no se ofrece).
   // Se recalcula con activities: al cambiar el día o los datos, reaparecen.
+  /**
+   * ¿La asa lateral de ESTA tarjeta (columna concreta i) ofrece algo?
+   * Regla del usuario: si el día vecino exterior YA tiene la actividad (el
+   * bloque continúa hacia ese lado), la asa NO se muestra — el gesto hacia
+   * afuera sería no-op y una asa muerta en los límites internos de un bloque
+   * continuo solo confunde. Retirar el día sigue disponible en los BORDES
+   * del bloque (asa exterior arrastrada hacia adentro). En el borde del
+   * arreglo (izq de Lunes / der de Domingo) la asa solo existe para retirar.
+   */
+  function asaLateralUtil(act: Activity, i: number, lado: 'izq' | 'der'): boolean {
+    const puedeRetirar = act.daysOfWeek.length > 1;
+    const vecino = lado === 'der' ? i + 1 : i - 1;
+    if (vecino < 0 || vecino > 6) return puedeRetirar; // borde del arreglo: solo retirar
+    return !act.daysOfWeek.includes(vecino); // vecino ya lo tiene → asa oculta
+  }
   const asasPosibles = $derived.by(() => {
     const mapa = new Map<string, { arriba: boolean; abajo: boolean; izq: boolean; der: boolean; retirar: boolean }>();
     for (const act of activities) {
@@ -1149,14 +1164,14 @@
                     onpointerdown={(e) => startResize(e, activity, i, 'abajo')}
                   ></div>
                 {/if}
-                {#if (i > 0 || asasPosibles.get(activity.id!)?.retirar) && asasPosibles.get(activity.id!)?.izq}
+                {#if (i > 0 || asasPosibles.get(activity.id!)?.retirar) && asasPosibles.get(activity.id!)?.izq && asaLateralUtil(activity, i, 'izq')}
                   <div
                     class="resize-handle hres-izq"
                     aria-hidden="true"
                     onpointerdown={(e) => startHResize(e, activity, i, 'izq')}
                   ></div>
                 {/if}
-                {#if (i < 6 || asasPosibles.get(activity.id!)?.retirar) && asasPosibles.get(activity.id!)?.der}
+                {#if (i < 6 || asasPosibles.get(activity.id!)?.retirar) && asasPosibles.get(activity.id!)?.der && asaLateralUtil(activity, i, 'der')}
                   <div
                     class="resize-handle hres-der"
                     aria-hidden="true"
