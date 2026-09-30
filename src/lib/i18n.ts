@@ -75,6 +75,8 @@ const es: Catalogo = {
   'dayView.moveIn': 'Mover en {day}',
   'dayView.insertHere': 'Insertar aquí',
   'dayView.limitedBy': 'Limitado por {what}',
+  'dayView.prevDay': 'Ir al día anterior: {day}',
+  'dayView.nextDay': 'Ir al día siguiente: {day}',
 
   // ── Menú contextual ──
   'menu.createHere': 'Crear actividad a las {time}',
@@ -245,6 +247,7 @@ const es: Catalogo = {
   'modal.remove': 'Quitar',
   'modal.uploadFile': 'Subir archivo',
   'modal.subiendoImagen': 'Procesando imagen…',
+  'modal.imageUrl': 'URL de la imagen',
   'modal.useUrl': 'Usar URL',
   'modal.stepsCount': 'Pasos / Subtareas ({n})',
   'modal.suggestRoutine': 'Sugerir rutina',
@@ -335,6 +338,8 @@ const en: Catalogo = {
   'dayView.moveIn': 'Move in {day}',
   'dayView.insertHere': 'Insert here',
   'dayView.limitedBy': 'Limited by {what}',
+  'dayView.prevDay': 'Go to previous day: {day}',
+  'dayView.nextDay': 'Go to next day: {day}',
 
   'menu.createHere': 'Create activity at {time}',
   'menu.duplicate': 'Duplicate (Independent)',
@@ -499,6 +504,7 @@ const en: Catalogo = {
   'modal.remove': 'Remove',
   'modal.uploadFile': 'Upload file',
   'modal.subiendoImagen': 'Processing image…',
+  'modal.imageUrl': 'Image URL',
   'modal.useUrl': 'Use URL',
   'modal.stepsCount': 'Steps / Subtasks ({n})',
   'modal.suggestRoutine': 'Suggest routine',

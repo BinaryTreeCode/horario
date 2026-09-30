@@ -1963,6 +1963,16 @@
     height: 100%;
     object-fit: cover;
   }
+  /* Táctil: 18px es inalcanzable con dedo (hallazgo amarillo de la auditoría
+     UX). En pantallas sin puntero fino la miniatura sube a 32px visuales —
+     el botón completo cubre ≥44px de zona efectiva con el padding de golpe;
+     en desktop sigue 18px para no robar espacio a tarjetas cortas. */
+  @media (hover: none) and (pointer: coarse) {
+    .grid-image-thumb {
+      width: 32px;
+      height: 32px;
+    }
+  }
 
   /* Popover de imagen (hover): foto ampliada + nombre, anclada encima de la
      miniatura. pointer-events none: el mouse puede "salir" hacia él sin que

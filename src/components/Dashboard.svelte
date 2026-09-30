@@ -67,6 +67,29 @@
     const off = onSyncChange((s) => { syncStatus = s; });
     return off;
   });
+  // Detalle del último sync (pendientes y fecha): el badge era invisible
+  // (hallazgo amarillo de la auditoría UX) — ahora muestra punto de estado y
+  // el title explica cuándo sincronizó y cuántos cambios quedan por subir.
+  let syncDetail = $state<{ pending: number; lastSyncAt?: number }>({ pending: 0 });
+  $effect(() => {
+    const off = onSyncChange((s, d) => { syncStatus = s; syncDetail = { pending: d.pending, lastSyncAt: d.lastSyncAt }; });
+    return off;
+  });
+  const syncTitulo = $derived.by(() => {
+    const base = syncStatus === 'synced'
+      ? 'Sincronizado con la nube'
+      : syncStatus === 'syncing'
+        ? 'Sincronizando…'
+        : syncStatus === 'offline'
+          ? 'Sin conexión — se sincronizará al volver'
+          : syncStatus === 'error'
+            ? 'Error de sincronización'
+            : 'Solo local — sin respaldo en la nube';
+    const extras: string[] = [];
+    if (syncDetail.lastSyncAt) extras.push('Última sincronización: ' + new Date(syncDetail.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    if (syncDetail.pending > 0) extras.push(syncDetail.pending + ' cambio' + (syncDetail.pending === 1 ? '' : 's') + ' pendiente' + (syncDetail.pending === 1 ? '' : 's') + ' de subir');
+    return extras.length ? base + ' — ' + extras.join(' — ') : base;
+  });
 
   let selectedDay = $state(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1); // 0 = Mon, 6 = Sun
 
@@ -512,6 +535,9 @@
           title={$t('sidebar.menuDatos')}
         >
           <Cloud size={20} />
+          {#if syncDetail.pending > 0}
+            <span class="sync-dot pendiente" aria-hidden="true"></span>
+          {/if}
         </button>
       </div>
       {#if syncStatus !== 'local'}
@@ -520,11 +546,13 @@
           class:syncing={syncStatus === 'syncing'}
           class:error={syncStatus === 'error'}
           onclick={() => syncNow(true).catch(() => {})}
-          title={syncStatus === 'synced' ? 'Sincronizado con la nube — clic para refrescar' : syncStatus === 'syncing' ? 'Sincronizando…' : syncStatus === 'offline' ? 'Sin conexión — se sincronizará al volver' : 'Error de sincronización — clic para reintentar'}
+          aria-label={syncTitulo}
+          title={syncTitulo}
         >
           {#if syncStatus === 'synced'}<Cloud size={16} />
           {:else if syncStatus === 'syncing'}<RefreshCw size={16} />
           {:else}<CloudOff size={16} />{/if}
+          <span class="sync-dot {syncStatus}" aria-hidden="true"></span>
         </button>
       {/if}
     </div>
@@ -574,6 +602,7 @@
               settings={settingsObj}
               dayOverrides={$dayOverridesStore || []}
               onEditActivity={(id, initialData) => openActivityModal(id, selectedDay, initialData)}
+              onNavigateDay={(dir) => { selectedDay = Math.max(0, Math.min(6, selectedDay + dir)); }}
             />
           {:else}
             <!-- Esqueleto EN el panel (no overlay fixed): mantiene el layout y
@@ -782,6 +811,9 @@
   .menu-datos-wrap {
     display: inline-flex;
   }
+  .menu-datos-wrap .btn-icon {
+    position: relative;
+  }
 
   /* Dropdown de Datos (portal a body, position:fixed): mismo look que el
      menú contextual de las vistas. */
@@ -964,6 +996,24 @@
   }
   .sync-retry:hover { filter: brightness(1.1); }
 
+  /* Punto de estado del sync (hallazgo amarillo de la auditoría: el icono
+     de nube no decía NADA del estado). Colores semánticos con tokens. */
+  .sync-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1.5px solid #fff;
+    background: #8a8a8a;
+  }
+  .sync-dot.synced { background: #2e7d32; }
+  .sync-dot.syncing { background: #f9a825; }
+  .sync-dot.error { background: #c62828; }
+  .sync-dot.offline { background: #8a8a8a; }
+  .sync-dot.pendiente { background: #f9a825; }
+
   .sync-badge {
     display: flex;
     align-items: center;
@@ -972,10 +1022,11 @@
     border: 1px solid rgba(45, 90, 39, 0.25);
     color: var(--color-green-dark);
     border-radius: 50%;
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
     cursor: pointer;
     transition: all 0.2s;
+    position: relative;
   }
 
   .sync-badge:hover {

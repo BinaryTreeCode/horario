@@ -575,6 +575,7 @@
                 type="url"
                 bind:value={imageUrlInput}
                 placeholder="https://ejemplo.com/imagen.jpg"
+                aria-label={$t('modal.imageUrl')}
                 onkeydown={e => { if (e.key === 'Enter') { e.preventDefault(); applyImageUrl(); } }}
               />
               <button type="button" class="image-upload-btn" onclick={applyImageUrl}>OK</button>

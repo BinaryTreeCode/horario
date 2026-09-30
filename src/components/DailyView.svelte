@@ -4,7 +4,7 @@
   import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
   import { resolveDayCascade, resolveResizeDay, resolveNudgeDay } from '../lib/cascade';
   import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
-  import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon, Plus } from '@lucide/svelte';
+  import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon, Plus, ChevronLeft, ChevronRight } from '@lucide/svelte';
   import { db, newId } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import ImageLightbox from './ImageLightbox.svelte';
@@ -21,9 +21,10 @@
     settings: { startHour: number; endHour: number };
     dayOverrides?: DayOverride[];
     onEditActivity: (id: string | null, initialData?: Activity) => void;
+    onNavigateDay: (dir: -1 | 1) => void;
   }
 
-  let { day, activities, categories, settings, dayOverrides = [], onEditActivity }: Props = $props();
+  let { day, activities, categories, settings, dayOverrides = [], onEditActivity, onNavigateDay }: Props = $props();
 
   /**
    * Tap en un slot vacío del track (G4): abre el modal de creación con la hora
@@ -846,7 +847,27 @@
 <div class="daily-view">
   <div class="daily-header">
     <div class="header-top-row">
-      <h2>{dayName}{#if esHoy} <span class="hoy-chip">{$t('week.today')}</span>{/if}</h2>
+      <div class="day-nav">
+        <button
+          class="btn-day-nav"
+          onclick={() => onNavigateDay(-1)}
+          disabled={day === 0}
+          aria-label={$t('dayView.prevDay', { day: DAY_NAMES[day - 1] ?? '' })}
+          title={$t('dayView.prevDay', { day: DAY_NAMES[day - 1] ?? '' })}
+        >
+          <ChevronLeft size={20} />
+        </button>
+        <h2>{dayName}{#if esHoy} <span class="hoy-chip">{$t('week.today')}</span>{/if}</h2>
+        <button
+          class="btn-day-nav"
+          onclick={() => onNavigateDay(1)}
+          disabled={day === 6}
+          aria-label={$t('dayView.nextDay', { day: DAY_NAMES[day + 1] ?? '' })}
+          title={$t('dayView.nextDay', { day: DAY_NAMES[day + 1] ?? '' })}
+        >
+          <ChevronRight size={20} />
+        </button>
+      </div>
       <div class="current-time-display">
         <Clock size={16} /> {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
       </div>
@@ -1058,6 +1079,39 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+  }
+
+  /* Navegación de días (anterior/siguiente): hallazgo rojo de la auditoría UX
+     — la vista Día solo se alcanzaba tocando el ⚡ de una columna en Semana.
+     Touch ≥44px y aria-label (reglas duras del proyecto). */
+  .day-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .btn-day-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    border: 1px solid rgba(45, 90, 39, 0.25);
+    background: rgba(255, 255, 255, 0.55);
+    color: var(--color-green-dark);
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+  }
+  .btn-day-nav:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.85);
+  }
+  .btn-day-nav:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .btn-day-nav:focus-visible {
+    outline: 2px solid var(--color-green-dark);
+    outline-offset: 2px;
   }
 
   .daily-header h2 {
