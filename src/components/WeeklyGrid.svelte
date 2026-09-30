@@ -873,8 +873,13 @@
       const puedeRetirar = act.daysOfWeek.length > 1;
       const ganaAlgo = act.daysOfWeek.length < 7;
       mapa.set(act.id!, {
-        arriba: capacidadResizeWeekly(activities, act.id!, 'arriba', CODEC, startHour, endHour) > 0,
-        abajo: capacidadResizeWeekly(activities, act.id!, 'abajo', CODEC, startHour, endHour) > 0,
+        // Encoger SIEMPRE está permitido (regla del proyecto): el asa vertical
+        // existe aunque el bloque esté encajonado entre vecinos (capacidad 0
+        // = no puede estirar, pero sí puede achicar). El gesto acota por la
+        // capacidad al estirar y no toca nada al encoger — sin asa el bloque
+        // colindante quedaba inmodificable verticalmente.
+        arriba: true,
+        abajo: true,
         izq: ganaAlgo || puedeRetirar,
         der: ganaAlgo || puedeRetirar,
         retirar: puedeRetirar
