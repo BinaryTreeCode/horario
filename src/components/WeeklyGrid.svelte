@@ -864,7 +864,7 @@
   //    ninguno (retirar el único día no se ofrece).
   // Se recalcula con activities: al cambiar el día o los datos, reaparecen.
   const asasPosibles = $derived.by(() => {
-    const mapa = new Map<string, { arriba: boolean; abajo: boolean; izq: boolean; der: boolean }>();
+    const mapa = new Map<string, { arriba: boolean; abajo: boolean; izq: boolean; der: boolean; retirar: boolean }>();
     for (const act of activities) {
       // La asa lateral del lado X es útil si existe ALGÚN día que la gesture
       // afecte: ganar un vecino que no tiene la actividad, o retirar el día
@@ -876,7 +876,8 @@
         arriba: capacidadResizeWeekly(activities, act.id!, 'arriba', CODEC, startHour, endHour) > 0,
         abajo: capacidadResizeWeekly(activities, act.id!, 'abajo', CODEC, startHour, endHour) > 0,
         izq: ganaAlgo || puedeRetirar,
-        der: ganaAlgo || puedeRetirar
+        der: ganaAlgo || puedeRetirar,
+        retirar: puedeRetirar
       });
     }
     return mapa;
@@ -1094,14 +1095,14 @@
                     onpointerdown={(e) => startResize(e, activity, i, 'abajo')}
                   ></div>
                 {/if}
-                {#if i > 0 && asasPosibles.get(activity.id!)?.izq}
+                {#if (i > 0 || asasPosibles.get(activity.id!)?.retirar) && asasPosibles.get(activity.id!)?.izq}
                   <div
                     class="resize-handle hres-izq"
                     aria-hidden="true"
                     onpointerdown={(e) => startHResize(e, activity, i, 'izq')}
                   ></div>
                 {/if}
-                {#if i < 6 && asasPosibles.get(activity.id!)?.der}
+                {#if (i < 6 || asasPosibles.get(activity.id!)?.retirar) && asasPosibles.get(activity.id!)?.der}
                   <div
                     class="resize-handle hres-der"
                     aria-hidden="true"
