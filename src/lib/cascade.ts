@@ -378,9 +378,22 @@ export function resolveResizeDay(
     }
   }
   // El candado de rango solo aplica al ESTIRAR: encoger siempre es válido.
-  // Nota: si el día venía desbordado, la cadena solo acorta huecos — no
-  // agranda el desborde preexistente.
-  const valido = encoge ? true : enRango(N, minM, maxM);
+  // Nota: si el día venía desbordado de escrituras previas, la cadena solo
+  // acorta huecos — no agranda el desborde preexistente. El candado compara
+  // el día COMPLETO (enRango), y un bloque preexistente fuera de rango
+  // (p. ej. Rutina 6:45 con inicio de día configurado a las 7) hacía que
+  // CUALQUIER estirar fuera inválido aunque no lo tocara. Se compara contra
+  // el estado ORIGINAL del día: el estirar solo se rechaza si AGRANDA un
+  // desborde preexistente (nuevo bloque fuera de rango que antes estaba
+  // dentro).
+  const valido = encoge ? true : (() => {
+    const orig = slots.map(aM).sort(porInicio);
+    const estabaFuera = new Set(orig.filter(b => b.inicio < minM - EPS || finDe(b) > maxM + EPS).map(b => b.id));
+    return N.every(b => {
+      if (estabaFuera.has(b.id)) return true; // preexistente: el gesto no lo empeora (su lugar lo fija la cadena)
+      return b.inicio >= minM - EPS && finDe(b) <= maxM + EPS;
+    });
+  })();
   return {
     slots: cerrar(N),
     valido,
@@ -684,9 +697,20 @@ export function propagateWeekly(
     }
     // Candado del límite: NINGÚN día puede quedar fuera de rango (sin
     // recorte) — salvo al ENCOGER, que siempre está permitido.
+    // Igual que en resolveResizeDay: un bloque PREEXISTENTE fuera de rango
+    // (p. ej. Rutina 6:45 con inicio de día configurado a las 7) no debe
+    // invalidar estiramientos que NO lo empeoran — el gesto lo toca solo si
+    // la cadena lo empuja, y al empujarlo su lugar lo fija la pared. Se
+    // compara contra el estado ORIGINAL del día: solo rechaza un bloque que
+    // estaba DENTRO y queda FUERA (desborde nuevo).
     if (!encogeRedim) {
       for (const day of daySet) {
-        const fuera = slotsOn(day).some(s => s.start < startHour - EPS || s.end > endHour + EPS);
+        const slotsDia = slotsOn(day);
+        const origDia = activities
+          .filter(a => isOnDay(a, day))
+          .map(a => ({ id: a.id!, start: codec.parse(a.startTime), end: codec.parse(a.endTime) }));
+        const estabaFuera = new Set(origDia.filter(s => s.start < startHour - EPS || s.end > endHour + EPS).map(s => s.id));
+        const fuera = slotsDia.find(s => !estabaFuera.has(s.id) && (s.start < startHour - EPS || s.end > endHour + EPS));
         if (fuera) return rechazar('⛔ No cabe: estirar desbordaría el día');
       }
     }

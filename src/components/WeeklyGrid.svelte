@@ -534,6 +534,9 @@
   }
   /** Rótulo del gesto dentro del fantasma: qué hará el drop. */
   let dragHint = $state('');
+  /** Rótulo flotante del RESIZE vertical: por qué el bloque no crece
+   *  ("↕ Limitado por…"). null = sin gesto o sin límite alcanzado. */
+  let vresHint = $state<{ texto: string; x: number; y: number } | null>(null);
   /** Posición del cursor para el fantasma flotante (null = sin drag). */
   let dragGhostXY = $state<{ x: number; y: number } | null>(null);
   /** Hora proyectada del fantasma: el slot final del arrastrado en el preview. */
@@ -694,6 +697,7 @@
         setInvalid(!calc.valido);
         // F4: la capacidad global acotó el deseo → feedback del por qué.
         dragHint = calc.limitadoPor ? `↕ Limitado por ${calc.limitadoPor}` : '';
+        vresHint = dragHint ? { texto: dragHint, x: _x, y: clientY } : null;
         dropPreview = { day: m.day, slots: calc.slots };
       }
     },
@@ -705,6 +709,7 @@
       setInvalid(false);
       shakeInvalid = false;
       dragHint = '';
+      vresHint = null;
       if (!calc) { dropPreview = null; return; }
       if (!calc.valido) { toastErrRepetido(`estirar-sem:${m.day}`, '⛔ No cabe: estirar desbordaría el día'); dropPreview = null; return; }
       // Commit global: el borde del PUNTERO manda. Con lado 'arriba' el fin
@@ -727,6 +732,7 @@
       draggedActivityId = null;
       dragSourceDay = null;
       dropPreview = null;
+      vresHint = null;
       setInvalid(false);
       shakeInvalid = false;
     }
@@ -902,29 +908,42 @@
     const daySlots = activities
       .filter(a => a.daysOfWeek.includes(m.day))
       .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-    if (m.lado === 'abajo') {
-      let newEnd = Math.round((m.origEnd + deltaSlots / slotsPerHour) * 4) / 4;
+    // Capacidad GLOBAL (mínimo entre los días de la actividad): la duración
+    // es global — al estirar, la nueva duración viaja a todos los días y el
+    // commit acota el deseo para que NINGÚN día desborde (sin ⛔ al estirar).
+    // El encoger no se acota: siempre está permitido.
+    const capMin = capacidadResizeWeekly(activities, actId, m.lado, CODEC, startHour, endHour);
+    // Feedback cuando la capacidad GLOBAL acotó el deseo (la duración es
+    // global: el día MÁS APRETADO de la actividad manda). Sin esto el gesto
+    // se ve muerto: el hueco existe en la columna del gesto pero el bloque
+    // no crece y no se sabe por qué.
+    const EPS_H = 1e-6; // comparación de horas (floats del snap de 15min)
+    const deseoAbajo = m.lado === 'abajo';
+    const deseo = deseoAbajo
+      ? Math.round((m.origEnd + deltaSlots / slotsPerHour) * 4) / 4
+      : Math.round((m.origStart + deltaSlots / slotsPerHour) * 4) / 4;
+    const topeGlobal = deseoAbajo ? m.origEnd + capMin / 60 : m.origStart - capMin / 60;
+    const estaEstirando = deseoAbajo ? deseo > m.origEnd + EPS_H : deseo < m.origStart - EPS_H;
+    const acotoGlobal = estaEstirando && (deseoAbajo ? deseo > topeGlobal + EPS_H : deseo < topeGlobal - EPS_H);
+    if (deseoAbajo) {
+      let newEnd = deseo;
       // Regla del usuario: estirar SIEMPRE topa, nunca se rechaza. El deseo
-      // del puntero se acota por la capacidad GLOBAL (mínima entre los días
-      // de la actividad): la duración viaja a todos sus días, así el commit
-      // jamás desborda → sin candado ni ⛔ (el encoger no se acota).
+      // del puntero se acota por la capacidad global (el encoger no se acota).
       if (newEnd > m.origEnd) {
-        const capMin = capacidadResizeWeekly(activities, actId, 'abajo', CODEC, startHour, endHour);
-        newEnd = Math.min(newEnd, m.origEnd + capMin / 60);
+        newEnd = Math.min(newEnd, topeGlobal);
       }
       newEnd = Math.max(m.origStart + 0.25, Math.min(newEnd, endHour));
       const res = resolveResizeDay(daySlots, actId, 'abajo', newEnd, startHour, endHour);
-      return { lado: m.lado, newEnd, valido: res.valido, limitadoPor: res.limitadoPor, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
+      return { lado: m.lado, newEnd, valido: res.valido, limitadoPor: acotoGlobal && !res.limitadoPor ? 'el día más apretado de la semana' : res.limitadoPor, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
     }
-    let newStart = Math.round((m.origStart + deltaSlots / slotsPerHour) * 4) / 4;
-    // Espejo hacia arriba: acotar por la capacidad global antes de resolver.
+    let newStart = deseo;
+    // Espejo hacia arriba: acotar por la capacidad global.
     if (newStart < m.origStart) {
-      const capMin = capacidadResizeWeekly(activities, actId, 'arriba', CODEC, startHour, endHour);
-      newStart = Math.max(newStart, m.origStart - capMin / 60);
+      newStart = Math.max(newStart, topeGlobal);
     }
     newStart = Math.max(startHour, Math.min(newStart, m.origEnd - 0.25));
     const res = resolveResizeDay(daySlots, actId, 'arriba', newStart, startHour, endHour);
-    return { lado: m.lado, newStart, valido: res.valido, limitadoPor: res.limitadoPor, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
+    return { lado: m.lado, newStart, valido: res.valido, limitadoPor: acotoGlobal && !res.limitadoPor ? 'el día más apretado de la semana' : res.limitadoPor, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
   }
 
   // Context Menu logic
@@ -1161,6 +1180,15 @@
       style="left: {dragGhostXY.x - grabDX}px; top: {dragGhostXY.y - grabDY}px; width: {grabW}px; height: {grabH}px; --bg-color: {ghostColor}">
       <div class="df-title"><span>{ghostActivity.name}</span></div>
       <span class="df-hora">{dragGhostHora}</span>
+    </div>
+  {/if}
+
+  {#if vresHint}
+    <!-- Rótulo del resize vertical: explica por qué el bloque no creció
+         (capacidad global acotada / topa con bloque o borde). -->
+    <div class="hres-float hres-ganar vres-float" use:portal aria-hidden="true"
+      style="left: {vresHint.x}px; top: {vresHint.y}px">
+      {vresHint.texto}
     </div>
   {/if}
 
@@ -1467,6 +1495,13 @@
   .day-column.col-hres-retirar .slots-grid {
     box-shadow: inset 0 0 0 3px rgba(224, 69, 58, 0.5);
     background: rgba(224, 69, 58, 0.06);
+  }
+
+  /* Variante del rótulo para el resize VERTICAL: sin signo, solo el texto
+     del límite; anclado junto al puntero. */
+  .vres-float {
+    transform: translate(14px, -50%);
+    background: var(--color-brown-bark, #4a3728);
   }
 
   /* Rótulo flotante del hResize: acción + día + actividad, anclado al puntero.

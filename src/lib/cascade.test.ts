@@ -504,4 +504,28 @@ describe('capacidadResizeDay/Weekly — estirar SIEMPRE topa (nunca rechaza)', (
     // Encoger nunca reporta límite.
     expect(resolveResizeDay(slots, 'e', 'abajo', 9.5, 7, 22).limitadoPor).toBe('');
   });
+
+  test('día con bloque pre-fuera-de-rango: estirar que no lo empeora es válido', () => {
+    // Caso real del usuario: Rutina 6:45-7:45 con inicio de día configurado a
+    // las 7 → el día "venía desbordado" (Rutina fuera de rango). El candado
+    // viejo (enRango del día COMPLETO) hacía que CUALQUIER estirar fuera ⛔
+    // aunque el gesto no tocara a Rutina. Nuevo: solo rechaza si AGRANDA el
+    // desborde (un bloque que estaba dentro queda fuera).
+    // e 10-11 con hueco hasta 14 (r 13-14): estirar e a 12 empuja a r →
+    // nadie nuevo sale del rango (7-14) → VÁLIDO aunque rutina siga fuera.
+    const slots = [s('rutina', 6.75, 7.75), s('e', 10, 11), s('r', 13, 14)];
+    const res = resolveResizeDay(slots, 'e', 'abajo', 12, 7, 14);
+    expect(res.valido).toBe(true);
+    expect(res.movido).toEqual(s('e', 10, 12));
+    // Estirar MÁS allá del tope: la capacidad acota E al tope del día
+    // (libre = maxM - fin - vecinos), así que r se apila contra el borde y
+    // NADIE sale del rango — y el candado nuevo no castiga por la rutina
+    // preexistente. El resultado es tope: e 10-13, r 13-14.
+    const res2 = resolveResizeDay(slots, 'e', 'abajo', 15, 7, 14);
+    expect(res2.valido).toBe(true);
+    expect(res2.movido).toEqual(s('e', 10, 13));
+    // Sin candado nuevo esto habría dado ⛔ por la rutina preexistente:
+    const sinRutina = resolveResizeDay([s('e', 10, 11), s('r', 13, 14)], 'e', 'abajo', 12, 7, 14);
+    expect(res.valido).toBe(sinRutina.valido); // misma suerte con o sin rutina fuera de rango
+  });
 });
