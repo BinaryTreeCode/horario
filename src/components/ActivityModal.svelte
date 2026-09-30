@@ -299,6 +299,36 @@
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import { Copy } from '@lucide/svelte';
 
+  /** ¿[ini,fin) choca con [ini2,fin2)? (horas "HH:MM") */
+  function choca(ini: string, fin: string, ini2: string, fin2: string): boolean {
+    const a = ini.split(':').map(Number), b = fin.split(':').map(Number);
+    const c = ini2.split(':').map(Number), d = fin2.split(':').map(Number);
+    const aM = a[0] * 60 + a[1], bM = b[0] * 60 + b[1];
+    const cM = c[0] * 60 + c[1], dM = d[0] * 60 + d[1];
+    return aM < dM && cM < bM;
+  }
+
+  /**
+   * No se debe poder crear una actividad si ya existe una que se solape con
+   * ella en ALGÚN día seleccionado (pedido del usuario: el menú de hueco
+   * ofrecía "crear a las 12:00" sobre un bloque existente y el modal
+   * guardaba el choque sin avisar). La actividad editada se excluye a sí
+   * misma: moverla o acortarla sí se valida contra las demás.
+   */
+  async function buscarChoque(nueva: { startTime: string; endTime: string; daysOfWeek: number[] }): Promise<{ name: string; dia: string; rango: string } | null> {
+    const { DIAS_SEMANA } = await import('../lib/cascade');
+    const acts = (await db.activities.toArray()).filter(a => !a.deletedAt && a.id !== id);
+    for (const dia of nueva.daysOfWeek) {
+      for (const a of acts) {
+        if (!a.daysOfWeek.includes(dia)) continue;
+        if (choca(nueva.startTime, nueva.endTime, a.startTime, a.endTime)) {
+          return { name: a.name, dia: DIAS_SEMANA[dia] ?? `día ${dia}`, rango: `${format12h(a.startTime)} – ${format12h(a.endTime)}` };
+        }
+      }
+    }
+    return null;
+  }
+
   async function save() {
     try {
       if (!categoryId) {
@@ -317,6 +347,13 @@
         ...(image ? { image } : {}),
         updatedAt: Date.now()
       };
+
+      // ⛔ Choque de horarios: crear sobre una existente no está permitido.
+      const choque = await buscarChoque(activity);
+      if (choque) {
+        toastErr(tNow('toast.choca', choque));
+        return;
+      }
 
       if (targetDay !== null && saveScope === 'day') {
         // Save to dayOverrides (temporary, day-only)

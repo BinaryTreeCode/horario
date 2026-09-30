@@ -70,7 +70,7 @@ const MAX_PASSES = 7;
 /** Umbral de mitades: 0.5 = todo el bloque es "antes" o "después" (sin reemplazos). */
 const ZONA = 0.5;
 /** Nombres de día (0 = Lunes) para los motivos de rechazo del Semanal. */
-const DIAS_SEMANA = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+export const DIAS_SEMANA = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 
 const toMin = (h: number) => Math.round(h * 60);
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
