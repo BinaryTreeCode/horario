@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types';
-  import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
+  import { parseTime, getActivityColor, textOn, formatTime, format12h } from '../lib/stores';
   import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeWeekly, barridoRetiro } from '../lib/cascade';
   import type { WeeklyResolution } from '../lib/cascade';
   import { db } from '../lib/db';
@@ -1112,6 +1112,8 @@
         >
           {#each dayData.items as activity (activity.id)}
             {@const numSlots = activity.numSlots}
+            {@const catColor = getActivityColor(activity.categoryId, categories)}
+            {@const catFg = textOn(catColor)}
             <button 
               class="activity-item" 
               class:short={numSlots <= 2}
@@ -1121,7 +1123,7 @@
               class:hres-afectado={hresPreview?.accion === 'retirar' && hresPreview.dias.includes(i) && activity.id === draggedActivityId}
               onpointerdown={(e) => handleItemPointerDown(e, activity, i)}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
-              style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
+              style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {catColor}; --fg-color: {catFg.text}; --fg-shadow: {catFg.shadow}"
               onclick={() => onEditActivity(activity.id!)}
               onkeydown={(e) => {
                 // M6 (WCAG 2.5.7): ↑/↓ = ±15 min con cascada global. Enter y
@@ -1647,7 +1649,9 @@
   .activity-item {
     position: absolute;
     background: var(--bg-color);
-    color: white;
+    /* Texto adaptativo por luminancia (WCAG 1.4.3): el blanco fijo
+       fallaba en categorías claras — 2.26:1 «oración», 3.51:1 «Cocinar». */
+    color: var(--fg-color, white);
     margin: 1px;
     border-radius: 4px;
     /* Padding fino: en columnas de piso (56-66px) cada px horizontal decide
@@ -1987,7 +1991,7 @@
     white-space: nowrap;
     overflow: visible;
     text-overflow: clip;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 3px rgba(0, 0, 0, 0.35);
+    text-shadow: 0 1px 2px var(--fg-shadow, rgba(0, 0, 0, 0.55)), 0 0 3px var(--fg-shadow, rgba(0, 0, 0, 0.35));
   }
   .activity-item.mini .grid-image-thumb,
   .activity-item.mini .grid-steps-icon {

@@ -100,6 +100,25 @@ export function getActivityColor(categoryId: string, categories: any[]) {
     return categories.find(c => c.id === categoryId)?.color || '#999';
 }
 
+/**
+ * Texto legible sobre un color de categoría (WCAG 1.4.3). El blanco
+ * fijo fallaba en categorías claras: 2.26:1 en «oración» (#7FB3D5)
+ * y 3.51:1 en «Cocinar» (#319795). Umbral de luminancia 0.20:
+ * arriba → texto oscuro (≥4.8:1 medido sobre esos colores); abajo
+ * → blanco (≥4.9:1). `shadow` es para los bloques "mini", cuyo
+ * nombre desborda sobre otros bloques y necesita sombra inversa.
+ */
+export function textOn(hex: string): { text: string; shadow: string } {
+    const m = hex.match(/#?([0-9a-f]{6})/i);
+    if (!m) return { text: '#ffffff', shadow: 'rgba(0, 0, 0, 0.55)' };
+    const rgb = m[1].match(/../g)!.map(x => parseInt(x, 16) / 255);
+    const lin = rgb.map(c => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+    const L = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+    return L > 0.20
+        ? { text: '#14201a', shadow: 'rgba(255, 255, 255, 0.7)' }
+        : { text: '#ffffff', shadow: 'rgba(0, 0, 0, 0.55)' };
+}
+
 export function parseTime(time: string): number {
     const [h, m] = time.split(':').map(Number);
     return h + m / 60;
