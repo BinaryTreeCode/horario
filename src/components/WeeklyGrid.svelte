@@ -1332,6 +1332,14 @@
     border-right: 1px solid rgba(0,0,0,0.08);
     user-select: none;
     flex-shrink: 0;
+    /* Solo texto decorativo (etiquetas de hora): sin eventos,
+       el carril pegajoso deja de "comerse" el borde izquierdo
+       de la zona táctil (::before) de las miniaturas de la 1ª
+       columna (medido: hasta −14px de zona perdida contra el
+       carril, z-index 20 con fondo). El scroll/rueda siguen
+       funcionando: el evento pasa al contenido bajo el carril
+       y sube hasta .grid-scroll. */
+    pointer-events: none;
     /* Pegajosa al deslizar hacia los lados: las horas siempre visibles. */
     position: sticky;
     left: 0;
@@ -2039,10 +2047,10 @@
        reemplaza los márgenes que la separaban del texto. */
     float: none;
     flex: 0 0 auto;
+    position: relative; /* ancla del ::before (zona táctil invisible) */
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    overflow: hidden;
     padding: 0;
     border: 2px solid rgba(255, 255, 255, 0.9);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -2061,16 +2069,64 @@
     display: block;
     width: 100%;
     height: 100%;
+    border-radius: 50%; /* recorte aquí: el botón necesita overflow
+                           visible para su zona táctil (::before) */
     object-fit: cover;
   }
-  /* Táctil: 18px es inalcanzable con dedo (hallazgo amarillo de la auditoría
-     UX). En pantallas sin puntero fino la miniatura sube a 32px visuales —
-     el botón completo cubre ≥44px de zona efectiva con el padding de golpe;
-     en desktop sigue 18px para no robar espacio a tarjetas cortas. */
+  /* Táctil: 18px es inalcanzable con dedo (hallazgo de la auditoría UX).
+     Sin puntero fino la miniatura sube a 32px visuales y un ::before
+     transparente extiende la ZONA EFECTIVA a 44px (regla dura #5):
+     el anillo visible no crece, el target sí. En desktop sigue 18px
+     para no robar espacio a tarjetas cortas. */
   @media (hover: none) and (pointer: coarse) {
     .grid-image-thumb {
       width: 32px;
       height: 32px;
+    }
+    /* box-sizing: border-box → el padding-box del botón es 32 − 2×2px
+       de borde = 28px, y `inset` se mide SOBRE ÉSE. −8px → 28 + 16
+       = 44px de zona real (verificado con elementFromPoint). */
+    .grid-image-thumb::before {
+      content: '';
+      position: absolute;
+      inset: -8px;
+    }
+    /* Bloques cortos: el visual sigue en 14px (la regla de arriba, con
+       especificidad 0,2,0, gana), pero la zona efectiva llega a 44px
+       (padding-box 10px + 2×17px). */
+    .activity-item.short .grid-image-thumb::before {
+      inset: -17px;
+    }
+    /* Bloques cortos: con wrap, el nombre (nowrap, base completa
+       de la línea) empuja la miniatura a la 2ª línea en AMBOS
+       sentidos — row y row-reverse (medido: centro al ~69% de
+       la tarjeta, dentro del asa inferior → hitW de 1px, peor
+       que desktop). Con nowrap el nombre cede ancho (min-width:0
+       ya lo permite) y se trunca con ellipsis; la miniatura
+       queda en la línea 1, centrada verticalmente al 50% de la
+       tarjeta: lejos del asa inferior (30% inferior) y de la
+       superior. El nombre entero sigue en title/aria-label de
+       la tarjeta. */
+    .activity-item.short .activity-title {
+      flex-wrap: nowrap;
+    }
+    /* El ::before de 44×44 se pinta MÁS ALLÁ del padding-box del
+       botón: en cortos sobresale ~12px por la izquierda de la
+       tarjeta, y en todas sobrepasa el borde de .activity-title.
+       Pero AMBOS ancestros tienen overflow:hidden, que en
+       hit-testing RECORTA el ::before (bitmap elementFromPoint:
+       zona efectiva real de solo ~28×12px con el ::before de
+       44×44 computado — medido en vivo). En táctil los ancestros
+       dejan de recortar: el ::before es transparente (cero
+       impacto visual — el nombre sigue truncándose en el <span>,
+       que tiene su propio overflow:hidden + ellipsis) y el
+       target sí llega a 44px reales. Desktop intacto: la regla
+       vive dentro del media query, donde el ::before no existe. */
+    .activity-title {
+      overflow: visible;
+    }
+    .activity-item.short {
+      overflow: visible;
     }
   }
 

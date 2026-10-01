@@ -1571,12 +1571,12 @@
 
   .activity-image-thumb {
     flex-shrink: 0;
+    position: relative; /* ancla del ::before (zona táctil invisible) */
     border: 2px solid rgba(255, 255, 255, 0.9);
     padding: 0;
     background: none;
     cursor: zoom-in;
     border-radius: 50%;
-    overflow: hidden;
     width: 24px;
     height: 24px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
@@ -1595,7 +1595,22 @@
     display: block;
     width: 100%;
     height: 100%;
+    border-radius: 50%; /* recorte aquí: el botón necesita overflow
+                           visible para su zona táctil (::before) */
     object-fit: cover;
+  }
+
+  /* Táctil (auditoría UX): 24px es inalcanzable con dedo (regla dura
+     #5). Un ::before transparente lleva la zona efectiva a 44px sin
+     agrandar el anillo visual ni robarle espacio al nombre.
+     box-sizing: border-box → padding-box = 24 − 2×2px de borde = 20px,
+     y `inset` se mide sobre él: −12px → 20 + 24 = 44px reales. */
+  @media (hover: none) and (pointer: coarse) {
+    .activity-image-thumb::before {
+      content: '';
+      position: absolute;
+      inset: -12px;
+    }
   }
 
   .activity-steps-badge {
