@@ -1113,6 +1113,7 @@
             <button 
               class="activity-item" 
               class:short={numSlots <= 2}
+              class:mini={numSlots <= 1}
               class:drag-ghost={draggedActivityId === activity.id}
               class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
               class:hres-afectado={hresPreview?.accion === 'retirar' && hresPreview.dias.includes(i) && activity.id === draggedActivityId}
@@ -1927,6 +1928,33 @@
     width: 14px;
     height: 14px;
     margin-left: 3px;
+  }
+  /* Bloques de UN slot (≤15 min): el bloque mide ~13px y ni la línea de
+     texto le cabe (auditoría UX: "ilegibles"). El nombre desborda HACIA
+     FUERA del bloque (patrón Google Calendar) con sombra para leerse sobre
+     lo que haya debajo; miniatura e icono de pasos se ocultan (más chicos
+     que el bloque, y el botón de 14px violaba el touch target de 44px). */
+  .activity-item.mini {
+    overflow: visible;
+    z-index: 3;
+  }
+  .activity-item.mini .activity-title {
+    font-size: 0.66rem;
+    line-height: 1.15;
+    margin-top: -1px;
+    overflow: visible;
+  }
+  .activity-item.mini .activity-title span {
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 3px rgba(0, 0, 0, 0.35);
+  }
+  .activity-item.mini .grid-image-thumb,
+  .activity-item.mini .grid-steps-icon {
+    display: none;
   }
   /* Con las columnas compactas de móvil (piso 56px) el título normal baja
      un punto: "Miércoles" completo entra en 56px sin recortes agresivos. */
