@@ -1093,7 +1093,7 @@
         <!-- Nombre completo SIEMPRE accesible: en columna angosta el header muestra
              la abreviatura (Mié/Sáb) y el title lleva el nombre entero. Sin
              nombres cortados a medias jamás. -->
-        <button class="day-header" class:header-hoy={i === hoyIdx} onclick={() => onSelectDay(i)} aria-label={$t('week.viewDay', { day })} title="{day}">
+        <button class="day-header" class:header-hoy={i === hoyIdx} class:header-temp={dayOverrides.some(o => o.day === i && o.activities?.length >= 0)} onclick={() => onSelectDay(i)} aria-label={$t('week.viewDay', { day })} title="{day}">
           <span class="day-name">
             <span class="day-name-completo">{day}</span>
             <span class="day-name-corto" aria-hidden="true">{day.slice(0, 3)}</span>
@@ -1446,6 +1446,7 @@
     transition: background 0.2s;
     overflow: hidden; /* el nombre largo nunca desborda la columna */
     box-sizing: border-box;
+    position: relative; /* ancla el badge ⚡ en la esquina (no empuja el nombre) */
   }
 
   /* Nombre completo SIEMPRE legible (nada cortado a medias):
@@ -1563,17 +1564,30 @@
     background: #e0453a;
   }
 
+  /* Badge ⚡ de edición temporal: PUNTO en la esquina del header (position
+     absolute). Antes iba inline junto al nombre y con 5 días con ⚡ la fila
+     de cabeceras quedaba saturada ("Lun ⚡ Mar ⚡ Hoy ⚡ …") empujando y
+     compactando el nombre. Sigue con title para el significado. */
   .day-temp-badge {
-    font-size: 0.68rem;
-    margin-left: 0.25rem;
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    font-size: 0.58rem;
     color: #b45309;
     background: #fef3c7;
     border: 1px solid #fde68a;
-    border-radius: 6px;
+    border-radius: 999px;
     padding: 0 3px;
     line-height: 1.2;
     display: inline-flex;
     align-items: center;
+    margin: 0;
+  }
+  /* El header con ⚡ reserva la esquina: el nombre/píldora Hoy nunca la pisa
+     (en columnas angostas la píldora llegaba hasta el badge). */
+  .day-header.header-temp {
+    padding-right: 16px;
+    padding-left: 8px;
   }
 
   .slots-grid {
@@ -1860,16 +1874,16 @@
     background-color: rgba(0,0,0,0.01);
   }
 
+  /* Título de la tarjeta: BLOCK con miniatura FLOAT a la derecha (antes era
+     flex space-between y la miniatura le robaba 22px SIEMPRE al texto — en
+     columnas de 66px quedaban 38px y "Rutina" (38.4px) se partía a la mitad.
+     Con float el texto fluye alrededor: las palabras largas bajan enteras a
+     la 2ª línea en vez de truncarse a "Desa…". */
   .activity-title {
     font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.25rem;
+    display: block;
     font-size: 0.78rem;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     width: 100%;
     line-height: 1.25;
   }
@@ -1893,7 +1907,8 @@
   }
 
   /* Bloques de 15 min (1 slot): una sola línea con ellipsis — 2 líneas
-     no caben en la altura del bloque y el texto se recorta. */
+     no caben en la altura del bloque y el texto se recorta. La miniatura
+     baja a 14px para cederle el mayor ancho posible al nombre. */
   .activity-item.short .activity-title {
     font-size: 0.68rem;
   }
@@ -1903,6 +1918,11 @@
     white-space: nowrap;
     display: block;
   }
+  .activity-item.short .grid-image-thumb {
+    width: 14px;
+    height: 14px;
+    margin-left: 3px;
+  }
   /* Con las columnas compactas de móvil (piso 56px) el título normal baja
      un punto: "Miércoles" completo entra en 56px sin recortes agresivos. */
   @container weekly-grid (width < 480px) {
@@ -1911,6 +1931,11 @@
     }
     .activity-item.short .activity-title {
       font-size: 0.62rem;
+    }
+    .grid-image-thumb {
+      width: 15px;
+      height: 15px;
+      margin-left: 3px;
     }
   }
 
@@ -1945,9 +1970,13 @@
 
   /* Miniatura de imagen de la tarjeta (Semana): círculo de la foto real con
      anillo blanco para destacar sobre cualquier color de categoría. Mismo
-     concepto que .activity-image-thumb de la vista Día. */
+     concepto que .activity-image-thumb de la vista Día. FLOAT right: el
+     nombre usa el ancho restante y las palabras completas bajan limpias —
+     sin partir palabras ni truncar por culpa de la foto. */
   .grid-image-thumb {
-    flex-shrink: 0;
+    float: right;
+    margin-left: 4px;
+    margin-top: 1px;
     width: 18px;
     height: 18px;
     border-radius: 50%;

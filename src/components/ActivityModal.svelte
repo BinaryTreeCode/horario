@@ -314,15 +314,35 @@
    * ofrecía "crear a las 12:00" sobre un bloque existente y el modal
    * guardaba el choque sin avisar). La actividad editada se excluye a sí
    * misma: moverla o acortarla sí se valida contra las demás.
+   *
+   * Scope "Solo este día" (override ⚡): la validación corre SOLO contra el
+   * día destino (targetDay). Antes recorría daysOfWeek — los días de la
+   * plantilla semanal — y un día LEJANO con un bloque a la misma hora
+   * bloqueaba la edición del día visible: no se podía mover nada en el
+   * override aunque ese día estuviera libre ("los de la plantilla siguen
+   * existiendo"). Además compara contra las HORAS EFECTIVAS del día: si el
+   * override ya existe, sus actividades mandan sobre la plantilla.
    */
   async function buscarChoque(nueva: { startTime: string; endTime: string; daysOfWeek: number[] }): Promise<{ name: string; dia: string; rango: string } | null> {
     const { DIAS_SEMANA } = await import('../lib/cascade');
+    const diasAValidar = targetDay !== null && saveScope === 'day' ? [targetDay] : nueva.daysOfWeek;
+    // Horas efectivas del día: el override (si existe) pisa la plantilla.
+    const override = targetDay !== null ? await db.dayOverrides.get(targetDay) : null;
+    const overrideActs = override?.activities;
     const acts = (await db.activities.toArray()).filter(a => !a.deletedAt && a.id !== id);
-    for (const dia of nueva.daysOfWeek) {
+    for (const dia of diasAValidar) {
       for (const a of acts) {
         if (!a.daysOfWeek.includes(dia)) continue;
-        if (choca(nueva.startTime, nueva.endTime, a.startTime, a.endTime)) {
-          return { name: a.name, dia: DIAS_SEMANA[dia] ?? `día ${dia}`, rango: `${format12h(a.startTime)} – ${format12h(a.endTime)}` };
+        // Si hay override para este día, la hora vigente es la del override.
+        const vigente = overrideActs?.find(o => o.id === a.id);
+        const s = vigente?.startTime ?? a.startTime;
+        const e = vigente?.endTime ?? a.endTime;
+        // La actividad editada puede vivir en el override con OTRO id (clon
+        // no — mismo id): ya excluida arriba. Un clon de nombre distinto sí
+        // valida (es un bloque real en el día).
+        if (vigente?.id === id) continue;
+        if (choca(nueva.startTime, nueva.endTime, s, e)) {
+          return { name: a.name, dia: DIAS_SEMANA[dia] ?? `día ${dia}`, rango: `${format12h(s)} – ${format12h(e)}` };
         }
       }
     }
