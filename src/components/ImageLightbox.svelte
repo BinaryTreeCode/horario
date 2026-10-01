@@ -26,9 +26,7 @@
 
 <!-- Portal a body: un ancestro con backdrop-filter crea containing block y ancla este overlay fixed a la sección scrolleada en vez del viewport -->
 <div class="lightbox-fullscreen" use:portal onclick={handleOverlayClick} role="dialog" aria-modal="true">
-  <img class="lightbox-img" src={activity.image} alt={activity.name} onclick={handleOverlayClick} />
-
-  <!-- Barra superior flotante: nombre + botón de cierre -->
+  <!-- Barra superior: fila fija — la imagen nunca pasa bajo ella -->
   <div class="lightbox-topbar">
     <div class="lightbox-title-group">
       <h3>{activity.name}</h3>
@@ -55,7 +53,15 @@
     </button>
   </div>
 
-  <!-- Panel de pasos flotante -->
+  <!-- Área de imagen: TODO el espacio libre entre la barra y el panel de
+       pasos. La imagen cabe entera (contain) — nunca se solapa con la
+       barra ni con el panel. Clic en el fondo o en la imagen (por burbuja)
+       cierra. -->
+  <div class="lightbox-stage" onclick={() => onClose()}>
+    <img class="lightbox-img" src={activity.image} alt={activity.name} />
+  </div>
+
+  <!-- Panel de pasos: fila fija al final (ya no flota sobre la imagen) -->
   {#if hasSteps && stepsOpen}
     <ul class="lightbox-steps-panel">
       {#each activity.steps as step}
@@ -66,7 +72,9 @@
 </div>
 
 <style>
-  /* Cubre TODA la pantalla */
+  /* Cubre TODA la pantalla — columna: barra · escenario de imagen · panel
+     de pasos. El padding respeta safe-area (notch/bordes redondeados) para
+     que el póster no toque los bordes del dispositivo. */
   .lightbox-fullscreen {
     position: fixed;
     inset: 0;
@@ -77,9 +85,25 @@
     backdrop-filter: blur(6px);
     z-index: 1200;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding:
+      max(0.5rem, env(safe-area-inset-top, 0px))
+      max(0.5rem, env(safe-area-inset-right, 0px))
+      max(0.5rem, env(safe-area-inset-bottom, 0px))
+      max(0.5rem, env(safe-area-inset-left, 0px));
     animation: lbFade 0.15s ease-out;
+  }
+
+  /* Escenario: todo el espacio libre entre la barra y el panel de pasos.
+     min-height: 0 permite que el flex hijo se encoja (la imagen cabe
+     completa con object-fit: contain, sin desbordar el flex). */
+  .lightbox-stage {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: grid;
+    place-items: center;
   }
 
   @keyframes lbFade {
@@ -89,9 +113,8 @@
 
   .lightbox-img {
     display: block;
-    max-width: 100vw;
-    max-height: 100vh;
-    max-height: 100dvh;
+    max-width: 100%;
+    max-height: 100%;
     width: auto;
     height: auto;
     object-fit: contain;
@@ -104,12 +127,10 @@
     to { transform: scale(1); opacity: 1; }
   }
 
-  /* Barra superior flotante */
+  /* Barra superior: fila fija de la columna (flex-shrink: 0) — ya no
+     flota sobre la imagen, así que el póster nunca queda bajo el título. */
   .lightbox-topbar {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -143,13 +164,14 @@
     align-items: center;
     gap: 0.3rem;
     flex-shrink: 0;
+    min-height: 44px; /* target táctil ≥44px (regla dura #5) */
     background: rgba(255, 255, 255, 0.14);
     border: 1px solid rgba(255, 255, 255, 0.25);
     backdrop-filter: blur(6px);
     color: #fff;
     font-size: 0.75rem;
     font-weight: 700;
-    padding: 0.3rem 0.6rem;
+    padding: 0.4rem 0.75rem;
     border-radius: 999px;
     cursor: pointer;
     transition: background 0.2s;
@@ -159,7 +181,7 @@
     background: rgba(255, 255, 255, 0.28);
   }
 
-  /* Icono de cierre, siempre visible */
+  /* Icono de cierre, siempre visible (48px: ≥44px regla dura #5) */
   .close-btn {
     pointer-events: auto;
     flex-shrink: 0;
@@ -184,29 +206,26 @@
     transform: scale(1.06);
   }
 
-  /* Panel de pasos flotante abajo */
+  /* Panel de pasos: fila fija al final de la columna — ya no cubre el
+     pie del póster (antes era absolute sobre la imagen). */
   .lightbox-steps-panel {
-    position: absolute;
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    margin: 0;
-    width: min(560px, calc(100vw - 2rem));
+    flex-shrink: 0;
+    align-self: center;
+    width: min(560px, 100%);
     max-height: 32vh;
     overflow-y: auto;
     list-style: none;
     padding: 0.9rem 1.25rem;
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
-    border-bottom: none;
     backdrop-filter: blur(10px);
-    border-radius: 16px 16px 0 0;
+    border-radius: 16px;
     animation: lbSlideUp 0.2s ease-out;
   }
 
   @keyframes lbSlideUp {
-    from { transform: translate(-50%, 20px); opacity: 0; }
-    to { transform: translate(-50%, 0); opacity: 1; }
+    from { transform: translateY(20px); opacity: 0; }
+    to   { transform: translateY(0); opacity: 1; }
   }
 
   .lightbox-steps-panel li {
@@ -235,14 +254,12 @@
 
   @media (max-width: 640px) {
     .lightbox-topbar {
-      padding: 0.75rem 0.85rem;
+      padding: 0.5rem 0.75rem;
     }
     .lightbox-topbar h3 {
       font-size: 0.95rem;
     }
-    .close-btn {
-      width: 42px;
-      height: 42px;
-    }
+    /* .close-btn se queda en 48px también en móvil: target táctil ≥44px
+       (regla dura #5 — antes bajaba a 42px). */
   }
 </style>
