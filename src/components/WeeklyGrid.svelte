@@ -872,23 +872,25 @@
   // Solo se muestran los gestos que HOY tienen sentido:
   //  - estirar arriba/abajo: capacidad > 0 en ese lado (si no hay hueco, la
   //    asa no aparece: sin indicador de acción imposible)
-  //  - asa lateral: siempre útil (gana un día nuevo O retira el propio),
-  //    salvo que la actividad tenga un solo día y el gesto la dejaría sin
-  //    ninguno (retirar el único día no se ofrece).
+  //  - asa lateral: SOLO en límites o huecos (pedido del usuario): activa
+  //    únicamente si el vecino exterior NO tiene la actividad (ahí se gana
+  //    ese día) o el borde del arreglo deja el barrido hacia adentro. En
+  //    medio de un tramo contiguo ( Lun–Vie: el borde Lun/Mar ) NO hay asa:
+  //    arrastrar desde ahí mueve el bloque como cualquier otra zona.
   // Se recalcula con activities: al cambiar el día o los datos, reaparecen.
   /**
    * ¿La asa lateral de ESTA tarjeta (columna concreta i) ofrece algo?
-   * Hacia afuera: ganar el vecino si no lo tiene. Hacia adentro: SIEMPRE
-   * hay gesto cuando puedeRetirar — retirar el día del asa (media columna)
-   * o el BARRIDO que elimina los días cruzados (nuevo). Por eso el asa se
-   * muestra aunque el vecino exterior ya tenga la actividad: el barrido la
-   * hace viva (antes era un asa muerta y se ocultaba).
+   * Límites y huecos: afuera se gana un día libre; en el borde del arreglo
+   * solo queda el barrido hacia adentro (requiere ≥2 días). En el medio de
+   * un tramo contiguo la asa no existe — el vecino ya tiene la actividad y
+   * no hay hueco que llenar ni límite que mover.
    */
   function asaLateralUtil(act: Activity, i: number, lado: 'izq' | 'der'): boolean {
     const puedeRetirar = act.daysOfWeek.length > 1;
     const vecino = lado === 'der' ? i + 1 : i - 1;
     const ganaVecino = vecino >= 0 && vecino <= 6 && !act.daysOfWeek.includes(vecino);
-    return ganaVecino || puedeRetirar;
+    const vecinoFuera = vecino < 0 || vecino > 6;
+    return ganaVecino || (puedeRetirar && vecinoFuera);
   }
   const asasPosibles = $derived.by(() => {
     const mapa = new Map<string, { arriba: boolean; abajo: boolean; izq: boolean; der: boolean; retirar: boolean }>();
