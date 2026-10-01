@@ -1890,11 +1890,25 @@
      la 2ª línea en vez de truncarse a "Desa…". */
   .activity-title {
     font-weight: 700;
-    display: block;
+    /* Grupo CENTRADO (nombre + miniatura + pasos) en horizontal y vertical:
+       flex-wrap para que en columnas angostas la miniatura baje a una 2ª
+       línea centrada en vez de robarle ancho al nombre ("Rutina" se
+       truncaba a 32px útiles con la miniatura flotando a la derecha). */
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    text-align: center;
     font-size: 0.78rem;
     overflow: hidden;
     width: 100%;
     line-height: 1.25;
+  }
+
+  .activity-title > span {
+    flex: 0 1 auto;
+    min-width: 0;
   }
 
   .activity-title span {
@@ -1930,7 +1944,6 @@
   .activity-item.short .grid-image-thumb {
     width: 14px;
     height: 14px;
-    margin-left: 3px;
   }
   /* Bloques de UN slot (≤15 min): el bloque mide ~13px y ni la línea de
      texto le cabe (auditoría UX: "ilegibles"). El nombre desborda HACIA
@@ -1971,7 +1984,6 @@
     .grid-image-thumb {
       width: 15px;
       height: 15px;
-      margin-left: 3px;
     }
   }
 
@@ -2010,9 +2022,10 @@
      nombre usa el ancho restante y las palabras completas bajan limpias —
      sin partir palabras ni truncar por culpa de la foto. */
   .grid-image-thumb {
-    float: right;
-    margin-left: 4px;
-    margin-top: 1px;
+    /* Centrada con el nombre (antes float: right). El gap de .activity-title
+       reemplaza los márgenes que la separaban del texto. */
+    float: none;
+    flex: 0 0 auto;
     width: 18px;
     height: 18px;
     border-radius: 50%;
