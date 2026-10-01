@@ -455,7 +455,12 @@
   <header class="dashboard-header glass-panel">
     <div class="header-left">
       <h1 class="logo">🌲 {$t('app.name')}</h1>
-      <nav class="view-tabs" aria-label="{$t('header.viewWeek')} / {$t('header.viewDay')}">
+    </div>
+    <!-- Pestañas FUERA de .header-left: en pantallas anchas el header es una
+         grilla de 3 zonas (logo · pestañas · acciones) y las pestañas quedan
+         centradas de verdad, no pegadas al logo. En pantallas chicas pasan a
+         la derecha de la fila del logo y las acciones se centran debajo. -->
+    <nav class="view-tabs" aria-label="{$t('header.viewWeek')} / {$t('header.viewDay')}">
         <!-- Pestañas semánticas: role=tablist/tab + aria-selected (los lectores anuncian "pestaña", no "botón pulsado") -->
         <div class="view-tabs-inner" role="tablist">
           <button
@@ -480,9 +485,8 @@
           >
             <Clock size={18} /> {$t('header.day')}
           </button>
-        </div>
-      </nav>
-    </div>
+      </div>
+    </nav>
     <div class="header-right">
       <!-- Acciones del header: visibles en móvil/tablet siempre, y en desktop
            solo en Semana (en Día viven en la barra lateral dentro del panel). -->
@@ -720,10 +724,14 @@
     min-height: 100vh;
   }
 
+  /* 3 zonas de verdad: logo (izq) · pestañas (centro EXACTO) · acciones (der).
+     Con flex space-between las pestañas quedaban pegadas al logo y el centro
+     del header quedaba vacío en pantallas anchas. */
   .dashboard-header {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
+    gap: 1rem;
     padding: 1rem 1.5rem;
     padding-top: calc(1rem + env(safe-area-inset-top, 0px));
   }
@@ -732,6 +740,29 @@
     display: flex;
     align-items: center;
     gap: 2rem;
+    justify-self: start;
+  }
+
+  .view-tabs {
+    justify-self: center;
+  }
+
+  .header-right {
+    justify-self: end;
+  }
+
+  /* Pantallas medianas: las 3 zonas no caben sin apretar (las acciones miden
+     ~390px); vuelve el layout de 2 bloques con las pestañas a la derecha del
+     logo y las acciones a la derecha. */
+  @media (max-width: 1199px) {
+    .dashboard-header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+    }
+    .view-tabs {
+      margin-left: auto;
+    }
   }
 
   .logo {
@@ -1165,14 +1196,12 @@
       min-height: 44px;
       line-height: 1;
     }
-    .header-left {
-      width: 100%;
-      justify-content: space-between;
-      gap: 1rem;
-    }
+    /* Fila 1: logo a la izquierda y pestañas a la derecha. Fila 2: acciones
+       CENTRADAS (antes pegadas a la derecha: en móvil el header parecía
+       desbalanceado). */
     .header-right {
       width: 100%;
-      justify-content: flex-end;
+      justify-content: center;
       gap: 0.5rem;
     }
     /* G9: en landscape corto el header se come la mitad de la pantalla —
