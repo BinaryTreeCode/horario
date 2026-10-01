@@ -1088,8 +1088,7 @@
     {#each days as day, i}
       {@const dayData = getDayActivitiesWithLayout(i, dropPreview?.day === i ? dropPreview.slots : undefined, draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i) ? draggedActivityId : null)}
       <div class="day-column" class:col-dragging={draggedActivityId !== null} class:col-hoy={i === hoyIdx}
-        class:col-hres-ganar={hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i)}
-        class:col-hres-retirar={hresPreview?.accion === 'retirar' && hresPreview.dias.includes(i)}>
+        class:col-hres-ganar={hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i)}>
         <!-- Nombre completo SIEMPRE accesible: en columna angosta el header muestra
              la abreviatura (Mié/Sáb) y el title lleva el nombre entero. Sin
              nombres cortados a medias jamás. -->
@@ -1116,6 +1115,7 @@
               class:short={numSlots <= 2}
               class:drag-ghost={draggedActivityId === activity.id}
               class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
+              class:hres-afectado={hresPreview?.accion === 'retirar' && hresPreview.dias.includes(i) && activity.id === draggedActivityId}
               onpointerdown={(e) => handleItemPointerDown(e, activity, i)}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
               style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {getActivityColor(activity.categoryId, categories)}"
@@ -1510,16 +1510,21 @@
   }
 
   /* ── Preview del hResize (asas laterales) ──
-     Mientras el gesto cruza el umbral, la columna afectada se marca ANTES
-     de soltar: verde = la actividad ganaría este día; rojo tenue = este día
-     se retiraría. Espejo del feedback del drag vertical (drop-preview). */
+     Verde: la actividad ganaría el día (no tiene bloque ahí — la columna
+     entera es el único feedback posible). Retiro: la marca va sobre los
+     BLOQUES de la actividad arrastrada en los días afectados (.hres-
+     afectado), NUNCA sobre la columna entera: eso manchaba a los vecinos
+     (Aseo 1, Trabajo…) que no participan en el gesto. Espejo del feedback
+     del drag vertical (drop-preview). */
   .day-column.col-hres-ganar .slots-grid {
     box-shadow: inset 0 0 0 3px rgba(74, 124, 68, 0.55);
     background: rgba(74, 124, 68, 0.06);
   }
-  .day-column.col-hres-retirar .slots-grid {
-    box-shadow: inset 0 0 0 3px rgba(224, 69, 58, 0.5);
-    background: rgba(224, 69, 58, 0.06);
+  /* Fantasmas del retiro: los bloques de la actividad que dejarían de
+     existir en esos días se ponen rojos. */
+  .activity-item.hres-afectado {
+    background: #e0453a !important;
+    color: #fff !important;
   }
 
   /* Variante del rótulo para el resize VERTICAL: sin signo, solo el texto
