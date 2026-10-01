@@ -1833,12 +1833,16 @@
   /* ── Asas horizontales (estirar a días vecinos) ──
      Franjas laterales angostas, separadas de las verticales (las esquinas
      quedan para el resize vertical: fricción mínima entre gestos). */
+  /* Las asas van MORDIDAS hacia adentro del bloque: al ras del borde (0-2px)
+     la píldora caía justo en la frontera entre columnas y parecía una barrita
+     flotando entre los dos bloques vecinos, sin dueño claro (captura del
+     usuario). Zona de agarre 12px, píldora 4px a 4px del borde. */
   .resize-handle.hres-izq {
-    left: 0;
+    left: 1px;
     right: auto;
-    top: 30%;
-    bottom: 30%;
-    width: 8px;
+    top: 25%;
+    bottom: 25%;
+    width: 12px;
     height: auto;
     min-height: 0;
     max-height: none;
@@ -1846,10 +1850,10 @@
   }
   .resize-handle.hres-der {
     left: auto;
-    right: 0;
-    top: 30%;
-    bottom: 30%;
-    width: 8px;
+    right: 1px;
+    top: 25%;
+    bottom: 25%;
+    width: 12px;
     height: auto;
     min-height: 0;
     max-height: none;
@@ -1857,19 +1861,22 @@
   }
   .resize-handle.hres-izq::after,
   .resize-handle.hres-der::after {
-    left: 2px;
-    right: 2px;
-    top: 20%;
-    bottom: 20%;
-    width: 3px;
+    top: 22%;
+    bottom: 22%;
+    width: 4px;
     height: auto;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.8);
+    /* Contorno + sombra: la píldora se lee igual sobre bloques claros y
+       oscuros y no se confunde con el borde de la columna. */
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22), 0 1px 2px rgba(0, 0, 0, 0.3);
   }
   .resize-handle.hres-izq::after {
-    left: 2px;
+    left: 4px;
   }
   .resize-handle.hres-der::after {
     left: auto;
-    right: 2px;
+    right: 4px;
   }
 
   .activity-item:hover {
