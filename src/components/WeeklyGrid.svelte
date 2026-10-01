@@ -1833,16 +1833,18 @@
   /* ── Asas horizontales (estirar a días vecinos) ──
      Franjas laterales angostas, separadas de las verticales (las esquinas
      quedan para el resize vertical: fricción mínima entre gestos). */
-  /* Las asas van MORDIDAS hacia adentro del bloque: al ras del borde (0-2px)
-     la píldora caía justo en la frontera entre columnas y parecía una barrita
-     flotando entre los dos bloques vecinos, sin dueño claro (captura del
-     usuario). Zona de agarre 12px, píldora 4px a 4px del borde. */
+  /* Asas laterales SIN indicador visible (pedido del usuario: las píldoras
+     en los bordes izquierdo/derecho se veían como barritas flotando entre
+     columnas). El gesto de barrido sigue disponible: la franja de 8px en
+     cada borde inicia el hResize y el cursor cambia a ew-resize, así que el
+     agarre se descubre sin ensuciar el bloque. `content: none` es necesario
+     para NO heredar la píldora horizontal del asa vertical base. */
   .resize-handle.hres-izq {
-    left: 1px;
+    left: 0;
     right: auto;
     top: 25%;
     bottom: 25%;
-    width: 12px;
+    width: 8px;
     height: auto;
     min-height: 0;
     max-height: none;
@@ -1850,10 +1852,10 @@
   }
   .resize-handle.hres-der {
     left: auto;
-    right: 1px;
+    right: 0;
     top: 25%;
     bottom: 25%;
-    width: 12px;
+    width: 8px;
     height: auto;
     min-height: 0;
     max-height: none;
@@ -1861,22 +1863,7 @@
   }
   .resize-handle.hres-izq::after,
   .resize-handle.hres-der::after {
-    top: 22%;
-    bottom: 22%;
-    width: 4px;
-    height: auto;
-    border-radius: 3px;
-    background: rgba(255, 255, 255, 0.8);
-    /* Contorno + sombra: la píldora se lee igual sobre bloques claros y
-       oscuros y no se confunde con el borde de la columna. */
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22), 0 1px 2px rgba(0, 0, 0, 0.3);
-  }
-  .resize-handle.hres-izq::after {
-    left: 4px;
-  }
-  .resize-handle.hres-der::after {
-    left: auto;
-    right: 4px;
+    content: none;
   }
 
   .activity-item:hover {
