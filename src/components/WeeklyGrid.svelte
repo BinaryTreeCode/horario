@@ -1835,18 +1835,19 @@
   /* ── Asas horizontales (estirar a días vecinos) ──
      Franjas laterales angostas, separadas de las verticales (las esquinas
      quedan para el resize vertical: fricción mínima entre gestos). */
-  /* Asas laterales SIN indicador visible (pedido del usuario: las píldoras
-     en los bordes izquierdo/derecho se veían como barritas flotando entre
-     columnas). El gesto de barrido sigue disponible: la franja de 8px en
-     cada borde inicia el hResize y el cursor cambia a ew-resize, así que el
-     agarre se descubre sin ensuciar el bloque. `content: none` es necesario
-     para NO heredar la píldora horizontal del asa vertical base. */
+  /* Asas laterales: el indicador (píldora) existe SOLO donde el gesto tiene
+     sentido — límites del tramo y huecos — porque el elemento del asa ya se
+     crea únicamente ahí (asaLateralUtil). En el medio de un tramo contiguo
+     no hay asa ni píldora: arrastrar desde el borde mueve el bloque.
+     La píldora va MORDIDA hacia adentro (5-9px) para no caer sobre la
+     frontera entre columnas, con anillo oscuro + sombra para leerse igual
+     sobre bloques claros y oscuros. */
   .resize-handle.hres-izq {
-    left: 0;
+    left: 1px;
     right: auto;
     top: 25%;
     bottom: 25%;
-    width: 8px;
+    width: 12px;
     height: auto;
     min-height: 0;
     max-height: none;
@@ -1854,10 +1855,10 @@
   }
   .resize-handle.hres-der {
     left: auto;
-    right: 0;
+    right: 1px;
     top: 25%;
     bottom: 25%;
-    width: 8px;
+    width: 12px;
     height: auto;
     min-height: 0;
     max-height: none;
@@ -1865,7 +1866,20 @@
   }
   .resize-handle.hres-izq::after,
   .resize-handle.hres-der::after {
-    content: none;
+    top: 22%;
+    bottom: 22%;
+    width: 4px;
+    height: auto;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22), 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  .resize-handle.hres-izq::after {
+    left: 4px;
+  }
+  .resize-handle.hres-der::after {
+    left: auto;
+    right: 4px;
   }
 
   .activity-item:hover {
