@@ -1898,7 +1898,10 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: center;
-    gap: 3px;
+    /* Separación nombre ↔ miniatura: a 3px quedaban pegados (captura del
+       usuario). 6px los despega sin forzar el salto de línea en columnas
+       anchas. */
+    gap: 6px;
     text-align: center;
     font-size: 0.78rem;
     overflow: hidden;
@@ -2067,7 +2070,8 @@
   .img-popover {
     position: fixed;
     z-index: 1000;
-    transform: translate(-50%, calc(-100% - 8px));
+    /* 12px sobre la miniatura: a 8px la foto quedaba pegada al bloque. */
+    transform: translate(-50%, calc(-100% - 12px));
     display: flex;
     flex-direction: column;
     align-items: center;
