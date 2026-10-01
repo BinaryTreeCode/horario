@@ -861,3 +861,49 @@ export function barridoRetiro(
   if (dias.length > maxQuitar) dias = dias.slice(0, maxQuitar);
   return dias;
 }
+
+/**
+ * ── Horario vigente de un día (validación de choques del modal) ─────────
+ *
+ * El override ⚡, cuando existe, ES el día: la vista Día muestra únicamente
+ * sus actividades, que pueden tener ids PROPIOS (bloques creados o
+ * duplicados dentro del día) y pueden haber eliminado bloques de la
+ * plantilla. Validar una edición contra la plantilla en un día con override
+ * reportaba bloques FANTASMA ("Ya existe trabajo (opcional) (copia)… el
+ * Lunes") que ese día ya no existen, y rechazaba ediciones válidas. Sin
+ * override, el horario del día es la plantilla filtrada por daysOfWeek.
+ *
+ * `excluirId` excluye a la actividad editada: moverla o acortarla se valida
+ * contra las demás, nunca contra sí misma.
+ */
+export function horarioEfectivoDia(
+  plantilla: Activity[],
+  override: { activities?: Activity[] } | undefined,
+  dia: number,
+  excluirId: string | null = null
+): Activity[] {
+  if (override?.activities) {
+    return override.activities.filter(a => a.id !== excluirId);
+  }
+  return plantilla.filter(
+    a => !a.deletedAt && a.id !== excluirId && a.daysOfWeek.includes(dia)
+  );
+}
+
+/**
+ * ¿[ini,fin) se solapa con [ini2,fin2)? Horas "HH:MM" comparadas en minutos
+ * ENTEROS (blindaje anti-flotantes, igual que el resto del módulo). Los
+ * extremos son exclusivos: 15:45–16:00 y 16:00–16:30 NO chocan.
+ */
+export function chocaHoras(
+  ini: string,
+  fin: string,
+  ini2: string,
+  fin2: string
+): boolean {
+  const a = ini.split(':').map(Number), b = fin.split(':').map(Number);
+  const c = ini2.split(':').map(Number), d = fin2.split(':').map(Number);
+  const aM = a[0] * 60 + a[1], bM = b[0] * 60 + b[1];
+  const cM = c[0] * 60 + c[1], dM = d[0] * 60 + d[1];
+  return aM < dM && cM < bM;
+}

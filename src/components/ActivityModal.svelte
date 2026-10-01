@@ -299,15 +299,6 @@
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import { Copy } from '@lucide/svelte';
 
-  /** ¿[ini,fin) choca con [ini2,fin2)? (horas "HH:MM") */
-  function choca(ini: string, fin: string, ini2: string, fin2: string): boolean {
-    const a = ini.split(':').map(Number), b = fin.split(':').map(Number);
-    const c = ini2.split(':').map(Number), d = fin2.split(':').map(Number);
-    const aM = a[0] * 60 + a[1], bM = b[0] * 60 + b[1];
-    const cM = c[0] * 60 + c[1], dM = d[0] * 60 + d[1];
-    return aM < dM && cM < bM;
-  }
-
   /**
    * No se debe poder crear una actividad si ya existe una que se solape con
    * ella en ALGÚN día seleccionado (pedido del usuario: el menú de hueco
@@ -316,33 +307,24 @@
    * misma: moverla o acortarla sí se valida contra las demás.
    *
    * Scope "Solo este día" (override ⚡): la validación corre SOLO contra el
-   * día destino (targetDay). Antes recorría daysOfWeek — los días de la
-   * plantilla semanal — y un día LEJANO con un bloque a la misma hora
-   * bloqueaba la edición del día visible: no se podía mover nada en el
-   * override aunque ese día estuviera libre ("los de la plantilla siguen
-   * existiendo"). Además compara contra las HORAS EFECTIVAS del día: si el
-   * override ya existe, sus actividades mandan sobre la plantilla.
+   * día destino (targetDay) y contra el HORARIO VIGENTE de ese día, que
+   * calcula `horarioEfectivoDia` (el override ES el día y reemplaza la
+   * plantilla; sin override, la plantilla del día).
+   *
+   * Scope "Plantilla semanal": se valida la plantilla tal cual en los días
+   * marcados (un día con override tapa su plantilla, pero el usuario está
+   * editando LA PLANTILLA y su consistencia interna).
    */
   async function buscarChoque(nueva: { startTime: string; endTime: string; daysOfWeek: number[] }): Promise<{ name: string; dia: string; rango: string } | null> {
-    const { DIAS_SEMANA } = await import('../lib/cascade');
-    const diasAValidar = targetDay !== null && saveScope === 'day' ? [targetDay] : nueva.daysOfWeek;
-    // Horas efectivas del día: el override (si existe) pisa la plantilla.
-    const override = targetDay !== null ? await db.dayOverrides.get(targetDay) : null;
-    const overrideActs = override?.activities;
-    const acts = (await db.activities.toArray()).filter(a => !a.deletedAt && a.id !== id);
+    const { DIAS_SEMANA, horarioEfectivoDia, chocaHoras } = await import('../lib/cascade');
+    const scopeDia = targetDay !== null && saveScope === 'day';
+    const diasAValidar = scopeDia ? [targetDay] : nueva.daysOfWeek;
+    const plantilla = await db.activities.toArray();
     for (const dia of diasAValidar) {
-      for (const a of acts) {
-        if (!a.daysOfWeek.includes(dia)) continue;
-        // Si hay override para este día, la hora vigente es la del override.
-        const vigente = overrideActs?.find(o => o.id === a.id);
-        const s = vigente?.startTime ?? a.startTime;
-        const e = vigente?.endTime ?? a.endTime;
-        // La actividad editada puede vivir en el override con OTRO id (clon
-        // no — mismo id): ya excluida arriba. Un clon de nombre distinto sí
-        // valida (es un bloque real en el día).
-        if (vigente?.id === id) continue;
-        if (choca(nueva.startTime, nueva.endTime, s, e)) {
-          return { name: a.name, dia: DIAS_SEMANA[dia] ?? `día ${dia}`, rango: `${format12h(s)} – ${format12h(e)}` };
+      const override = scopeDia ? await db.dayOverrides.get(dia) : undefined;
+      for (const a of horarioEfectivoDia(plantilla, override, dia, id)) {
+        if (chocaHoras(nueva.startTime, nueva.endTime, a.startTime, a.endTime)) {
+          return { name: a.name, dia: DIAS_SEMANA[dia] ?? `día ${dia}`, rango: `${format12h(a.startTime)} – ${format12h(a.endTime)}` };
         }
       }
     }

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeDay, capacidadResizeWeekly, barridoRetiro } from './cascade';
+import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeDay, capacidadResizeWeekly, barridoRetiro, horarioEfectivoDia, chocaHoras } from './cascade';
 import type { Activity } from './types';
 
 const codec = {
@@ -595,5 +595,68 @@ describe('barridoRetiro — asa lateral: los días cruzados se eliminan', () => 
     // dirIn=+1 solo cruza Domingo (6), que no está en days → sin cruces
     // válidos → cae al gesto clásico (retirar el Sábado, el día del asa).
     expect(barridoRetiro(LUN_VIE, 5, 1, 4)).toEqual([5]);
+  });
+});
+
+/** Fixture mínimo de actividad para la validación de choques. */
+const act = (id: string, name: string, startTime: string, endTime: string, daysOfWeek: number[], deletedAt?: number): Activity =>
+  ({ id, categoryId: 'rutina', name, startTime, endTime, daysOfWeek, updatedAt: 0, ...(deletedAt ? { deletedAt } : {}) } as Activity);
+
+describe('chocaHoras — solape [ini,fin) en minutos enteros', () => {
+  test('bordes que se tocan NO chocan (extremos exclusivos)', () => {
+    expect(chocaHoras('15:45', '16:00', '16:00', '16:30')).toBe(false);
+    expect(chocaHoras('16:00', '16:30', '15:45', '16:00')).toBe(false);
+  });
+
+  test('solape parcial de 15 min sí choca (caso Baño vs trabajo (opcional) (copia))', () => {
+    expect(chocaHoras('19:00', '19:45', '17:45', '19:15')).toBe(true);
+    expect(chocaHoras('17:45', '19:15', '19:00', '19:45')).toBe(true);
+  });
+
+  test('idénticos y contenidos chocan', () => {
+    expect(chocaHoras('08:00', '09:00', '08:00', '09:00')).toBe(true);
+    expect(chocaHoras('08:30', '08:45', '08:00', '09:00')).toBe(true);
+  });
+});
+
+describe('horarioEfectivoDia — qué actividades existen en un día', () => {
+  const plantilla = [
+    act('cop', 'trabajo (opcional) (copia)', '17:45', '19:15', [0, 1, 2, 3, 4]),
+    act('ej', 'Ejercicio', '11:30', '12:15', [0, 2, 4]),
+    act('bor', 'borrada', '12:00', '13:00', [0], 123),
+    act('sab', 'de otro día', '10:00', '11:00', [5])
+  ];
+
+  test('sin override: plantilla del día, sin borradas, sin la editada', () => {
+    const vigentes = horarioEfectivoDia(plantilla, undefined, 0, 'ej');
+    expect(vigentes.map(a => a.id)).toEqual(['cop']);
+  });
+
+  test('con override: ES el día — bloques de plantilla ausentes NO existen', () => {
+    // Override con ids PROPIOS (caso real: el override de Lunes no hereda
+    // los ids de la plantilla). "cop" y "ej" de la plantilla NO deben
+    // aparecer aunque daysOfWeek los incluya.
+    const override = {
+      day: 0,
+      activities: [act('x1', 'Baño', '18:00', '19:30', [0]), act('x2', 'Cena', '19:30', '20:00', [0])],
+      updatedAt: 0
+    };
+    const vigentes = horarioEfectivoDia(plantilla, override, 0, null);
+    expect(vigentes.map(a => a.id)).toEqual(['x1', 'x2']);
+  });
+
+  test('con override: excluirId quita la actividad editada del override', () => {
+    const override = {
+      day: 0,
+      activities: [act('x1', 'Baño', '18:00', '19:30', [0]), act('x2', 'Cena', '19:30', '20:00', [0])],
+      updatedAt: 0
+    };
+    const vigentes = horarioEfectivoDia(plantilla, override, 0, 'x1');
+    expect(vigentes.map(a => a.id)).toEqual(['x2']);
+  });
+
+  test('override vacío (activities: []) = día sin bloques, no cae a plantilla', () => {
+    const override = { day: 0, activities: [], updatedAt: 0 };
+    expect(horarioEfectivoDia(plantilla, override, 0, null)).toEqual([]);
   });
 });
