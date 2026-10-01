@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeDay, capacidadResizeWeekly } from './cascade';
+import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeDay, capacidadResizeWeekly, barridoRetiro } from './cascade';
 import type { Activity } from './types';
 
 const codec = {
@@ -527,5 +527,73 @@ describe('capacidadResizeDay/Weekly — estirar SIEMPRE topa (nunca rechaza)', (
     // Sin candado nuevo esto habría dado ⛔ por la rutina preexistente:
     const sinRutina = resolveResizeDay([s('e', 10, 11), s('r', 13, 14)], 'e', 'abajo', 12, 7, 14);
     expect(res.valido).toBe(sinRutina.valido); // misma suerte con o sin rutina fuera de rango
+  });
+});
+
+describe('barridoRetiro — asa lateral: los días cruzados se eliminan', () => {
+  // days de referencia: Lun(0)–Vie(4), como "trabajo" en la BD real.
+  const LUN_VIE = [0, 1, 2, 3, 4];
+
+  test('umbral de media columna (0 columnas cruzadas): gesto clásico — solo el día del asa', () => {
+    // Asa del Domingo (6) hacia adentro (dirIn=-1): retira SOLO el Domingo.
+    expect(barridoRetiro(LUN_VIE, 6, -1, 0)).toEqual([6]);
+    // Asa del Lunes (0) hacia adentro (dirIn=+1): retira SOLO el Lunes.
+    expect(barridoRetiro(LUN_VIE, 0, 1, 0)).toEqual([0]);
+  });
+
+  test('barrido de Domingo a Jueves: elimina Sábado y Viernes (el ejemplo del usuario)', () => {
+    // days = Lun–Dom (el bloque completo), asa en Domingo (6), dirIn=-1,
+    // 2 columnas completas cruzadas → Sábado (5) y Viernes (4) fuera;
+    // Jueves (3) queda como nuevo borde y Domingo se conserva.
+    const TODO_SEMANA = [0, 1, 2, 3, 4, 5, 6];
+    expect(barridoRetiro(TODO_SEMANA, 6, -1, 2)).toEqual([5, 4]);
+  });
+
+  test('extremos exclusivos: el día bajo el dedo (columna incompleta) sobrevive', () => {
+    // Asa en Viernes (4) de Lun–Vie, 2 columnas COMPLETAS hacia adentro
+    // (dirIn=-1): el dedo cruzó Jueves(3) y Miércoles(2) y está DENTRO de
+    // Martes (2.4 columnas en la vista → floor 2) → Martes sobrevive como
+    // nuevo borde junto con el origen Viernes.
+    expect(barridoRetiro(LUN_VIE, 4, -1, 2)).toEqual([3, 2]);
+    // Con 3 columnas COMPLETAS el dedo ya cruzó Martes entero: se retira
+    // también (la vista pasa floor(|delta|/ancho), así que la columna bajo
+    // el dedo solo sobrevive cuando el dedo está dentro de ella).
+    expect(barridoRetiro(LUN_VIE, 4, -1, 3)).toEqual([3, 2, 1]);
+  });
+
+  test('solo se retiran días que la actividad tiene (corrida con hueco)', () => {
+    // Baño real: Lun(0), Mié(2), Vie(4). Asa del Viernes hacia adentro 3
+    // columnas cruza Jueves(4-1*? no lo tiene), Miércoles(2, sí), Martes(1,
+    // no lo tiene) → solo se retiran los que tiene: Miércoles.
+    expect(barridoRetiro([0, 2, 4], 4, -1, 3)).toEqual([2]);
+  });
+
+  test('corrida rota sin cruces válidos: cae al gesto clásico (día del asa)', () => {
+    // Días Lun(0) y Vie(4): asa del Lunes, 2 columnas hacia adentro cruzan
+    // Martes(1) y Miércoles(2) — no tiene ninguno → gesto clásico [0].
+    expect(barridoRetiro([0, 4], 0, 1, 2)).toEqual([0]);
+  });
+
+  test('jamás deja el bloque sin días', () => {
+    // Dos días (Lun, Mar), asa del Lunes, barrido de 5 columnas: solo puede
+    // quitar 1 (Mar) — el bloque jamás queda vacío.
+    expect(barridoRetiro([0, 1], 0, 1, 5)).toEqual([1]);
+    // Barrido gigante sobre Lun–Vie (asa del Lunes): quita Mar, Mié, Jue, Vie
+    // (4 = length-1); los primeros del barrido (los más cercanos al asa).
+    expect(barridoRetiro(LUN_VIE, 0, 1, 99)).toEqual([1, 2, 3, 4]);
+  });
+
+  test('actividad de un solo día: sin gesto (no se ofrece retirar)', () => {
+    expect(barridoRetiro([3], 3, -1, 0)).toEqual([]);
+    expect(barridoRetiro([3], 3, -1, 4)).toEqual([]);
+  });
+
+  test('columnas negativas o fuera del arreglo se tratan como gesto clásico y se frenan en el borde', () => {
+    // Columnas negativas (no debería pasar, defensivo): gesto clásico.
+    expect(barridoRetiro(LUN_VIE, 2, -1, -3)).toEqual([2]);
+    // Barrido que desborda el arreglo: asa del Sábado (5) de Lun–Vie con
+    // dirIn=+1 solo cruza Domingo (6), que no está en days → sin cruces
+    // válidos → cae al gesto clásico (retirar el Sábado, el día del asa).
+    expect(barridoRetiro(LUN_VIE, 5, 1, 4)).toEqual([5]);
   });
 });

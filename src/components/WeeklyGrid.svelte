@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types';
   import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
-  import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeWeekly } from '../lib/cascade';
+  import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeWeekly, barridoRetiro } from '../lib/cascade';
   import type { WeeklyResolution } from '../lib/cascade';
   import { db } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
@@ -782,30 +782,13 @@
     const dirAsa = m.lado === 'der' ? 1 : -1;      // hacia afuera
     const haciaDentro = Math.sign(delta) === -dirAsa; // arrastre opuesto al lado del asa
     if (haciaDentro) {
-      // Devolverse: BARRIDO de retiro hacia adentro.
-      if (act.daysOfWeek.length <= 1) return null; // retirar el único día no se ofrece
-      const dirIn = -dirAsa;
-      const set = new Set(act.daysOfWeek);
+      // Devolverse: BARRIDO de retiro hacia adentro. La matemática vive en
+      // cascade.ts (barridoRetiro, dueño único con tests): aquí solo la
+      // geometría del gesto (columnas completas cruzadas y dirección).
+      const dirIn: 1 | -1 = -dirAsa;
       const n = Math.floor(Math.abs(delta) / colAncho); // columnas COMPLETAS cruzadas
-      let dias: number[] = [];
-      if (n === 0) {
-        // Umbral de media columna (dedo aún dentro de la primera columna):
-        // gesto clásico — retirar SOLO el día del asa.
-        dias = [m.day];
-      } else {
-        // Barrido: los días cruzados entre el asa y el dedo (EXTREMOS
-        // EXCLUSIVOS): el día bajo el dedo queda como nuevo borde y el día
-        // del asa se conserva. Solo días que la actividad tiene.
-        for (let k = 1; k <= n; k++) {
-          const d = m.day + k * dirIn;
-          if (d < 0 || d > 6) break;
-          if (set.has(d)) dias.push(d);
-        }
-        if (dias.length === 0) dias = [m.day]; // corrida rota: vale el gesto clásico
-      }
-      // Jamás deja el bloque sin días.
-      const maxQuitar = act.daysOfWeek.length - 1;
-      if (dias.length > maxQuitar) dias = dias.slice(0, maxQuitar);
+      const dias = barridoRetiro(act.daysOfWeek, m.day, dirIn, n);
+      if (dias.length === 0) return null; // único día: retirar no se ofrece
       return { accion: 'retirar', dias, diaOrigen: m.day };
     }
     const diaVecino = m.day + dirAsa;
