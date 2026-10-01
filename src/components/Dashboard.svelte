@@ -747,6 +747,26 @@
     justify-self: center;
   }
 
+  /* Acciones compactas: con textos (Ajustar Arriba/Abajo + Nueva Actividad)
+   la fila mide ~700px y SOLO cabe en ultrawide (≥1960px); en pantallas
+   comunes partía la fila en dos (el ⚙️ quedaba solo abajo) y descentraba
+   las pestañas al crecer su zona de la grilla. Iconos solos (con aria-label
+   y title) caben siempre y las pestañas siguen centradas exactas. */
+  @media (max-width: 2080px) {
+    .header-actions :global(.hide-mobile) {
+      display: none;
+    }
+  }
+
+  /* Desktop: la fila de acciones no se parte — si no cupiera, la zona
+   derecha de la grilla crece (1fr tiene piso en su contenido) en vez de
+   bajar el ⚙️ a una segunda fila. */
+  @media (min-width: 1200px) {
+    .header-actions {
+      flex-wrap: nowrap;
+    }
+  }
+
   .header-right {
     justify-self: end;
   }
@@ -810,6 +830,10 @@
 
   .header-right {
     display: flex;
+    /* center: sin esto, si las acciones llegan a partirse en 2 filas, el
+       botón de Datos (hermano en esta fila) se ESTIRA a la altura de las
+       dos filas (píldora gigante vista en preview a 2000px). */
+    align-items: center;
     gap: 0.75rem;
   }
 
