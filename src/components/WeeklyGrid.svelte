@@ -1386,13 +1386,20 @@
   .hour-ampm {
     font-size: 0.6rem;
     font-weight: 600;
-    color: #718096;
+    /* 4,02:1 con #718096 — no llegaba a AA. #4a5568 da 7,53:1 sobre el
+       panel y 6,60:1 en el peor caso (glifo encima de un punto del
+       patrón de fondo). Jerarquía conservada: sigue siendo más claro que
+       .hour-text (#2d3748). */
+    color: #4a5568;
   }
 
   .half-hour-label {
     font-size: 0.64rem;
     font-weight: 500;
-    color: #a0aec0;
+    /* 2,26:1 con #a0aec0: la mitad de lo que exige AA. #5c6778 da 5,73:1
+       sobre el panel y 5,03:1 en el peor caso. Sigue siendo la etiqueta
+       más discreta de las dos (peso 500 frente al 600 de AM/PM). */
+    color: #5c6778;
     display: flex;
     align-items: center;
     justify-content: flex-end;

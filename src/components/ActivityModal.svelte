@@ -813,7 +813,9 @@
   }
 
   .image-btn-danger {
-    color: #e53e3e;
+    /* 4,13:1 con #e53e3e sobre el blanco del botón (3,86:1 en hover):
+       no llegaba a AA. #c81e1e da 5,74:1 y 5,36:1 en hover. */
+    color: #c81e1e;
   }
 
   .image-btn-danger:hover {
@@ -1441,7 +1443,9 @@
 
   .btn-danger {
     background: #fee2e2;
-    color: #dc2626;
+    /* 3,95:1 con #dc2626 — y en hover el fondo se oscurece (#fecaca) y
+       baja a 3,34:1. #a71a1a da 6,13:1 y mantiene 5,17:1 en hover. */
+    color: #a71a1a;
   }
 
   .btn-danger:hover {

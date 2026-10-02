@@ -116,7 +116,10 @@ async function zonasInteractivas(page: import('@playwright/test').Page, minimo: 
     // 1) Candidatos por rect: solo los que ya de entrada se ven cortos.
     //    ElementFromPoint no mide nada fuera del viewport, asi que medir
     //    todo a ciegas se saltaria justo los bloques cortos de la tarde.
-    const candidatos = [...document.querySelectorAll('button')]
+    //    OJO: los bloques de la rejilla semanal son <div role="button">, no
+    //    <button> — buscarlos solo por etiqueta dejaba el guard mediendo
+    //    cero bloques de la semana y pasaban en verde sin comprobar nada.
+    const candidatos = [...document.querySelectorAll('button, [role="button"]')]
       .filter(b => {
         const r = b.getBoundingClientRect();
         return r.width > 0 && r.height > 0 && r.height < min;
@@ -196,3 +199,98 @@ for (const vp of VIEWPORTS_PARA_44) {
     });
   });
 }
+
+/**
+ * Contraste REAL de todo el texto visible, componiendo el fondo a mano.
+ *
+ * Por que no basta con la regla color-contrast de axe: el body lleva un
+ * patrón de puntos (radial-gradient en global.css) y axe no sabe calcular
+ * contraste sobre un background-image. Clasifica esos nodos como
+ * `incomplete` en lugar de `violation`, de modo que el assert de arriba
+ * (violations == []) PASABA EN VERDE sin haber medido nada: en la rejilla
+ * semanal entera noHabía ni un solo elemento queaxe dieron por "pasa".
+ *
+ * Aqui se compone el color de fondo mezclando las capas semitransparentes
+ * desde el ancestro mas opaco hacia abajo, que es lo que hace el ojo. El
+ * patrón de puntos se ignora (es un background-image): se mide contra el
+ * color de fondo plano, que es el caso OPTIMISTA, asi que los colores que
+ * pasan aqui tienen que cumplir ademas con el punto mas oscuro encima
+ * (≈5% mas oscuro) para ser correctos de verdad.
+ */
+async function contrasteReal(page: import('@playwright/test').Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const srgb = (c: number) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    const luminancia = (rgb: number[]) => 0.2126 * srgb(rgb[0]) + 0.7152 * srgb(rgb[1]) + 0.0722 * srgb(rgb[2]);
+    const leer = (s: string) => { const n = (s.match(/[\d.]+/g) || []).map(Number); return { rgb: n.slice(0, 3), a: n.length > 3 ? n[3] : 1 }; };
+
+    const fondoDe = (el: Element): number[] => {
+      const capas: { rgb: number[]; a: number }[] = [];
+      for (let n: Element | null = el; n; n = n.parentElement) {
+        const c = leer(getComputedStyle(n).backgroundColor);
+        if (c.a > 0) { capas.push(c); if (c.a >= 0.999) break; }
+      }
+      let f = [255, 255, 255];
+      for (let i = capas.length - 1; i >= 0; i--) {
+        const { rgb, a } = capas[i];
+        f = rgb.map((v, j) => v * a + f[j] * (1 - a));
+      }
+      return f;
+    };
+
+    const fallos: string[] = [];
+    for (const el of document.querySelectorAll('body *')) {
+      const texto = [...el.childNodes]
+        .filter(n => n.nodeType === 3)
+        .map(n => (n.textContent || '').trim())
+        .join(' ')
+        .trim();
+      if (!texto) continue;
+      const s = getComputedStyle(el);
+      if (s.visibility === 'hidden' || s.display === 'none' || Number(s.opacity) === 0) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;
+
+      const fondo = fondoDe(el);
+      const c = leer(s.color);
+      const fg = c.a < 1 ? fondo.map((v, j) => v * c.a + c.rgb[j] * (1 - c.a)) : c.rgb;
+      const l1 = luminancia(fg), l2 = luminancia(fondo);
+      const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+
+      const fs = parseFloat(s.fontSize);
+      const grande = fs >= 24 || (fs >= 18.66 && Number(s.fontWeight) >= 700);
+      const minimo = grande ? 3 : 4.5;
+      if (ratio < minimo) {
+        const quien = (el.className || el.tagName).toString().split(' ').slice(0, 2).join('.');
+        fallos.push(`${quien} "${texto.slice(0, 22)}" ${fs}px → ${ratio.toFixed(2)}:1 (mín ${minimo})`);
+      }
+    }
+    return [...new Set(fallos)];
+  });
+}
+
+test.describe('Contraste real (componiendo el fondo)', () => {
+  test('Semana: todo el texto visible cumple AA', async ({ page }) => {
+    await expect(page.locator('.stat-card h2').first()).toBeVisible({ timeout: 30_000 });
+    await esperarAnimacion(page);
+    const fallos = await contrasteReal(page);
+    expect(fallos, 'Contraste < AA en Semana: ' + fallos.join(' | ')).toEqual([]);
+  });
+
+  test('Día: todo el texto visible cumple AA', async ({ page }) => {
+    await page.locator(TAB_DIA).click();
+    await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
+    await esperarAnimacion(page);
+    const fallos = await contrasteReal(page);
+    expect(fallos, 'Contraste < AA en Día: ' + fallos.join(' | ')).toEqual([]);
+  });
+
+  test('Modal de actividad: todo el texto visible cumple AA', async ({ page }) => {
+    await page.locator(TAB_DIA).click();
+    await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
+    await page.locator('.activities-track').first().click({ position: { x: 200, y: 300 } });
+    await expect(page.locator('.modal-content[role="dialog"]')).toBeVisible({ timeout: 30_000 });
+    await esperarAnimacion(page);
+    const fallos = await contrasteReal(page);
+    expect(fallos, 'Contraste < AA en el modal: ' + fallos.join(' | ')).toEqual([]);
+  });
+});
