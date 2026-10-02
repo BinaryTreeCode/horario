@@ -108,11 +108,73 @@ function normOverride(o: any) {
   };
 }
 
+// ── Topes de payload ─────────────────────────────────────────────────────────
+//
+// Sin estos, un usuario autenticado (o un cookie robado) puede empujar arrays
+// sin límite y llenar la base: el merge LWW acepta cualquier cosa que venga
+// con un updatedAt más nuevo. Los tops de imagen en normActivity acotan la
+// cadena, no el número de filas ni el tamaño del conjunto.
+
+/** Máximo de filas por colección y por push. El planificador real usa menos. */
+const MAX_FILAS = {
+  categories: 200,
+  activities: 2000,
+  settings: 200,
+  overrides: 7, // uno por día de la semana
+};
+
+/** Tope del body completo. Por encima, 413 sin tocar la BD. */
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
+
+/** Máximo de actividades embebidas en un override del día. */
+const MAX_ACTOS_POR_OVERRIDE = 100;
+
+/**
+ * Devuelve como máximo `max` elementos de una colección del body. Lo que
+ * exceda se descarta (el merge es por LWW, así que lo que viene después es
+ * descartado de todos modos): es preferible perder filas viejas a escribir
+ * miles de insert una sola vez.
+ */
+function listar(coleccion: unknown, max: number): unknown[] {
+  if (!Array.isArray(coleccion)) return [];
+  return coleccion.slice(0, max);
+}
+
+/**
+ * Un override guarda el día entero en un jsonb. Antes solo se filtraba por el
+ * tipo de `id`, así que una fila podía traer actividades completas con su
+ * imagen de hasta 3 MB cada una: un único registro de varios megabytes. Aquí
+ * se acota el número de actividades y, sobre todo, el tamaño del jsonb.
+ */
+function acotarActsOverride(acts: any[]): any[] {
+  const porDefecto = JSON.stringify({ day: 0, activities: [] }).length;
+  let usado = porDefecto;
+  const salida: any[] = [];
+  for (const a of acts.slice(0, MAX_ACTOS_POR_OVERRIDE)) {
+    const s = JSON.stringify(a);
+    if (s === undefined) continue;
+    // presupuesto generoso para el horario de un día, con margen para el
+    // cifrado (base64 + IV) sin dejar pasar blobs de imagen completos.
+    const tope = 512 * 1024;
+    if (usado + s.length > tope) break;
+    usado += s.length;
+    salida.push(a);
+  }
+  return salida;
+}
+
 // ── POST /api/sync — push (merge LWW) ────────────────────────────────────────
 
 export const POST: APIRoute = async ({ cookies, request }) => {
   const user = await getSessionUser(cookies);
   if (!user) return json({ error: 'No autenticado' }, 401);
+
+  // Tope de body antes de parsear: un cuerpo enorme se rechaza sin gastar
+  // CPU en el JSON.parse ni en las escrituras posteriores.
+  const declared = Number(request.headers.get('content-length') ?? '0') || 0;
+  if (declared > MAX_BODY_BYTES) {
+    return json({ error: 'El cuerpo del push supera el límite permitido' }, 413);
+  }
 
   let body: any;
   try {
@@ -120,13 +182,17 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   } catch {
     return json({ error: 'JSON inválido' }, 400);
   }
+  if (body === null || typeof body !== 'object') {
+    return json({ error: 'JSON inválido' }, 400);
+  }
 
   const now = Date.now();
   let pushed = 0;
+  let truncado = 0;
 
   try {
     // Categorías
-    for (const raw of body.categories ?? []) {
+    for (const raw of listar(body.categories, MAX_FILAS.categories)) {
       const c = normCategory(raw);
       if (!c) continue;
       await db
@@ -145,7 +211,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     }
 
     // Actividades
-    for (const raw of body.activities ?? []) {
+    for (const raw of listar(body.activities, MAX_FILAS.activities)) {
       const a = normActivity(raw);
       if (!a) continue;
       await db
@@ -164,7 +230,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     }
 
     // Settings
-    for (const raw of body.settings ?? []) {
+    for (const raw of listar(body.settings, MAX_FILAS.settings)) {
       const s = normSetting(raw);
       if (!s) continue;
       await db
@@ -179,21 +245,23 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     }
 
     // DayOverrides
-    for (const raw of body.dayOverrides ?? []) {
+    for (const raw of listar(body.dayOverrides, MAX_FILAS.overrides)) {
       const o = normOverride(raw);
       if (!o) continue;
+      const acotadas = acotarActsOverride(o.activities);
+      if (acotadas.length < o.activities.length) truncado++;
       await db
         .insert(dayOverrides)
-        .values({ userId: user.id, ...o })
+        .values({ userId: user.id, ...o, activities: acotadas })
         .onConflictDoUpdate({
           target: [dayOverrides.userId, dayOverrides.day],
-          set: { activities: o.activities, updatedAt: o.updatedAt, deletedAt: o.deletedAt },
+          set: { activities: acotadas, updatedAt: o.updatedAt, deletedAt: o.deletedAt },
           where: sql`${dayOverrides.updatedAt} < ${o.updatedAt}`
         });
       pushed++;
     }
 
-    return json({ ok: true, pushed, serverTime: now });
+    return json({ ok: true, pushed, serverTime: now, truncado });
   } catch (err: any) {
     console.error('[sync/push]', err);
     return json({ error: 'Error en el push: ' + (err?.message ?? 'desconocido') }, 500);
