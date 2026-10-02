@@ -2109,7 +2109,15 @@
        única variable mueve el visual y mantiene el pegado al borde. */
     --thumb: 18px;
     position: absolute; /* ancla del ::before (zona táctil invisible) */
-    z-index: 2;
+    /* POR ENCIMA del bloque, no dentro de él: al ser hermana tiene que
+       ganarle en el orden de pintado. .activity-item sube a z-index 5 en
+       :hover/:focus-visible, y con la miniatura en 2 el bloque entero —asas
+       de estirar incluidas— se pintaba por delante: el clic caia en el asa
+       y redimensionaba la actividad en vez de abrir la imagen (medido con
+       elementFromPoint simulando ese hover). 6 queda por encima del bloque
+       en reposo y en hover, y por debajo del fantasma de arrastre (100),
+       que sí debe taparla. */
+    z-index: 6;
     width: var(--thumb);
     height: var(--thumb);
     border-radius: 50%;
