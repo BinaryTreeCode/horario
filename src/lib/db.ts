@@ -700,16 +700,47 @@ export async function importValidatedData(result: ValidationResult): Promise<voi
   const patch = <T extends { updatedAt?: number }>(rows: T[]): T[] =>
     rows.map(r => ({ ...r, updatedAt: stamp }));
 
+  // Un respaldo se recomprime a 256px para que el archivo sea ligero (ver
+  // buildRespaldoBinario). Importar ese archivo NO puede dejar que esa version
+  // pobre pise a la que ya esta guardada: sin este guard, exportar → importar
+  // degrada las imagenes de forma irreversible. Medido en los datos reales:
+  // cuatro imagenes de 288x512 quedaron en 144x256 tras un round-trip, y en
+  // el lightbox de escritorio son un sello de 138px en una pantalla de 2560.
+  //
+  // Solo se conserva la imagen previa cuando AMBAS son data-URL y la guardada
+  // pesa mas (mismo codec, mas bytes = mas detalle). Si cualquiera de las dos
+  // es una URL http/blob la entrante gana sin comparar: su tamano no depende
+  // de como se haya comprimido el archivo de respaldo.
+  const conservarImagen = (entrante: Activity, previa?: string): Activity => {
+    if (!previa || !entrante.image) return entrante;
+    if (!entrante.image.startsWith('data:image/')) return entrante;
+    if (!previa.startsWith('data:image/')) return entrante;
+    return previa.length > entrante.image.length ? { ...entrante, image: previa } : entrante;
+  };
+
   await db.transaction('rw', db.activities, db.categories, db.settings, db.dayOverrides, db.syncState, async () => {
+    // Lectura ANTES de los clear(): quedan en el mismo ámbito de transacción
+    // para que nadie pueda escribir entre medias.
+    const previas = new Map<string, string>();
+    for (const a of await db.activities.toArray()) if (a.image) previas.set(a.id, a.image);
+    const previasOv = new Map<string, string>();
+    for (const o of await db.dayOverrides.toArray())
+      for (const a of o.activities ?? []) if (a.image) previasOv.set(a.id, a.image);
+
     await db.activities.clear();
     await db.categories.clear();
     await db.settings.clear();
     await db.dayOverrides.clear();
 
-    if (result._activities.length) await db.activities.bulkPut(patch(result._activities));
+    if (result._activities.length)
+      await db.activities.bulkPut(patch(result._activities.map(a => conservarImagen(a, previas.get(a.id)))));
     if (result._categories.length) await db.categories.bulkPut(patch(result._categories));
     if (result._settings.length) await db.settings.bulkPut(patch(result._settings));
-    if (result._dayOverrides.length) await db.dayOverrides.bulkPut(patch(result._dayOverrides));
+    if (result._dayOverrides.length)
+      await db.dayOverrides.bulkPut(patch(result._dayOverrides.map(o => ({
+        ...o,
+        activities: (o.activities ?? []).map(a => conservarImagen(a, previasOv.get(a.id)))
+      }))));
     // PRESERVAR lastServerPullAt del syncState (no resetear): el cursor de pull
     // es del dispositivo, no de los datos. Resetearlo haría que el próximo pull
     // re-trajera la nube entera y el LWW pisara el import con lo remoto.
