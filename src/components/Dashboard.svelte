@@ -785,6 +785,43 @@
     }
   }
 
+  /* Móvil en HORIZONTAL: alto escaso y ancho de sobra. El bloque anterior
+     (max-width 1199px) convertía la cabecera en flex-wrap, y con solo 390px
+     de alto se partía en dos filas: 146px de cabecera, el 37% de la pantalla,
+     dejando 196px útiles de un timeline de día que mide 1600px.
+
+     Pero en horizontal los tres bloques SI caben en una fila: medidos,
+     172 + 204 + 376 = 752px dentro de 844px. Así que se recupera la
+     disposicion de una sola linea (grid 1fr auto 1fr, como en escritorio) y
+     se ajustan solo los paddings. Los botones de acción no se tocan: 44px es
+     el piso duro de zona táctil y ya lo cumplen justos. */
+  @media (max-height: 480px) and (min-width: 700px) {
+    .dashboard-header {
+      display: grid;
+      /* 1fr auto auto y no 1fr auto 1fr: con la derecha en 1fr el navegador
+         le daba 275px de los 376px que miden sus botones, y estos se partian
+         por dentro en dos filas (96px de alto). auto auto les deja su ancho
+         natural; el 1fr del logo absorbe lo que sobra. Suman 752px en 820. */
+      grid-template-columns: 1fr auto auto;
+      gap: 0.5rem;
+      padding: 0.35rem 0.75rem;
+      padding-top: calc(0.35rem + env(safe-area-inset-top, 0px));
+    }
+    .view-tabs {
+      margin-left: 0;
+    }
+    .logo {
+      font-size: 1rem;
+    }
+    .view-tabs button {
+      padding: 0.45rem 0.7rem;
+    }
+    .header-right,
+    .header-actions {
+      flex-wrap: nowrap;
+    }
+  }
+
   .logo {
     font-size: 1.25rem;
     font-weight: 700;

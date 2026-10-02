@@ -95,6 +95,11 @@ const VIEWPORTS_PARA_44 = [
   { nombre: 'móvil 390x844', width: 390, height: 844 },
   { nombre: 'CI 1280x800', width: 1280, height: 800 },
   { nombre: 'ancho 1600x900', width: 1600, height: 900 },
+  // Horizontal de móvil: el ÚNICO caso con el alto tan escaso (390px) que la
+  // cabecera compite de verdad por el espacio. Antes no lo cubria ninguno de
+  // los tres de arriba (todos con 800px o mas de alto), y por eso se coló una
+  // cabecera partida en dos filas que se comia el 37% de la pantalla.
+  { nombre: 'horizontal 844x390', width: 844, height: 390 },
 ];
 
 /**
@@ -293,4 +298,57 @@ test.describe('Contraste real (componiendo el fondo)', () => {
     const fallos = await contrasteReal(page);
     expect(fallos, 'Contraste < AA en el modal: ' + fallos.join(' | ')).toEqual([]);
   });
+});
+
+/**
+ * La cabecera no puede comerse el alto de la pantalla.
+ *
+ * Es un guard de espacio, no de accesibilidad: la zona tactil ya la cubre
+ * zonasInteractivas. Lo que se vigila aqui es que la cabecera no se parta en
+ * varias filas cuando la pantalla es baja, porque el espacio que se come es
+ * directamente espacio de horario invisible.
+ *
+ * Contexto del fallo que motiva el guard: en horizontal (844x390) el
+ * breakpoint de 1199px convertía la cabecera en flex-wrap y se partía en dos
+ * filas — 146px de cabecera, 37% del alto, dejando 196px útiles de un
+ * timeline de dia que mide 1600px. Los tres bloques caben de sobra en una
+ * fila (172 + 204 + 376 = 752px en 820 disponibles).
+ */
+test('Horizontal: la cabecera ocupa una sola fila y no se come el alto', async ({ page }) => {
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect(page.locator('.days-columns')).toBeVisible({ timeout: 30_000 });
+  await esperarAnimacion(page);
+
+  const medida = await page.evaluate(() => {
+    const cab = document.querySelector('.dashboard-header');
+    if (!cab) return null;
+    const hijos = [...cab.children];
+    // "Filas" = lineas de base agrupadas: dos hijos estan en la misma fila si
+    // sus centros verticales se solapan.
+    const centros = hijos.map(e => {
+      const r = e.getBoundingClientRect();
+      return { nombre: e.className.toString().split(' ')[0], centro: r.top + r.height / 2, alto: r.height };
+    }).sort((a, b) => a.centro - b.centro);
+    let filas = 1;
+    for (let i = 1; i < centros.length; i++) {
+      const anterior = centros[i - 1];
+      // Solapan verticalmente -> misma fila.
+      const solapan = Math.abs(centros[i].centro - anterior.centro) < Math.max(anterior.alto, centros[i].alto) / 2;
+      if (!solapan) filas++;
+    }
+    return {
+      altoCabecera: Math.round(cab.getBoundingClientRect().height),
+      altoViewport: window.innerHeight,
+      filas,
+    };
+  });
+
+  expect(medida, 'No se encontró .dashboard-header').not.toBeNull();
+  expect(medida!.filas, `La cabecera se parte en ${medida!.filas} filas en horizontal: ${JSON.stringify(medida)}`).toBe(1);
+  // Techo generoso a proposito: con una sola fila medida da 65px de 390 (17%).
+  // Se corta en 30% para no hacer el test fragil ante cambios de tipografia.
+  expect(
+    medida!.altoCabecera / medida!.altoViewport,
+    `La cabecera ocupa ${Math.round(medida!.altoCabecera / medida!.altoViewport * 100)}% del alto en horizontal`
+  ).toBeLessThanOrEqual(0.3);
 });
