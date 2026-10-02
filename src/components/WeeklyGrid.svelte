@@ -2132,6 +2132,36 @@
     .activity-item.short {
       overflow: visible;
     }
+    /* Bloques cortos (<44px de alto): la zona interactiva se amplía a 44px
+       con un pseudo-elemento transparente, como ya se hace con las
+       miniaturas. El visual sigue siendo de 24-27px (la escala temporal no
+       se toca: un bloque de 15 min son 15 min), lo que cambia es lo que el
+       dedo alcanza.
+
+       La ampliación roza ~10px del bloque de arriba y del de abajo cuando
+       están pegados. Es el mismo canje que ya se acepta con las miniaturas
+       y, a cambio, el objetivo pasa de 24x60 a 44x60 casi el doble de
+       área). Con mouse NO se aplica nada de esto: ahí 24px ya cumple
+       WCAG 2.2 AA (Target Size 2.5.8 pide 24x24) y ampliar la zona
+       robaría clics al vecino sin ganar nada. */
+    .activity-item.short::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      /* 46 y no 44: al centrar sobre una altura fraccionaria el hit-testing
+         cae un píxel por debajo de lo declarado, y el guard mide entero. */
+      height: 46px;
+      transform: translateY(-50%);
+      z-index: 2;
+    }
+    /* Los ancestros recortan el ::before en hit-testing, igual que pasaba
+       con las miniaturas: hay que quitarles el overflow en táctil. */
+    .day-column,
+    .slots-grid {
+      overflow: visible;
+    }
   }
 
   /* Popover de imagen (hover): foto ampliada + nombre, anclada encima de la

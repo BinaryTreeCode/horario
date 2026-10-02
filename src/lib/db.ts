@@ -312,7 +312,12 @@ async function initializeDefaults() {
     seed('Desayuno', 'comer', '08:00', '08:30', TODOS),
     seed('Trabajo', 'trabajar', '09:00', '13:00', LUNES_A_VIERNES),
     seed('Almuerzo', 'comer', '13:00', '14:00', TODOS),
-    seed('Aseo personal', 'aseo', '22:00', '22:30', TODOS)
+    seed('Aseo personal', 'aseo', '22:00', '22:30', TODOS),
+    // Actividad de 15 minutos a propósito: es el caso corto que hace que la
+    // zona interactiva de un bloque baje de 44px, y sin una semilla así el
+    // guard de accesibilidad no tiene ningún caso que pueda violar la regla
+    // (la más corta del resto dura 30 min y nunca baja de 44px).
+    seed('Tomar sol', 'rutina', '17:30', '17:45', TODOS)
   ]);
 }
 
