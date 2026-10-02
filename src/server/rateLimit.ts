@@ -9,7 +9,7 @@
  * Modelo: ventana deslizable simple. Cada clave lleva un contador y el
  * instante en que empezó su ventana. Al superar `LIMITE` intentos fallidos
  * dentro de `VENTANA_MS` la clave queda bloqueada hasta `BLOQUEO_MS`. Un
- * login exitoso limpia el contador (el que falla es el que要被 limitar).
+ * login exitoso limpia el contador (el que falla es el que se debe limitar).
  ** PRIVACIDAD: la clave que se persiste NO es el email ni la IP, sino su hash
  * truncado a 64 hex. Un atacante con acceso de solo-lectura a la tabla no puede
  * enumerar qué correos o direcciones han intentado autenticarse, y la tabla no

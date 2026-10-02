@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { SyncStatus } from './types';
 
@@ -91,6 +91,80 @@ describe('i18n: el estado del sync está traducido entero', () => {
     for (const clave of ['sync.bannerError', 'sync.bannerOffline', 'sync.retry', 'sync.lastAt', 'sync.pending', 'sync.pendingMany']) {
       expect(es.has(clave), `falta es:${clave}`).toBe(true);
       expect(en.has(clave), `falta en:${clave}`).toBe(true);
+    }
+  });
+});
+
+/**
+ * Guarda de claves muertas: una clave del catálogo que nadie pide es deuda
+ * (hay que traducirla dos veces y nadie la va a leer nunca).
+ *
+ * El barrido busca la clave entre comillas simples en todo src/ salvo el
+ * propio catálogo. Buscar la clave a pelo daría un falso negativo grave:
+ * "settings.imported" está contenido en "settings.importedNoSync", que sí se
+ * usa, así que la clave muerta parecería viva. Por eso se exige la comilla.
+ *
+ * Las claves que se arman por prefijo (day.${i}, sync.${syncStatus},
+ * modal.preset.${n}) no aparecen literales: se resuelven mirando los prefijos
+ * que el código construye con una interpolación.
+ */
+const RESERVADAS = new Set<string>([
+  // La consume la pista de primera ejecución, en el commit siguiente.
+  'dayView.dragHint',
+]);
+
+describe('i18n: ninguna clave está muerta', () => {
+  const raiz = new URL('../../', import.meta.url);
+  const ruta = fileURLToPath(new URL('./i18n.ts', import.meta.url));
+
+  /** Prefijos que el código arma por interpolación: `day.${i}`, etc. */
+  function prefijosDinamicos(codigo: string): Set<string> {
+    const prefijos = new Set<string>();
+    for (const m of codigo.matchAll(/([\w.]+)\.\$\{/g)) prefijos.add(m[1]);
+    for (const m of codigo.matchAll(/t\(\s*`([\w.]+)\.\$\{/g)) prefijos.add(m[1]);
+    return prefijos;
+  }
+
+  test('toda clave del catálogo se usa en el código', () => {
+    const codigo: string[] = [];
+    const prefijos = new Set<string>();
+    const recorrer = (dir: URL) => {
+      for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+        if (entrada.name === 'node_modules' || entrada.name.startsWith('.')) continue;
+        const hijo = new URL(entrada.name + (entrada.isDirectory() ? '/' : ''), dir);
+        if (entrada.isDirectory()) { recorrer(hijo); continue; }
+        if (!/\.(ts|svelte|astro)$/.test(entrada.name)) continue;
+        if (fileURLToPath(hijo) === ruta) continue;
+        const texto = readFileSync(hijo, 'utf8');
+        codigo.push(texto);
+        for (const p of prefijosDinamicos(texto)) prefijos.add(p);
+      }
+    };
+    recorrer(raiz);
+    const todo = codigo.join('\n');
+
+    const muertas: string[] = [];
+    for (const clave of es.keys()) {
+      if (RESERVADAS.has(clave)) continue;
+      if (todo.includes(`'${clave}'`)) continue;
+      // Clave construida por prefijo: `day.${i}` cubre day.0..day.6.
+      const prefijo = clave.slice(0, clave.lastIndexOf('.'));
+      if (prefijos.has(prefijo)) continue;
+      muertas.push(clave);
+    }
+
+    expect(
+      muertas,
+      'Claves del catálogo que nadie pide (borrarlas o usarlas):\n' + muertas.join('\n')
+    ).toEqual([]);
+  });
+
+  test('las claves reservadas están realmente reservadas y no se olvidan', () => {
+    // Si una clave reservada queda sin consumidor, hay que sacarla de la
+    // lista: es una puerta por la que colaría una clave muerta.
+    for (const clave of RESERVADAS) {
+      expect(es.has(clave), `${clave} está en RESERVADAS pero ya no existe`).toBe(true);
+      expect(en.has(clave), `${clave} está en RESERVADAS pero falta en inglés`).toBe(true);
     }
   });
 });
