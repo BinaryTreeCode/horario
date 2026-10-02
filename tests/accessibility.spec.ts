@@ -352,3 +352,66 @@ test('Horizontal: la cabecera ocupa una sola fila y no se come el alto', async (
     `La cabecera ocupa ${Math.round(medida!.altoCabecera / medida!.altoViewport * 100)}% del alto en horizontal`
   ).toBeLessThanOrEqual(0.3);
 });
+
+/**
+ * La acción principal del modal tiene que estar en pantalla sin scroll.
+ *
+ * Cancelar/Guardar son lo que el usuario viene a hacer. Si el formulario es
+ * más alto que la pantalla, el botón acaba fuera de vista y no hay ninguna
+ * pista de que haya que desplazarse: en horizontal (844x390) el formulario
+ * de creación mide 1040px dentro de un modal de 357px visibles, y Guardar
+ * quedaba a 759px de scroll.
+ *
+ * El footer ya era sticky, pero solo con (max-width: 640px) — una condición
+ * de ancho que no describe el problema, que es de altura. Por eso no se
+ * activaba ni en horizontal ni en un escritorio de 800px de alto.
+ */
+const MODALES_CON_ALTURA_ESCASA = [
+  { nombre: 'horizontal 844x390', width: 844, height: 390 },
+  { nombre: 'escritorio corto 1280x800', width: 1280, height: 800 },
+];
+
+for (const vp of MODALES_CON_ALTURA_ESCASA) {
+  test(`Modal: Guardar visible sin scroll en ${vp.nombre}`, async ({ page }) => {
+    await page.setViewportSize({ width: vp.width, height: vp.height });
+    await page.locator(TAB_DIA).click();
+    await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
+    await esperarAnimacion(page);
+
+    // Mismo camino que un usuario: tap en un hueco del track abre la creación.
+    await page.locator('.activities-track').first().click({ position: { x: 200, y: 200 } });
+    const modal = page.locator('.modal-content[role="dialog"]');
+    await expect(modal).toBeVisible({ timeout: 30_000 });
+    await esperarAnimacion(page);
+
+    const estado = await page.evaluate(() => {
+      const m = document.querySelector('.modal-content');
+      if (!m) return null;
+      // type=submit y no el texto: la etiqueta sale de i18n y los tests
+      // tienen que pasar igual en español y en inglés.
+      const b = m.querySelector('button[type="submit"]');
+      if (!b) return { error: 'no hay botón submit en el modal' };
+      const r = b.getBoundingClientRect();
+      const footer = m.querySelector('footer');
+      return {
+        top: Math.round(r.top),
+        bottom: Math.round(r.bottom),
+        viewport: window.innerHeight,
+        sticky: footer ? getComputedStyle(footer).position : 'sin footer',
+        // Alto del contenido vs. el del modal: si el formulario no cabe, el
+        // pie tiene que ser el que se ancla.
+        desborda: m.scrollHeight > m.clientHeight + 4,
+      };
+    });
+
+    expect(estado, 'No se encontró el modal').not.toBeNull();
+    expect((estado as any).error).toBeUndefined();
+    if ((estado as any).desborda) {
+      expect((estado as any).sticky, 'El formulario no cabe y el pie no es sticky').toBe('sticky');
+    }
+    expect(
+      (estado as any).top >= 0 && (estado as any).bottom <= (estado as any).viewport,
+      `Guardar fuera de pantalla en ${vp.nombre}: y=${(estado as any).top}..${(estado as any).bottom} en ${(estado as any).viewport}px`
+    ).toBe(true);
+  });
+}

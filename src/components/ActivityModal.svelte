@@ -1422,17 +1422,24 @@
     border-top: 1px solid rgba(0,0,0,0.05);
     background: #fcfcfc;
     flex-shrink: 0;
-  }
+    /* Pegajoso, sin breakpoint. Cancelar/Guardar son la acción principal del
+       modal y no pueden depender de que el usuario adivine que hay que
+       bajar: el formulario de creación mide 1040px, asi que en cuanto la
+       pantalla es más baja el botón Guardar queda fuera de vista.
 
-  /* Footer pegajoso en móviles: Cancelar/Guardar siempre visibles */
-  @media (max-width: 640px) {
-    .modal-footer {
-      position: sticky;
-      bottom: 0;
-      z-index: 10;
-      box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.08);
-      background: #ffffff;
-    }
+       Antes solo era sticky con (max-width: 640px), una condición de ANCHO
+       que no describe el problema (es de altura): en móvil horizontal
+       (844x390) no se aplicaba y Guardar quedaba a 759px de scroll, y en
+       escritorio (1280x800) tampoco, con el boton fuera de pantalla.
+
+       Sin efecto secundario cuando el contenido cabe: sticky solo actúa si
+       el elemento trataria de salirse del contenedor, asi que en un modal
+       corto se comporta igual que un footer normal. */
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.08);
+    background: #ffffff;
   }
 
   .footer-right {
