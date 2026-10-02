@@ -258,7 +258,14 @@
       const e = item.act._end;
       const topPct = ((s - startHour) / totalHours) * 100;
       const heightPct = ((e - s) / totalHours) * 100;
-      const widthPct = 100 / overallMaxCols;
+      // El ancho sale de las columnas de SU PROPIO grupo de solapamiento, no
+      // del maximo de la semana. Con overallMaxCols, un solo solapamiento en
+      // cualquier dia y a cualquier hora encogia al 50% los 123 bloques de la
+      // rejilla: en un movil eso son 27px de ancho para el nombre, y 97 de
+      // esos bloques ni siquiera se solapaban con nadie. clusterCols ya se
+      // calculaba justo aqui y se guardaba sin usar.
+      const cols = item.clusterCols;
+      const widthPct = 100 / cols;
       const leftPct = item.track * widthPct;
       return {
         ...item.act,
@@ -267,8 +274,8 @@
         numSlots: Math.max(1, Math.round((e - s) * slotsPerHour)),
         top: `${topPct}%`,
         height: `calc(${heightPct}% - 3px)`,
-        left: `${overallMaxCols > 1 ? leftPct : 0}%`,
-        width: overallMaxCols > 1 ? `calc(${widthPct}% - 3px)` : '100%'
+        left: `${cols > 1 ? leftPct : 0}%`,
+        width: cols > 1 ? `calc(${widthPct}% - 3px)` : '100%'
       };
     });
 
