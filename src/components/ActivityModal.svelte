@@ -6,7 +6,7 @@
   import ImageLightbox from './ImageLightbox.svelte';
   import { t, tNow } from '../lib/i18n';
   import { fueConsumido } from '../lib/dialogStack';
-  import { comprimirImagen, subirABlob } from '../lib/routineImages';
+  import { comprimirImagen, subirABlob, DIM_LOCAL, DIM_BLOB } from '../lib/routineImages';
   import { isLoggedIn } from '../lib/sync';
 
   interface Props {
@@ -174,17 +174,28 @@
     input.value = '';
     subiendoImagen = true;
     try {
-      // 1) Comprimir SIEMPRE en cliente (512px/WebP ~100KB): una data-URL
-      //    de 2 MB dentro de la actividad llenaba localStorage ("respaldo
-      //    pausado") y hacía 413 en el push.
-      const comprimida = await comprimirImagen(file);
-      // 2) Con sesión: subir a Vercel Blob y guardar solo la URL (~100 bytes).
-      //    Sin sesión (modo local): queda la data-URL comprimida.
-      if (await isLoggedIn()) {
+      // La resolución depende de DÓNdé va a acabar la imagen, no de una sola
+      // regla global:
+      //
+      // - Con sesión: va a Vercel Blob y en la actividad se guarda SOLO la URL
+      //   (~100 bytes). El peso no lo paga la base de datos, así que se sube a
+      //   DIM_BLOB y el lightbox deja de verse blando en pantallas de alta
+      //   densidad. Tope de /api/images: 2 MB, y una WebP de 1600px anda por
+      //   los cientos de KB.
+      // - Sin sesión: la data-URL queda DENTRO de la actividad. Aquí sí manda
+      //   DIM_LOCAL, porque es lo que llena el respaldo automático y lo que
+      //   puede provocar el 413 del push.
+      //
+      // El respaldo ligero se recalcula solo si la subida falla (sin Blob
+      // configurado, error de red): el fallback guardado en la actividad
+      // tiene que ser siempre el pequeño, nunca el grande.
+      const sesion = await isLoggedIn();
+      const comprimida = await comprimirImagen(file, sesion ? DIM_BLOB : DIM_LOCAL);
+      if (sesion) {
         try {
           image = await subirABlob(comprimida);
         } catch {
-          image = comprimida; // sin Blob configurado o error → local comprimida
+          image = await comprimirImagen(file, DIM_LOCAL);
         }
       } else {
         image = comprimida;

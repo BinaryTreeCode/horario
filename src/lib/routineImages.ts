@@ -20,11 +20,25 @@ const MAX_DIM = 512; // px, lado mayor
 const QUALITY = 0.82;
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024; // límite del endpoint /api/images
 
-/** Comprime un File/Blob a data-URL WebP (máx 512px el lado mayor).
- *  Si el navegador no soporta canvas WebP cae a JPEG con la misma calidad. */
-export async function comprimirImagen(file: Blob): Promise<string> {
+/** Lado mayor de la data-URL que vive DENTRO de la actividad. 512px es el
+ *  punto en el que el respaldo automático y el push siguen respirando: por
+ *  encima, una sola foto puede valer MB de texto base64. */
+export const DIM_LOCAL = MAX_DIM;
+/** Lado mayor cuando la imagen va a Vercel Blob. Allí solo se guarda la URL
+ *  (~100 bytes), así que el peso de la imagen no lo paga la base de datos y
+ *  el tope artificial solo servía para dejar el lightbox blando: 512px sobre
+ *  un escenario de móvil a 3x son ~1170 píxeles de dispositivo y se ve borroso.
+ *  1600px cubre ese escenario y queda muy por debajo del tope de 2 MB del
+ *  endpoint /api/images. */
+export const DIM_BLOB = 1600;
+
+/** Comprime un File/Blob a data-URL WebP (máx `maxDim` px el lado mayor).
+ *  Si el navegador no soporta canvas WebP cae a JPEG con la misma calidad.
+ *  `maxDim` decide si la imagen acaba en la base de datos (DIM_LOCAL, el
+ *  valor por defecto) o en Blob (DIM_BLOB). */
+export async function comprimirImagen(file: Blob, maxDim: number = MAX_DIM): Promise<string> {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
   const w = Math.max(1, Math.round(bitmap.width * scale));
   const h = Math.max(1, Math.round(bitmap.height * scale));
   const canvas = document.createElement('canvas');
