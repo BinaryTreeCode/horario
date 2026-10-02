@@ -869,7 +869,10 @@
     opacity: 0.75;
     cursor: wait;
   }
-  .image-upload-btn .giro {
+  /* :global porque la clase viaja al <svg> de lucide, que es hijo de otro
+     componente: sin el hash de ambito el selector no llegaba a casar y el
+     spinner de subida se quedaba quieto. */
+  .image-upload-btn :global(.giro) {
     animation: giroSubida 1s linear infinite;
   }
   @keyframes giroSubida {
@@ -1073,7 +1076,10 @@
     color: var(--color-green-dark);
   }
 
-  .check-icon.done {
+  /* :global porque .check-icon lo recibe un icono de lucide (componente hijo)
+     y Svelte no le anade el hash de ambito: la regla nunca aplicaba y un paso
+     completado se quedaba del mismo gris que uno pendiente. */
+  :global(.check-icon.done) {
     color: var(--color-green-dark);
   }
 

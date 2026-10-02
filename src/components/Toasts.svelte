@@ -99,10 +99,13 @@
   .toast-success { background: rgba(46, 84, 52, 0.92); color: #eafbee; }
   .toast-error   { background: rgba(96, 34, 34, 0.94); color: #fdeaea; }
   .toast-info    { background: rgba(38, 50, 56, 0.94); color: #eceff1; }
-  .toast-icon { flex-shrink: 0; }
-  .toast-success .toast-icon { color: #9ae6b4; }
-  .toast-error .toast-icon { color: #f9b4b4; }
-  .toast-info .toast-icon { color: #b0bec5; }
+  /* El icono viene de lucide (componente hijo): Svelte no le pone el hash de
+     ambito, asi que la parte que lo selecciona debe ser :global o la regla
+     nunca casa. Sin esto los tres tonos de aviso salian del color heredado. */
+  :global(.toast-icon) { flex-shrink: 0; }
+  .toast-success :global(.toast-icon) { color: #9ae6b4; }
+  .toast-error :global(.toast-icon) { color: #f9b4b4; }
+  .toast-info :global(.toast-icon) { color: #b0bec5; }
   .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-line; }
   .toast-close {
     flex-shrink: 0;
