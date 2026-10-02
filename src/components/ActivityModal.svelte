@@ -1282,23 +1282,6 @@
     border-color: var(--color-green-dark);
   }
 
-  .time-select-row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-
-  .time-badge {
-    background: white;
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: var(--color-green-dark);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    white-space: nowrap;
-  }
-
   .duration-hint {
     margin-top: 1rem;
     text-align: center;
@@ -1349,12 +1332,6 @@
     font-size: 0.85rem;
     font-weight: 600;
     color: var(--color-brown-bark);
-  }
-
-  .form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
   }
 
   label {
