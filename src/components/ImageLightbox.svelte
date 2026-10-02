@@ -1,6 +1,8 @@
 <script lang="ts">
   import { X, ListChecks, ChevronDown, ChevronUp } from '@lucide/svelte';
   import { portal } from '../lib/portal';
+  import { t } from '../lib/i18n';
+  import { atraparTab, enfocarDialogo, recordarFoco } from '../lib/focus';
   import type { Activity } from '../lib/types';
 
   interface Props {
@@ -12,6 +14,18 @@
 
   let stepsOpen = $state(true);
   const hasSteps = $derived(!!activity.steps && activity.steps.length > 0);
+
+  let lightboxEl = $state<HTMLElement | null>(null);
+  let closeBtnEl = $state<HTMLElement | null>(null);
+
+  // Al abrir, el foco entra al lightbox; al cerrar, vuelve a la miniatura que
+  // lo abrio. Antes el foco se quedaba en la pagina de detras del overlay y
+  // el teclado tabulaba a traves del contenido oculto.
+  $effect(() => {
+    const devolver = recordarFoco();
+    enfocarDialogo(lightboxEl, closeBtnEl);
+    return devolver;
+  });
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') onClose();
@@ -25,20 +39,30 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <!-- Portal a body: un ancestro con backdrop-filter crea containing block y ancla este overlay fixed a la sección scrolleada en vez del viewport -->
-<div class="lightbox-fullscreen" use:portal onclick={handleOverlayClick} role="dialog" aria-modal="true">
+<div
+  class="lightbox-fullscreen"
+  use:portal
+  bind:this={lightboxEl}
+  onclick={handleOverlayClick}
+  onkeydown={e => atraparTab(lightboxEl, e)}
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="lightbox-title"
+  tabindex="-1"
+>
   <!-- Barra superior: fila fija — la imagen nunca pasa bajo ella -->
   <div class="lightbox-topbar">
     <div class="lightbox-title-group">
-      <h3>{activity.name}</h3>
+      <h3 id="lightbox-title">{activity.name}</h3>
       {#if hasSteps}
         <button
           type="button"
           class="steps-toggle"
           onclick={() => stepsOpen = !stepsOpen}
-          title={stepsOpen ? 'Ocultar pasos' : 'Mostrar pasos'}
+          title={stepsOpen ? $t('lightbox.hideSteps') : $t('lightbox.showSteps')}
         >
           <ListChecks size={14} />
-          {activity.steps!.length} pasos
+          {$t('lightbox.stepsCount', { n: activity.steps!.length })}
           {#if stepsOpen}
             <ChevronUp size={14} />
           {:else}
@@ -48,7 +72,7 @@
       {/if}
     </div>
 
-    <button class="close-btn" onclick={onClose} title="Cerrar (Esc)" aria-label="Cerrar">
+    <button class="close-btn" bind:this={closeBtnEl} onclick={onClose} title={$t('lightbox.closeHint')} aria-label={$t('lightbox.close')}>
       <X size={26} />
     </button>
   </div>

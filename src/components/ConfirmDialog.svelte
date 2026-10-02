@@ -14,6 +14,19 @@
 
   let { open = $bindable(false), title = '¿Confirmar?', message = '', confirmText = 'Confirmar', cancelText = 'Cancelar', danger = false, onconfirm, oncancel }: Props = $props();
 
+  let boxEl = $state<HTMLElement | null>(null);
+  let confirmBtnEl = $state<HTMLElement | null>(null);
+
+  // El foco entra al diálogo y vuelve al elemento que lo abrió: sin esto,
+  // al cerrarse el foco se perdía en el body y el teclado arrancaba de nuevo
+  // desde el principio del documento.
+  $effect(() => {
+    if (!open) return;
+    const devolver = recordarFoco();
+    enfocarDialogo(boxEl, confirmBtnEl);
+    return devolver;
+  });
+
   function close(confirmed: boolean) {
     open = false;
     if (confirmed) onconfirm?.();
@@ -26,6 +39,7 @@
     if (e.key === 'Enter') { e.stopPropagation(); close(true); }
   }
   import { portal } from '../lib/portal';
+  import { atraparTab, enfocarDialogo, recordarFoco } from '../lib/focus';
 
 </script>
 
@@ -39,7 +53,15 @@
     role="presentation"
     onclick={(e) => e.target === e.currentTarget && close(false)}
   >
-    <div class="confirm-box glass-panel" role="alertdialog" aria-modal="true" aria-label={title}>
+    <div
+      class="confirm-box glass-panel"
+      bind:this={boxEl}
+      onkeydown={e => atraparTab(boxEl, e)}
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={title}
+      tabindex="-1"
+    >
       <h3>{title}</h3>
       <p>{message}</p>
       <div class="confirm-actions">
@@ -47,6 +69,7 @@
         <button
           class="btn-confirm-ok"
           class:danger
+          bind:this={confirmBtnEl}
           onclick={() => close(true)}
         >{confirmText}</button>
       </div>

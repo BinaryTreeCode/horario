@@ -544,10 +544,19 @@
 />
 
 <div class="modal-overlay" onclick={onClose}>
-  <div class="modal-content glass-panel" tabindex="-1" bind:this={panelEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
+  <div
+    class="modal-content glass-panel"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="settings-panel-title"
+    tabindex="-1"
+    bind:this={panelEl}
+    onkeydown={trapFocus}
+    onclick={e => e.stopPropagation()}
+  >
     <!-- div, no header: evita un segundo landmark banner (axe) -->
     <div class="modal-header">
-      <h2>{$t('settings.title')}</h2>
+      <h2 id="settings-panel-title">{$t('settings.title')}</h2>
       <button class="close-btn" onclick={onClose} aria-label={$t('settings.closeSettings')}><X size={20} /></button>
     </div>
 
