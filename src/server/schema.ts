@@ -1,4 +1,4 @@
-import { pgTable, text, varchar, integer, bigint, boolean, jsonb, timestamp, uuid, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, varchar, integer, bigint, jsonb, timestamp, uuid, uniqueIndex } from 'drizzle-orm/pg-core';
 import type { ActivityStep } from '../lib/types';
 
 /**

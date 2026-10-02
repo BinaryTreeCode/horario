@@ -690,7 +690,8 @@ export async function importValidatedData(result: ValidationResult): Promise<voi
     throw new Error('Los datos no fueron validados: llama a validateImport() primero.');
   }
 
-  // TODO registro importado recibe updatedAt = ahora:
+  // Cada registro importado recibe updatedAt = ahora (no un TODO: ya está
+  // implementado, el rótulo solo trailaba de cuando se decidió):
   // 1) Los de formatos antiguos no traían timestamp y quedarían invisibles para
   //    el push incremental (updatedAt > lastPushAt).
   // 2) Con sesión activa, un timestamp viejo pierde siempre el LWW contra la nube
