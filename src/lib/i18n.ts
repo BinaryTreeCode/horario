@@ -84,6 +84,7 @@ const es: Catalogo = {
   // ── Vista Semana ──
   'weekView.empty': 'Semana libre — tocá «{btn}» para empezar a planear',
   'dayView.dragHint': 'Arrastrar o tocar para editar',
+  'dayView.dragHintGotIt': 'Entendido',
   'dayView.edit': 'Editar {name}',
   'dayView.viewImage': 'Ver imagen de {name}',
   'dayView.keyboardHint': 'Flechas arriba/abajo para mover, Enter para editar',
@@ -368,6 +369,7 @@ const en: Catalogo = {
 
   'weekView.empty': 'Free week — tap «{btn}» to start planning',
   'dayView.dragHint': 'Drag or tap to edit',
+  'dayView.dragHintGotIt': 'Got it',
   'dayView.edit': 'Edit {name}',
   'dayView.viewImage': 'View {name} image',
   'dayView.keyboardHint': 'Arrow up/down to move, Enter to edit',

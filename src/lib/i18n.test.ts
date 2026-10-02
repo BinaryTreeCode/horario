@@ -109,8 +109,9 @@ describe('i18n: el estado del sync está traducido entero', () => {
  * que el código construye con una interpolación.
  */
 const RESERVADAS = new Set<string>([
-  // La consume la pista de primera ejecución, en el commit siguiente.
-  'dayView.dragHint',
+  // Vacía a propósito. Cuando haga falta una clave para un trabajo en curso,
+  // se lista aquí con un comentario y se saca en el mismo commit que la usa:
+  // es la única puerta por la que colaría una clave muerta.
 ]);
 
 describe('i18n: ninguna clave está muerta', () => {

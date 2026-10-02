@@ -14,7 +14,7 @@
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { undoStack, redoStack } from '../lib/undo';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Download, Upload, Cloud, CloudOff, RefreshCw } from '@lucide/svelte';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Download, Upload, Cloud, CloudOff, RefreshCw, Info } from '@lucide/svelte';
   import { portal } from '../lib/portal';
   import { onSyncChange, syncNow } from '../lib/sync';
   import { t, tNow, idioma } from '../lib/i18n';
@@ -106,6 +106,28 @@
   });
 
   let selectedDay = $state(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1); // 0 = Mon, 6 = Sun
+
+  // ── Pista de primera ejecución ─────────────────────────────────────────
+  // Arrastrar y tocar son los gestos de la app y no se descubren solos: sin
+  // una pista el usuario deduce que la rejilla es estática. Aparece UNA vez
+  // sobre la rejilla y se descarta para siempre. El estado inicial es false
+  // porque el HTML se prerenderiza sin localStorage: el $effect decide.
+  const CLAVE_PISTA = 'pistaArrastrarDescartada';
+  let mostrarPista = $state(false);
+  $effect(() => {
+    try {
+      if (localStorage.getItem(CLAVE_PISTA) !== '1') mostrarPista = true;
+    } catch {
+      mostrarPista = true; // sin localStorage (modo privado) se muestra siempre
+    }
+  });
+
+  function descartarPista() {
+    mostrarPista = false;
+    try {
+      localStorage.setItem(CLAVE_PISTA, '1');
+    } catch { /* sin almacenamiento: volverá a salir, es el precio del modo privado */ }
+  }
 
   // Precarga de modales cuando el navegador queda idle
   $effect(() => {
@@ -591,6 +613,15 @@
       {#if currentView === 'week'}
         <div class="week-layout">
           <div class="grid-section glass-panel">
+            {#if mostrarPista}
+              <div class="pista-primera" id="pista-primera">
+                <Info size={16} aria-hidden="true" />
+                <span class="pista-texto">{$t('dayView.dragHint')}</span>
+                <button type="button" class="pista-ok" onclick={descartarPista}>
+                  {$t('dayView.dragHintGotIt')}
+                </button>
+              </div>
+            {/if}
             <WeeklyGrid 
               activities={$activitiesStore || []} 
               categories={$categoriesStore || []} 
@@ -1198,6 +1229,41 @@
   .grid-section {
     padding: 1rem;
     overflow-x: auto;
+  }
+
+  /* Pista de primera ejecución: una sola vez, encima de la rejilla. El botón
+     es un target de texto normal (min-height 44px por la regla táctil), no una
+     ✕ diminuta: un cierre de 20px es inalcanzable con el dedo. */
+  .pista-primera {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.75rem;
+    padding: 0.25rem 0.25rem 0.25rem 0.7rem;
+    border-radius: 10px;
+    background: rgba(45, 90, 39, 0.08);
+    border: 1px solid rgba(45, 90, 39, 0.16);
+    color: var(--color-green-dark, #2d5a27);
+    font-size: 0.9rem;
+  }
+  .pista-texto {
+    flex: 1;
+    min-width: 0;
+  }
+  .pista-ok {
+    flex: none;
+    min-height: 44px;
+    padding: 0 0.9rem;
+    border: 1px solid rgba(45, 90, 39, 0.24);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--color-green-dark, #2d5a27);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .pista-ok:hover {
+    background: rgba(45, 90, 39, 0.08);
   }
 
   .stats-section {

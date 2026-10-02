@@ -552,3 +552,38 @@ test('i18n: ningún diálogo de un flujo deshacible afirma que sea irreversible'
   expect(revisadas, 'No se encontraron claves confirm.*/modal.*: el test no mordería').toBeGreaterThan(5);
   expect(offenses, 'Diálogos que afirman irreversibilidad:\n' + offenses.join('\n')).toEqual([]);
 });
+
+/**
+ * ── C4: la pista de primera ejecución ─────────────────────────────────────
+ *
+ * Arrastrar y tocar son los gestos de la app y no se descubren solos. La pista
+ * aparece una vez sobre la rejilla y, una vez descartada, no vuelve: si
+ * reapareciera en cada carga dejaría de ser una ayuda para ser ruido.
+ */
+const PISTA = '#pista-primera';
+
+test('Pista: aparece en la primera visita y se descarta para siempre', async ({ page }) => {
+  // beforeEach deja el perfil limpio: no hay nada en localStorage todavía.
+  await expect(page.locator(PISTA)).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(`${PISTA} span.pista-texto`)).not.toBeEmpty();
+
+  // Se descarta con su botón, no con un timeout.
+  await page.locator(`${PISTA} button.pista-ok`).click();
+  await expect(page.locator(PISTA)).toBeHidden({ timeout: 30_000 });
+
+  // Recargar NO la trae de vuelta: la marca quedó en localStorage.
+  await page.reload();
+  await expect(page.locator('h1')).toContainText(/Nature Planner/i, { timeout: 30_000 });
+  await page.waitForTimeout(800);
+  await expect(page.locator(PISTA)).toHaveCount(0, { timeout: 30_000 });
+});
+
+test('Pista: el botón de descartar cumple la zona táctil de 44px', async ({ page }) => {
+  await expect(page.locator(PISTA)).toBeVisible({ timeout: 30_000 });
+  const alto = await page.locator(`${PISTA} button.pista-ok`).evaluate(
+    el => Math.round(el.getBoundingClientRect().height)
+  );
+  // Una ✕ de 20px sería inalcanzable con el dedo: el botón es de texto y
+  // tiene que respetar la misma regla que el resto de la app.
+  expect(alto, `El botón de descartar mide ${alto}px de alto`).toBeGreaterThanOrEqual(44);
+});
