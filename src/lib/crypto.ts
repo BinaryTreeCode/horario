@@ -38,7 +38,6 @@ const LONGITUD_CLAVE = 256; // bits
 
 /** Clave derivada en memoria: vive solo mientras la sesión esté activa. */
 let claveCache: CryptoKey | null = null;
-let emailCache: string | null = null;
 
 function b64(buffer: ArrayBuffer | Uint8Array): string {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
@@ -80,13 +79,11 @@ export async function establecerClave(email: string, password: string): Promise<
     false, // no extraíble: ni el propio JS puede exportarla
     ['encrypt', 'decrypt']
   );
-  emailCache = email.toLowerCase();
 }
 
 /** Olvida la clave (logout): sin ella, los datos de la nube son ilegibles. */
 export function olvidarClave(): void {
   claveCache = null;
-  emailCache = null;
 }
 
 /** ¿Hay clave derivada en memoria? */
