@@ -694,8 +694,8 @@
 
       <!-- Days selector: hide when saving only to this day's override -->
       {#if saveScope === 'week'}
-        <div class="form-group">
-          <label>{$t('modal.daysOfWeek')}</label>
+        <fieldset class="form-group">
+          <legend>{$t('modal.daysOfWeek')}</legend>
           <div class="days-selector">
             {#each days as day}
               <button
@@ -714,7 +714,7 @@
             <button type="button" class="preset-btn" onclick={selectWeekdays}>{$t('modal.weekdays')}</button>
             <button type="button" class="preset-btn" onclick={selectAll}>{$t('modal.allWeek')}</button>
           </div>
-        </div>
+        </fieldset>
       {/if}
 
       <footer class="modal-footer">
@@ -1333,6 +1333,22 @@
     flex-direction: column;
     gap: 0.5rem;
     margin-bottom: 1.5rem;
+  }
+
+  /* fieldset para agrupar los días: el navegador le pone borde y padding por
+     defecto, y el legend necesita comportarse como el label que sustituye. */
+  fieldset.form-group {
+    border: 0;
+    padding: 0;
+    margin-inline: 0;
+    min-inline-size: 0;
+  }
+
+  fieldset.form-group > legend {
+    padding: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-brown-bark);
   }
 
   .form-row {

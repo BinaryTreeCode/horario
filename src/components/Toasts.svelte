@@ -3,7 +3,9 @@
   import { tNow } from '../lib/i18n';
   import { CheckCircle2, AlertCircle, Info, X } from '@lucide/svelte';
 
-  const icons = { success: CheckCircle2, error: AlertCircle, info: Info };
+  // Svelte 5: los componentes son dinámicos con una variable, sin
+  // <svelte:component> (que además está deprecado). AGENTS.md lo prohíbe.
+  const ICONOS = { success: CheckCircle2, error: AlertCircle, info: Info };
 
   function enter(id: number) { pauseToast(id); }
   function leave() { /* reanuda con 1.5s de gracia */ }
@@ -55,6 +57,7 @@
 {#if $toasts.length}
   <div class="toast-container" role="status" aria-live="polite">
     {#each $toasts as t (t.id)}
+      {@const Icono = ICONOS[t.type] ?? Info}
       <div
         class="toast glass-panel toast-{t.type}"
         class:toast-out={saliendo.has(t.id)}
@@ -63,7 +66,7 @@
         onfocusin={() => t.pausable && enter(t.id)}
         onfocusout={() => t.pausable && resumeToast(t.id, 1500)}
       >
-        <svelte:component this={icons[t.type]} size={18} class="toast-icon" />
+        <Icono size={18} class="toast-icon" />
         <span class="toast-msg">{t.message}</span>
         {#if t.action}
           <button
