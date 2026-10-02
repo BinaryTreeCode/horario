@@ -3,21 +3,32 @@
  *
  * Modelo de confianza: el SERVIDOR guarda blobs que NO puede leer. La clave
  * nunca sale del dispositivo — se deriva del password del usuario con
- * PBKDF2-SHA256 (210k iteraciones, sal aleatoria por cuenta) y vive solo en
- * memoria mientras haya sesión. El password jamás viaja a la nube en texto:
- * el servidor ya tiene su scrypt para autenticar, y aquí se usa como SEMILLA
- * local para la clave AES-GCM.
+ * PBKDF2-SHA256 (210k iteraciones) y vive solo en memoria mientras haya
+ * sesión. El password jamás viaja a la nube en texto: el servidor ya tiene su
+ * scrypt para autenticar, y aquí se usa como SEMILLA local para la clave
+ * AES-GCM.
  *
- * Formato de un campo cifrado (lo que viaja por el sync y vive en la BD):
- *   "np1:<saltB64>:<ivB64>:<datosB64>"
- *   np1    → versión del esquema (permite rotar parámetros a futuro)
- *   salt   → sal PBKDF2 (16 bytes, se regenera por campo: barato y aísla)
- *   iv     → nonce AES-GCM (12 bytes, único por cifrado — NUNCA reutilizar)
- *   datos  → ciphertext + tag GCM (16 bytes de autenticación incluidos)
+ * La sal de la derivación es DETERMINISTA ("np-sal:" + email normalizado) y
+ * no aleatoria: la clave maestra tiene que reproducirse igual en cada
+ * dispositivo y en cada sesión, y el servidor no guarda ninguna sal que
+ * pudiera acompañar al ciphertext. El PBKDF2 con 210k iteraciones es lo que
+ * encarece el ataque por diccionario; el email como sal solo hace que dos
+ * cuentas con la misma contraseña deriven claves distintas.
+ *
+ * Formato real de un campo cifrado (lo que viaja por el sync y vive en la BD):
+ *   "np1:<version>:<ivB64>:<datosB64>"
+ *   np1       → versión del esquema (permite rotar parámetros a futuro)
+ *   version   → marcador de versión reservado; hoy siempre "0" y sin uso.
+ *               Antes este segmento se documentaba como una sal por campo y
+ *               nunca lo fue: no hay sal por campo.
+ *   iv        → nonce AES-GCM (12 bytes, aleatorio y único por cifrado — lo
+ *               que garantiza que dos textos iguales den ciphertext distinto
+ *               y que reutilizar nonce sea detectable)
+ *   datos     → ciphertext + tag GCM (16 bytes de autenticación incluidos)
  *
  * Un campo que no empieza con "np1:" se considera legacy (texto plano de
- * antes de la migración): `decryptField` lo devuelve tal cual y
- * `encryptField` lo cifrará en el próximo push — migración transparente,
+ * antes de la migración): `descifrarCampo` lo devuelve tal cual y
+ * `cifrarCampo` lo cifrará en el próximo push — migración transparente,
  * sin script de datos.
  */
 
@@ -57,10 +68,10 @@ export function esCifrado(valor: unknown): valor is string {
 export async function establecerClave(email: string, password: string): Promise<void> {
   const material = new TextEncoder().encode(`${email.toLowerCase()}::${password}`);
   const base = await crypto.subtle.importKey('raw', material, 'PBKDF2', false, ['deriveKey']);
-  // Sal determinista por cuenta: la derivación debe dar SIEMPRE la misma clave
-  // (no hay servidor que recuerde una sal aleatoria — la sal va embebida en
-  // cada campo cifrado para el IV, pero la clave maestra necesita derivación
-  // reproducible: usamos el email como contexto estable).
+  // Sal determinista por cuenta: la derivación debe dar SIEMPRE la misma clave,
+  // en cada dispositivo y en cada sesión. No hay servidor que recuerde una sal
+  // aleatoria, y el campo cifrado solo lleva el IV; por eso el email hace de
+  // sal estable (ver la cabecera del archivo).
   const sal = new TextEncoder().encode(`np-sal:${email.toLowerCase()}`);
   claveCache = await crypto.subtle.deriveKey(
     { name: 'PBKDF2', salt: sal, iterations: PBKDF2_ITERACIONES, hash: 'SHA-256' },
@@ -96,8 +107,9 @@ export async function cifrarCampo(valor: string): Promise<string> {
     claveCache,
     new TextEncoder().encode(valor)
   );
-  // La sal PBKDF2 no aplica por-campo (la clave ya está derivada): el segundo
-  // segmento queda reservado y se llena con ceros informativos de versión.
+  // Sin sal por campo: la clave ya está derivada y lo que protege cada
+  // cifrado es el IV aleatorio. El segundo segmento queda reservado para la
+  // versión del formato.
   return `${ESQUEMA}:0:${b64(iv)}:${b64(datos)}`;
 }
 
