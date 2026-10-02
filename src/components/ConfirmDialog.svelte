@@ -12,7 +12,18 @@
     oncancel?: () => void;
   }
 
-  let { open = $bindable(false), title = '¿Confirmar?', message = '', confirmText = 'Confirmar', cancelText = 'Cancelar', danger = false, onconfirm, oncancel }: Props = $props();
+  // Los valores por defecto salen de i18n: antes eran literales en español y
+// quedaban en español aunque el usuario estuviera en inglés.
+  let {
+    open = $bindable(false),
+    title = tNow('confirm.defaultTitle'),
+    message = '',
+    confirmText = tNow('confirm.defaultOk'),
+    cancelText = tNow('confirm.defaultCancel'),
+    danger = false,
+    onconfirm,
+    oncancel,
+  }: Props = $props();
 
   let boxEl = $state<HTMLElement | null>(null);
   let confirmBtnEl = $state<HTMLElement | null>(null);
@@ -45,6 +56,7 @@
   import { portal } from '../lib/portal';
   import { atraparTab, enfocarDialogo, recordarFoco } from '../lib/focus';
   import { capturarEscape } from '../lib/dialogStack';
+  import { tNow } from '../lib/i18n';
 
 </script>
 

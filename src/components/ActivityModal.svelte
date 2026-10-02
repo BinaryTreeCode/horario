@@ -555,7 +555,7 @@
         </div>
 
         {#if image}
-          <button type="button" class="image-preview" onclick={openImagePreview} title="Ver imagen ampliada">
+          <button type="button" class="image-preview" onclick={openImagePreview} title={$t('lightbox.viewFull')}>
             <img src={image} alt={$t('modal.routineImage')} />
           </button>
         {:else}

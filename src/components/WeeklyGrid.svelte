@@ -1273,9 +1273,9 @@
 
   <ConfirmDialog
     bind:open={confirmDelete}
-    title="Eliminar actividad"
-    message="La actividad se eliminará de toda la semana (y de las ediciones temporales). Esta acción no se puede deshacer."
-    confirmText="Eliminar"
+    title={$t('confirm.deleteTitle')}
+    message={$t('confirm.deleteWeekMsg')}
+    confirmText={$t('confirm.deleteBtn')}
     danger
     onconfirm={deleteActivity}
   />
