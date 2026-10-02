@@ -1,6 +1,7 @@
 import { db } from './db';
-import { cloneAct, type RowChange, type OverrideChange } from './undo';
+import type { RowChange, OverrideChange } from './undo';
 import type { Activity, DayOverride } from './types';
+import { desProxyVerificado } from './snapshot';
 
 /**
  * Único punto de escritura de mutaciones de horarios (fase 1 del plan v2):
@@ -11,7 +12,7 @@ import type { Activity, DayOverride } from './types';
  *  - Deshacer/rehacer en UN paso por gesto, con snapshots before/after.
  *  - updatedAt fresco en toda fila escrita (regla 3 de AGENTS.md — sync LWW).
  *
- * `cambios.acts`  → filas master completas (ya clonadas, sin proxies $state).
+ * `cambios.acts`  → filas master completas (se desproxifican aquí).
  * `cambios.ovs`   → overrides completos por día.
  */
 
@@ -34,12 +35,15 @@ export async function commitCambios(c: CommitCambios): Promise<CommitResult> {
   const rows: RowChange[] = [];
   const overrides: OverrideChange[] = [];
   const writes: Promise<unknown>[] = [];
-  const deletes: Promise<unknown>[] = [];
 
   await db.transaction('rw', db.activities, db.dayOverrides, async () => {
     for (const act of c.acts ?? []) {
       const before = await db.activities.get(act.id!) ?? null;
-      const after = { ...act, updatedAt: stamp };
+      // Regla 2 por fin dentro de la propia ruta de escritura: antes solo
+      // confiaba en que el caller clonara, y un caller nuevo podia escribir
+      // un proxy de $state y reventar con DataCloneError dentro de la
+      // transacción.
+      const after: Activity = { ...desProxyVerificado(act, 'la actividad'), updatedAt: stamp };
       if (!before ||
           before.startTime !== after.startTime ||
           before.endTime !== after.endTime ||
@@ -52,8 +56,11 @@ export async function commitCambios(c: CommitCambios): Promise<CommitResult> {
     }
     for (const ov of c.ovs ?? []) {
       const before = await db.dayOverrides.get(ov.day) ?? null;
-      const after: DayOverride = { day: ov.day, activities: ov.activities, updatedAt: stamp };
-      rowsAreClean(after.activities);
+      const after: DayOverride = {
+        day: ov.day,
+        activities: desProxyVerificado(ov.activities, 'el día'),
+        updatedAt: stamp,
+      };
       if (!before || before.updatedAt !== undefined) {
         // El override se compara por contenido (el día entero es el unit).
         const same = before &&
@@ -66,7 +73,6 @@ export async function commitCambios(c: CommitCambios): Promise<CommitResult> {
     }
     await Promise.all(writes);
   });
-  void deletes;
 
   // Push del undo SOLO si algo cambió (evita pasos vacíos en la pila).
   if (rows.length || overrides.length) {
@@ -74,11 +80,4 @@ export async function commitCambios(c: CommitCambios): Promise<CommitResult> {
     pushUndo({ label: c.label, rows, overrides });
   }
   return { ok: true, label: c.label, rows, overrides };
-}
-
-/** Blindaje: nunca escribir proxies de $state (regla 2 de AGENTS.md). */
-function rowsAreClean(acts: Activity[]) {
-  for (const a of acts) {
-    if (a.steps && !Array.isArray(a.steps)) throw new Error('steps no es array');
-  }
 }
