@@ -8,10 +8,6 @@ export interface Toast {
   message: string;
   /** ms hasta auto-cerrar; 0 = persistente (requiere cierre manual) */
   duration: number;
-  /** Acción opcional (botón tipo [Deshacer]). Al clic: ejecuta y cierra. */
-  action?: { label: string; run: () => void };
-  /** Pausa el auto-cierre con hover/focus (toast con acción). */
-  pausable?: boolean;
 }
 
 export const toasts = writable<Toast[]>([]);
@@ -25,32 +21,18 @@ export const TOAST_DURACION = 2000;
 /** Muestra un toast. duration=0 → persistente (devuelve id para dismiss).
  *  Los toasts NUEVOS REEMPLAZAN a los anteriores (nunca se acumulan en
  *  ráfaga: el último manda — plan v2 fase 1). */
-export function toast(message: string, type: ToastType = 'info', duration = TOAST_DURACION, action?: Toast['action'], pausable = false): number {
+export function toast(message: string, type: ToastType = 'info', duration = TOAST_DURACION): number {
   const id = ++seq;
   toasts.update((list) => {
     // Cerrar los anteriores del mismo tipo: el nuevo reemplaza, no apila.
     for (const t of list) if (timers.has(t.id)) { clearTimeout(timers.get(t.id)!); timers.delete(t.id); }
-    return [{ id, type, message, duration, action, pausable }];
+    return [{ id, type, message, duration }];
   });
   if (duration > 0) {
     timers.set(id, setTimeout(() => dismissToast(id), duration));
   }
   return id;
-}
-
-/** Pausa/reanuda el auto-cierre (hover o foco sobre un toast con acción). */
-export function pauseToast(id: number) {
-  const t = timers.get(id);
-  if (!t) return false;
-  clearTimeout(t);
-  timers.delete(id);
-  return true;
-}
-export function resumeToast(id: number, remaining: number) {
-  if (timers.has(id)) return;
-  timers.set(id, setTimeout(() => dismissToast(id), remaining));
-}
-
+}/** Quita un toast (lo usa el timer de auto-cierre y el botón X). */
 export function dismissToast(id: number) {
   const t = timers.get(id);
   if (t) { clearTimeout(t); timers.delete(id); }
@@ -59,13 +41,6 @@ export function dismissToast(id: number) {
 
 /** Toast de éxito con el check estándar. */
 export const toastOk = (msg: string, duration?: number) => toast(msg, 'success', duration ?? TOAST_DURACION);
-/**
- * Toast de éxito con botón [Deshacer] (6s, pausable con hover): el estándar
- * del plan v2 para toda mutación confirmada. La acción la provee el llamador
- * ( normalmente popAndUndo del último paso).
- */
-export const toastUndo = (msg: string, run: () => void) =>
-  toast(msg, 'success', 6000, { label: 'Deshacer', run }, true);
 /**
  * Toast de error AUTO-CERRABLE por defecto: en el drag los avisos (tope del
  * día, hueco chico) llegan en ráfaga y los persistentes se acumulaban en

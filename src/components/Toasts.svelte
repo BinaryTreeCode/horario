@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { toasts, dismissToast, pauseToast, resumeToast } from '../lib/toast';
+  import { toasts, dismissToast } from '../lib/toast';
   import { tNow } from '../lib/i18n';
   import { CheckCircle2, AlertCircle, Info, X } from '@lucide/svelte';
 
@@ -7,14 +7,10 @@
   // <svelte:component> (que además está deprecado). AGENTS.md lo prohíbe.
   const ICONOS = { success: CheckCircle2, error: AlertCircle, info: Info };
 
-  function enter(id: number) { pauseToast(id); }
-  function leave() { /* reanuda con 1.5s de gracia */ }
-  function runAction(t: any) { t.action?.run(); cerrar(t.id); }
-
   /** Cierre con desvanecimiento (pedido del usuario): marca el toast saliente,
-   *  anima 200ms y recién entonces lo quita de la store. Todos los cierres
-   *  visibles (botón X, acción [Deshacer]) pasan por acá. El auto-cierre del
-   *  store también: nótese que dismissToast NO se usa directo en el markup. */
+   *  anima 200ms y recién entonces lo quita de la store. El cierre visible
+   *  (botón X) pasa por acá. El auto-cierre del store también: nótese que
+   *  dismissToast NO se usa directo en el markup. */
   const SALIDA_MS = 200;
   let saliendo = $state(new Set<number>());
 
@@ -61,19 +57,9 @@
       <div
         class="toast glass-panel toast-{t.type}"
         class:toast-out={saliendo.has(t.id)}
-        onmouseenter={() => t.pausable && enter(t.id)}
-        onmouseleave={() => t.pausable && resumeToast(t.id, 1500)}
-        onfocusin={() => t.pausable && enter(t.id)}
-        onfocusout={() => t.pausable && resumeToast(t.id, 1500)}
       >
         <Icono size={18} class="toast-icon" />
         <span class="toast-msg">{t.message}</span>
-        {#if t.action}
-          <button
-            class="toast-action"
-            onclick={() => runAction(t)}
-          >{t.action.label}</button>
-        {/if}
         <button
           class="toast-close"
           aria-label={tNow('confirm.close')}
@@ -131,20 +117,6 @@
     cursor: pointer;
   }
   .toast-close:hover { background: rgba(255, 255, 255, 0.22); }
-  .toast-action {
-    flex-shrink: 0;
-    border: 1px solid rgba(255, 255, 255, 0.35);
-    background: rgba(255, 255, 255, 0.14);
-    color: inherit;
-    font-weight: 700;
-    font-size: 0.8rem;
-    padding: 6px 12px;
-    min-height: 44px;
-    border-radius: 9px;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-  .toast-action:hover { background: rgba(255, 255, 255, 0.28); }
   @keyframes toast-in {
     from { opacity: 0; transform: translateY(-12px) scale(0.96); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
