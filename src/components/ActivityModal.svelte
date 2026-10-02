@@ -430,6 +430,10 @@
 
   async function remove() {
     if (id !== null) {
+      // El diálogo de confirmación promete "podés deshacerlo": el op tiene que
+      // entrar al historial. Antes este flujo NO empujaba nada y el botón
+      // Deshacer quedaba deshabilitado: la promesa era falsa.
+      const etiqueta = `${tNow('toast.deleted')} — ${name}`;
       if (targetDay !== null && saveScope === 'day') {
         // Remove from dayOverrides. Si el override aún no existe, se siembra
         // desde master SIN la actividad (eliminar "solo este día" no puede
@@ -445,11 +449,22 @@
           activities: acts,
           updatedAt: Date.now()
         });
+        // Snapshot del override: el undo restaura la fila entera (el bloque
+        // vuelve con sus campos) en vez de intentar reinsertar la actividad.
+        pushUndo({
+          label: etiqueta,
+          rows: [],
+          overrides: [{ day: targetDay, before: existing ?? null, after: await db.dayOverrides.get(targetDay) ?? null }]
+        });
       } else {
         // Borrado suave (tombstone) para que el sync lo propague a otros dispositivos
+        const before = await db.activities.get(id);
         await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });
+        if (before) {
+          pushUndo({ label: etiqueta, rows: [{ before, after: await db.activities.get(id) ?? null }] });
+        }
       }
-      toastOk(tNow('toast.deleted'));
+      toastOk(tNow('toast.deletedNamed', { name }));
       onClose();
     }
   }
@@ -733,7 +748,7 @@
           <button type="button" class="btn btn-danger" onclick={() => confirmDuplicate = true}>
             <Copy size={18} /> {$t('modal.duplicate')}
           </button>
-          <button type="button" class="btn btn-danger" onclick={() => confirmRemove = true}>
+          <button id="btn-delete-activity" type="button" class="btn btn-danger" onclick={() => confirmRemove = true}>
             <Trash2 size={18} /> {$t('confirm.deleteBtn')}
           </button>
         {/if}

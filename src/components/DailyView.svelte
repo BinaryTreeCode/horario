@@ -797,6 +797,9 @@
     const id = contextMenu.activityId;
     if (!id) return;
 
+    // Nombre del bloque borrado: el toast lo nombra para que el usuario sepa
+    // qué está por deshacer sin abrir el historial.
+    let nombreBorrado = '';
     try {
       if (isTemporaryMode) {
         const overrideActs = await ensureOverride();
@@ -809,6 +812,7 @@
           updatedAt: Date.now()
         });
         if (victim) {
+          nombreBorrado = victim.name;
           pushUndo({
             label: `${tNow('toast.deleted')} — ${victim.name} (${DAY_NAMES[day]})`,
             rows: [],
@@ -819,10 +823,11 @@
         const before = await db.activities.get(id);
         await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });
         if (before) {
+          nombreBorrado = before.name;
           pushUndo({ label: `${tNow('toast.deleted')} — ${before.name}`, rows: [{ before, after: await db.activities.get(id) ?? null }] });
         }
       }
-      toastOk(tNow('toast.deleted'));
+      toastOk(nombreBorrado ? tNow('toast.deletedNamed', { name: nombreBorrado }) : tNow('toast.deleted'));
     } catch (err: any) {
       toastErr(tNow('toast.couldNotDelete') + ': ' + (err?.message || err));
     }

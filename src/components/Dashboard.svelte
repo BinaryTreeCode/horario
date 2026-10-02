@@ -25,10 +25,24 @@
   let currentView = $state('week'); // 'week' | 'day'
 
   // ── Deshacer global (Ctrl+Z / ⌘Z) ───────────────────────────────────
+  // El botón no decía QUÉ iba a deshacer: un "Deshacer" genérico obliga a
+  // memoria. Guardamos también la etiqueta de la cima de cada pila para
+  // ponerla en el title (tooltip) y en el aria-label.
   let stackCount = $state(0);
   let redoCount = $state(0);
-  undoStack.subscribe(s => { stackCount = s.length; });
-  redoStack.subscribe(s => { redoCount = s.length; });
+  let undoLabel = $state('');
+  let redoLabel = $state('');
+  undoStack.subscribe(s => {
+    stackCount = s.length;
+    undoLabel = s[s.length - 1]?.label ?? '';
+  });
+  redoStack.subscribe(s => {
+    redoCount = s.length;
+    redoLabel = s[s.length - 1]?.label ?? '';
+  });
+
+  const undoTitulo = $derived(undoLabel ? $t('header.undoWith', { label: undoLabel }) : $t('header.undo'));
+  const redoTitulo = $derived(redoLabel ? $t('header.redoWith', { label: redoLabel }) : $t('header.redo'));
 
   /** Ejecuta deshacer/rehacer (compartido por teclado y botones del header). */
   function ejecutarUndo(redo: boolean) {
@@ -494,20 +508,22 @@
         <!-- Deshacer / Rehacer: mismos guards y misma ejecución que Ctrl+Z
              (ejecutarUndo). Deshabilitados cuando su pila está vacía. -->
         <button
+          id="btn-undo"
           class="btn btn-secondary btn-icon"
           onclick={() => ejecutarUndo(false)}
           disabled={stackCount === 0}
-          aria-label={$t('header.undo')}
-          title={$t('header.undo')}
+          aria-label={undoTitulo}
+          title={undoTitulo}
         >
           <Undo2 size={20} />
         </button>
         <button
+          id="btn-redo"
           class="btn btn-secondary btn-icon"
           onclick={() => ejecutarUndo(true)}
           disabled={redoCount === 0}
-          aria-label={$t('header.redo')}
-          title={$t('header.redo')}
+          aria-label={redoTitulo}
+          title={redoTitulo}
         >
           <Redo2 size={20} />
         </button>

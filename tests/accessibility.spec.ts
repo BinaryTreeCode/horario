@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { readFile } from 'node:fs/promises';
 
 // Regresión de accesibilidad: falla si axe encuentra alguna violación nueva.
 // La única regla deshabilitada es 'region': la app aún no delimita landmarks
@@ -415,3 +416,139 @@ for (const vp of MODALES_CON_ALTURA_ESCASA) {
     ).toBe(true);
   });
 }
+
+/**
+ * ── C1: el deshacer tiene que existir Y decir la verdad ────────────────────
+ *
+ * El diálogo de borrado promete "podés deshacerlo con el botón Deshacer".
+ * Dos de los tres flujos de borrado NO empujaban nada al historial
+ * (ActivityModal.remove y WeeklyGrid.deleteActivity), así que el botón
+ * quedaba deshabilitado justo después de prometer lo contrario. Además el
+ * botón decía "Deshacer" a secas: sin decir QUÉ iba a deshacer.
+ */
+
+/** Botón Deshacer del header: se localiza por el icono, no por el texto (i18n). */
+const BTN_DESHACER = '#btn-undo';
+const BTN_REHACER = '#btn-redo';
+
+/**
+ * Abre el modal de una actividad desde la rejilla de la Semana y la borra por
+ * el camino real: bloque → modal → Eliminar → confirmar.
+ * Devuelve el nombre de la actividad borrada.
+ */
+async function borrarDesdeElModal(page: import('@playwright/test').Page): Promise<string> {
+  const bloque = page.locator('.activity-item').first();
+  await expect(bloque).toBeVisible({ timeout: 30_000 });
+  const nombre = (await bloque.getAttribute('title')) ?? '';
+
+  await bloque.click();
+  const modal = page.locator('.modal-content[role="dialog"]');
+  await expect(modal).toBeVisible({ timeout: 30_000 });
+
+  // El de duplicar también es .btn-danger: se localiza por id, no por icono
+  // (lucide no pone una clase por icono, solo .lucide-icon).
+  const btnBorrar = modal.locator('#btn-delete-activity');
+  await expect(btnBorrar).toBeVisible({ timeout: 30_000 });
+  await btnBorrar.click();
+
+  // Diálogo de confirmación: el mensaje es el que hace la promesa.
+  const dialogo = page.locator('[role="alertdialog"]');
+  await expect(dialogo).toBeVisible({ timeout: 30_000 });
+  return nombre;
+}
+
+test('Borrar: el diálogo promete deshacer y el botón queda habilitado', async ({ page }) => {
+  await expect(page.locator(BTN_DESHACER)).toBeDisabled();
+
+  const nombre = await borrarDesdeElModal(page);
+
+  // (a) El diálogo no dice que sea irreversible.
+  const mensaje = await page.locator('[role="alertdialog"] p').innerText();
+  expect(
+    mensaje,
+    'El diálogo sigue afirmando que no se puede deshacer'
+  ).not.toMatch(/no se puede deshacer|cannot be undone|irreversible/i);
+
+  await page.locator('[role="alertdialog"] .btn-confirm-ok').click();
+  await expect(page.locator('[role="alertdialog"]')).toBeHidden({ timeout: 30_000 });
+
+  // (b) El botón Deshacer se habilita de verdad.
+  await expect(page.locator(BTN_DESHACER)).toBeEnabled({ timeout: 30_000 });
+  await expect(page.locator(BTN_REHACER)).toBeDisabled();
+
+  // (c) El título nombra la actividad que se va a deshacer.
+  const titulo = await page.locator(BTN_DESHACER).getAttribute('title');
+  expect(titulo, 'El botón Deshacer no dice qué va a deshacer').toBeTruthy();
+  expect(
+    titulo!,
+    `El title de Deshacer (${titulo}) no nombra la actividad (${nombre})`
+  ).toContain(nombre);
+
+  // El aria-label lleva lo mismo que el title (lectores de pantalla).
+  expect(await page.locator(BTN_DESHACER).getAttribute('aria-label')).toBe(titulo);
+});
+
+test('Borrar y deshacer: la actividad vuelve a la rejilla', async ({ page }) => {
+  const bloque = page.locator('.activity-item').first();
+  await expect(bloque).toBeVisible({ timeout: 30_000 });
+  const nombre = (await bloque.getAttribute('title')) ?? '';
+  expect(nombre, 'El bloque no trae title con el nombre').toBeTruthy();
+
+  // Una actividad de semana aparece en un bloque por cada día activo, así que
+  // se cuenta SOLO los bloques de esa actividad: contar todos y esperar -1
+  // daba un número arbitrario según cuántos días tuviera.
+  const propios = page.locator(`.activity-item[title="${nombre}"]`);
+  const antes = await propios.count();
+  expect(antes, 'No se encontró ningún bloque de la actividad').toBeGreaterThan(0);
+
+  await borrarDesdeElModal(page);
+  await page.locator('[role="alertdialog"] .btn-confirm-ok').click();
+  await expect(page.locator('[role="alertdialog"]')).toBeHidden({ timeout: 30_000 });
+
+  // Tras borrar, sus bloques desaparecen de TODOS los días...
+  await expect(propios).toHaveCount(0, { timeout: 30_000 });
+
+  // ...y el Deshacer (por botón) los devuelve: la promesa era cierta.
+  await page.locator(BTN_DESHACER).click();
+  await expect(propios).toHaveCount(antes, { timeout: 30_000 });
+
+  // Al deshacer, la pila de rehacer se habilita y nombra lo mismo.
+  await expect(page.locator(BTN_REHACER)).toBeEnabled({ timeout: 30_000 });
+  await expect(page.locator(BTN_DESHACER)).toBeDisabled();
+  const tituloRedo = await page.locator(BTN_REHACER).getAttribute('title');
+  expect(tituloRedo, 'El botón Rehacer no dice qué va a rehacer').toBeTruthy();
+  expect(tituloRedo!).toContain(nombre);
+});
+
+/**
+ * Barrido de las claves de confirmación: ninguna debe afirmar irreversibilidad
+ * si su flujo empuja al historial. Se lee el archivo de i18n como texto para
+ * cubrir también los diálogos que este test no ejercita por UI.
+ *
+ * Las únicas que SÍ pueden decirlo son las de importar y borrar todo, que
+ * llaman a clearUndo() por diseño.
+ */
+const IRREVERSIBLES_POR_DISENO = ['settings.importMsg', 'settings.wipeMsg'];
+
+test('i18n: ningún diálogo de un flujo deshacible afirma que sea irreversible', async () => {
+  const ruta = new URL('../src/lib/i18n.ts', import.meta.url);
+  const fuente = await readFile(ruta, 'utf8');
+
+  // Solo el bloque de español: el inglés se valida con el test de paridad.
+  const bloqueEs = fuente.slice(0, fuente.indexOf("const en: Catalogo"));
+  const entradas = [...bloqueEs.matchAll(/^\s*'([^']+)':\s*'((?:[^'\\]|\\.)*)'/gm)];
+
+  const offenses: string[] = [];
+  let revisadas = 0;
+  for (const [, clave, valor] of entradas) {
+    if (!clave.startsWith('confirm.') && !clave.startsWith('modal.')) continue;
+    if (IRREVERSIBLES_POR_DISENO.includes(clave)) continue;
+    revisadas++;
+    if (/no se puede deshacer|no podrá deshacerse|irreversible/i.test(valor)) {
+      offenses.push(`${clave}: ${valor}`);
+    }
+  }
+
+  expect(revisadas, 'No se encontraron claves confirm.*/modal.*: el test no mordería').toBeGreaterThan(5);
+  expect(offenses, 'Diálogos que afirman irreversibilidad:\n' + offenses.join('\n')).toEqual([]);
+});

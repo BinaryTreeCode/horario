@@ -10,7 +10,7 @@
   import ImageLightbox from './ImageLightbox.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr, toastErrRepetido } from '../lib/toast';
-  import { cloneAct } from '../lib/undo';
+  import { cloneAct, pushUndo } from '../lib/undo';
   import { portal } from '../lib/portal';
   import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
   import { t, tNow } from '../lib/i18n';
@@ -1042,14 +1042,33 @@
     const id = contextMenu.activityId;
     if (!id) return;
     try {
-      await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });
-      // Propagar el borrado a las ediciones temporales (dayOverrides) que la copiaron
+      // El diálogo promete "podés deshacerlo" y este flujo borra en dos sitios
+      // (tombstone + ediciones temporales). Sin pushUndo el botón Deshacer
+      // quedaba muerto tras borrar desde el menú contextual de la Semana.
+      const antes = await db.activities.get(id);
       const overrides = await db.dayOverrides.toArray();
-      const dirty = overrides
-        .filter(o => o.activities?.some(a => a.id === id))
-        .map(o => ({ ...o, activities: o.activities.filter(a => a.id !== id) }));
-      if (dirty.length > 0) await db.dayOverrides.bulkPut(dirty);
-      toastOk(tNow('toast.deleted'));
+      const dirty = overrides.filter(o => o.activities?.some(a => a.id === id));
+
+      await db.activities.update(id, { deletedAt: Date.now(), updatedAt: Date.now() });
+      // Propagar el borrado a las ediciones temporales (dayOverrides) que la copiaron.
+      // updatedAt FRESCO: el spread lo arrastraba del original, así que la fila
+      // mutada conservaba el sello viejo y el push incremental del sync no la
+      // veía (además el guard de undo comparaba un "después" indistinguible).
+      const cambios = dirty.map(o => ({ ...o, activities: o.activities.filter(a => a.id !== id), updatedAt: Date.now() }));
+      if (cambios.length > 0) await db.dayOverrides.bulkPut(cambios);
+
+      if (antes) {
+        const tras = await db.activities.get(id) ?? null;
+        // Snapshots leídos DESPUÉS de escribir: el guard de undoRun compara por
+        // updatedAt, así que el "after" tiene que ser el estado real final.
+        const ovAfter = await Promise.all(cambios.map(async o => await db.dayOverrides.get(o.day) ?? null));
+        pushUndo({
+          label: `${tNow('toast.deleted')} — ${antes.name}`,
+          rows: [{ before: antes, after: tras }],
+          overrides: cambios.map((o, i) => ({ day: o.day, before: dirty.find(d => d.day === o.day) ?? null, after: ovAfter[i] }))
+        });
+      }
+      toastOk(tNow('toast.deletedNamed', { name: antes?.name ?? '' }));
     } catch (err: any) {
       console.error(err);
     }
