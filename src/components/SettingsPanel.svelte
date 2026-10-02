@@ -14,6 +14,7 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { tNow } from '../lib/i18n';
+  import { fueConsumido } from '../lib/dialogStack';
   import { clearUndo } from '../lib/undo';
   import { notifyDataChange } from '../lib/dataBus';
   import Toasts from './Toasts.svelte';
@@ -139,7 +140,9 @@
   // Cerrar con Esc y atrapar el foco dentro del panel
   $effect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      // Si hay un diálogo encima (un ConfirmDialog), el Esc es suyo: ya
+      // marcou el evento en fase de captura.
+      if (e.key === 'Escape' && !fueConsumido(e)) onClose();
     };
     window.addEventListener('keydown', handleKey);
     panelEl?.focus();

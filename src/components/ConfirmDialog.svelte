@@ -27,6 +27,10 @@
     return devolver;
   });
 
+  // Escape en fase de captura: el modal de debajo lo consulta y lo deja pasar,
+  // así que Esc cierra solo este diálogo (antes cerraba los dos).
+  $effect(() => capturarEscape(() => open, () => close(false)));
+
   function close(confirmed: boolean) {
     open = false;
     if (confirmed) onconfirm?.();
@@ -35,11 +39,12 @@
 
   function onKeydown(e: KeyboardEvent) {
     if (!open) return;
-    if (e.key === 'Escape') { e.stopPropagation(); close(false); }
+    // El Escape ya lo gestionó el listener de captura de arriba.
     if (e.key === 'Enter') { e.stopPropagation(); close(true); }
   }
   import { portal } from '../lib/portal';
   import { atraparTab, enfocarDialogo, recordarFoco } from '../lib/focus';
+  import { capturarEscape } from '../lib/dialogStack';
 
 </script>
 

@@ -5,6 +5,7 @@
   import { X, Trash2, CheckCircle, Plus, CheckSquare, Square, ListChecks, Sparkles, Zap, Calendar, ImageIcon, Link2, RefreshCw } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
   import { t, tNow } from '../lib/i18n';
+  import { fueConsumido } from '../lib/dialogStack';
   import { comprimirImagen, subirABlob } from '../lib/routineImages';
   import { isLoggedIn } from '../lib/sync';
 
@@ -72,7 +73,8 @@
   // Cerrar con Esc (sin robar el foco si hay un lightbox de imagen abierto encima)
   $effect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !showImagePreview) onClose();
+      // Con el lightbox o un ConfirmDialog encima, el Esc es de ese diálogo.
+      if (e.key === 'Escape' && !showImagePreview && !fueConsumido(e)) onClose();
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);

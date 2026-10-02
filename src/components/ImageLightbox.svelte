@@ -3,6 +3,7 @@
   import { portal } from '../lib/portal';
   import { t } from '../lib/i18n';
   import { atraparTab, enfocarDialogo, recordarFoco } from '../lib/focus';
+  import { capturarEscape } from '../lib/dialogStack';
   import type { Activity } from '../lib/types';
 
   interface Props {
@@ -27,16 +28,13 @@
     return devolver;
   });
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') onClose();
-  }
+  // Escape en fase de captura: el modal que lo abrió lo deja pasar.
+  $effect(() => capturarEscape(() => true, () => onClose()));
 
   function handleOverlayClick(e: MouseEvent) {
     if (e.target === e.currentTarget) onClose();
   }
 </script>
-
-<svelte:window onkeydown={handleKeydown} />
 
 <!-- Portal a body: un ancestro con backdrop-filter crea containing block y ancla este overlay fixed a la sección scrolleada en vez del viewport -->
 <div
