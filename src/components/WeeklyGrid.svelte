@@ -1093,8 +1093,17 @@
             {@const numSlots = activity.numSlots}
             {@const catColor = getActivityColor(activity.categoryId, categories)}
             {@const catFg = textOn(catColor)}
-            <button 
-              class="activity-item" 
+            <!-- role="button" en un <div>, no un <button> real: el bloque
+                 contiene la miniatura, que SÍ es un botón (abre la
+                 imagen). Un <button> no puede contener otro <button> — HTML
+                 lo prohíbe y el foco de teclado no puede entrar: la
+                 miniatura quedaba inalcanzable con Tab y sus handlers de
+                 Enter/Espacio nunca se ejecutaban. La vista Día ya resolvió
+                 esto del mismo modo ( DailyView.svelte ). -->
+            <div
+              class="activity-item"
+              role="button"
+              tabindex="0"
               class:short={numSlots <= 2}
               class:mini={numSlots <= 1}
               class:drag-ghost={draggedActivityId === activity.id}
@@ -1106,10 +1115,14 @@
               onclick={() => onEditActivity(activity.id!)}
               onkeydown={(e) => {
                 // M6 (WCAG 2.5.7): ↑/↓ = ±15 min con cascada global. Enter y
-                // Espacio ya abren edición (comportamiento nativo de <button>).
+                // Espacio abren edición: antes venía gratis del <button>
+                // nativo y ahora hay que gestionarlos a mano.
                 if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                   e.preventDefault();
                   nudgeWeekly(activity, e.key === 'ArrowUp' ? -0.25 : 0.25);
+                } else if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onEditActivity(activity.id!);
                 }
               }}
               aria-label="{activity.name}, {format12h(activity.startTime)} — {format12h(activity.endTime)}{activity.steps?.length ? `, ${activity.steps.length}` : ''}. {$t('dayView.keyboardHint')}"
@@ -1117,26 +1130,6 @@
             >
               <div class="activity-title">
                 <span>{activity.name}</span>
-                {#if activity.image}
-                  <!-- Miniatura REAL de la imagen (igual que la vista Día):
-                       el icono genérico no decía qué imagen era; la foto misma
-                       sí, y a 18px no roba espacio a tarjetas cortas. -->
-                  <button
-                    type="button"
-                    class="grid-image-thumb"
-                    aria-label={$t('dayView.viewImage', { name: activity.name })}
-                    aria-describedby={imgPopover?.activity.id === activity.id ? 'img-popover' : undefined}
-                    title={$t('menu.viewImage')}
-                    onclick={(e) => { e.stopPropagation(); ocultarImgPopover(true); viewingImageActivity = activity; }}
-                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); ocultarImgPopover(true); viewingImageActivity = activity; } }}
-                    onmouseenter={(e) => mostrarImgPopover(e, activity)}
-                    onmouseleave={() => ocultarImgPopover()}
-                    onfocus={(e) => mostrarImgPopover(e, activity)}
-                    onblur={() => ocultarImgPopover(true)}
-                  >
-                    <img src={activity.image} alt="" loading="lazy" />
-                  </button>
-                {/if}
                 {#if activity.steps && activity.steps.length > 0}
                   <span class="grid-steps-icon">
                     <ListChecks size={10} />
@@ -1171,7 +1164,34 @@
                     onpointerdown={(e) => startHResize(e, activity, i, 'der')}
                   ></div>
                 {/if}
-            </button>
+            </div>
+            <!-- Miniatura REAL de la imagen (igual que la vista Día): el icono
+                 genérico no decía qué imagen era; la foto misma sí.
+                 Vive FUERA del bloque a propósito: el bloque es interactivo
+                 (role=button) y un <button> no puede anidarse en otro
+                 interactivo — HTML lo prohíbe y el foco de teclado no
+                 entra dentro, así que la miniatura era inalcanzable con Tab.
+                 Se posiciona con la MISMA geometría que el bloque (mismos
+                 strings de left/width), pegada a su borde derecho. -->
+            {#if activity.image && numSlots > 1}
+              <button
+                type="button"
+                class="grid-image-thumb"
+                class:short={numSlots <= 2}
+                style="top: calc({activity.top} + 2px); left: calc({activity.left} + {activity.width} - var(--thumb) - 3px)"
+                aria-label={$t('dayView.viewImage', { name: activity.name })}
+                aria-describedby={imgPopover?.activity.id === activity.id ? 'img-popover' : undefined}
+                title={$t('menu.viewImage')}
+                onclick={(e) => { e.stopPropagation(); ocultarImgPopover(true); viewingImageActivity = activity; }}
+                onpointerdown={(e) => e.stopPropagation()}
+                onmouseenter={(e) => mostrarImgPopover(e, activity)}
+                onmouseleave={() => ocultarImgPopover()}
+                onfocus={(e) => mostrarImgPopover(e, activity)}
+                onblur={() => ocultarImgPopover(true)}
+              >
+                <img src={activity.image} alt="" loading="lazy" />
+              </button>
+            {/if}
           {/each}
         </div>
       </div>
@@ -1945,9 +1965,8 @@
     white-space: nowrap;
     display: block;
   }
-  .activity-item.short .grid-image-thumb {
-    width: 14px;
-    height: 14px;
+  .grid-image-thumb.short {
+    --thumb: 14px;
   }
   /* Bloques de UN slot (≤15 min): el bloque mide ~13px y ni la línea de
      texto le cabe (auditoría UX: "ilegibles"). El nombre desborda HACIA
@@ -1972,7 +1991,6 @@
     text-overflow: clip;
     text-shadow: 0 1px 2px var(--fg-shadow, rgba(0, 0, 0, 0.55)), 0 0 3px var(--fg-shadow, rgba(0, 0, 0, 0.35));
   }
-  .activity-item.mini .grid-image-thumb,
   .activity-item.mini .grid-steps-icon {
     display: none;
   }
@@ -1986,8 +2004,7 @@
       font-size: 0.62rem;
     }
     .grid-image-thumb {
-      width: 15px;
-      height: 15px;
+      --thumb: 15px;
     }
   }
 
@@ -2026,13 +2043,14 @@
      nombre usa el ancho restante y las palabras completas bajan limpias —
      sin partir palabras ni truncar por culpa de la foto. */
   .grid-image-thumb {
-    /* Centrada con el nombre (antes float: right). El gap de .activity-title
-       reemplaza los márgenes que la separaban del texto. */
-    float: none;
-    flex: 0 0 auto;
-    position: relative; /* ancla del ::before (zona táctil invisible) */
-    width: 18px;
-    height: 18px;
+    /* El tamaño vive en --thumb porque AHORA lo calcula la geometría: el
+       `left` inline del botón es calc(… - var(--thumb) …), así que una
+       única variable mueve el visual y mantiene el pegado al borde. */
+    --thumb: 18px;
+    position: absolute; /* ancla del ::before (zona táctil invisible) */
+    z-index: 2;
+    width: var(--thumb);
+    height: var(--thumb);
     border-radius: 50%;
     padding: 0;
     border: 2px solid rgba(255, 255, 255, 0.9);
@@ -2063,8 +2081,7 @@
      para no robar espacio a tarjetas cortas. */
   @media (hover: none) and (pointer: coarse) {
     .grid-image-thumb {
-      width: 32px;
-      height: 32px;
+      --thumb: 32px;
     }
     /* box-sizing: border-box → el padding-box del botón es 32 − 2×2px
        de borde = 28px, y `inset` se mide SOBRE ÉSE. −8px → 28 + 16
@@ -2077,7 +2094,7 @@
     /* Bloques cortos: el visual sigue en 14px (la regla de arriba, con
        especificidad 0,2,0, gana), pero la zona efectiva llega a 44px
        (padding-box 10px + 2×17px). */
-    .activity-item.short .grid-image-thumb::before {
+    .grid-image-thumb.short::before {
       inset: -17px;
     }
     /* Bloques cortos: con wrap, el nombre (nowrap, base completa
