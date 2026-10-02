@@ -25,6 +25,29 @@ export const sessions = pgTable('sessions', {
 });
 
 /**
+ * Intentos de autenticación, para el rate limiting.
+ *
+ * Vive en la BD a propósito: Vercel serverless es stateless y sus instancias
+ * aparecen y desaparecen sin previo aviso, así que un contador en memoria lo
+ * saltaría (basta con abrir varias instancias en paralelo). En la BD el
+ * bloqueo sobrevive a reinicios y es compartido por todas las instancias.
+ *
+ * `key` nunca es una IP ni un email en claro: es un hash truncado (ver
+ * rateLimit.ts) del dato que queremos limitar, de modo que la tabla no se
+ * convierte en un registro de PII.
+ *
+ * `windowStart` es el inicio de la ventana actual y `blockedUntil` el instante
+ * hasta el que esa clave está rechazada (null = no bloqueada).
+ */
+export const loginAttempts = pgTable('login_attempts', {
+  key: varchar('key', { length: 64 }).primaryKey(),
+  failedCount: integer('failed_count').notNull().default(0),
+  windowStart: bigint('window_start', { mode: 'number' }).notNull(),
+  blockedUntil: bigint('blocked_until', { mode: 'number' }),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
+/**
  * Datos replicados del planificador, por usuario. Todos traen updated_at (ms epoch)
  * para merge LWW y deleted_at (tombstone) para propagar borrados entre dispositivos.
  */

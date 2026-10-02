@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db, isDbConfigured } from '../../server/db';
 import { users } from '../../server/schema';
 import { hashPassword, verifyPassword, createSession, destroySession, getSessionUser, sessionCookieOptions, SESSION_COOKIE } from '../../server/auth';
+import { consultarLimite, registrarFallo, limpiarFallos, claveLogin, claveRegistro, ipDeRequest } from '../../server/rateLimit';
 
 export const prerender = false;
 
@@ -29,6 +30,13 @@ async function readJson(request: Request): Promise<any> {
   }
 }
 
+/** 429 con Retry-After: el cliente sabe cuándo volver sin adivinar. */
+function demasiadosIntentos(error: string, reintentarEnSeg: number) {
+  const res = json({ error }, 429);
+  res.headers.set('Retry-After', String(reintentarEnSeg));
+  return res;
+}
+
 export const POST: APIRoute = async ({ url, cookies, request }) => {
   if (!isDbConfigured) {
     return json({ error: 'La base de datos en la nube no está configurada. La aplicación funciona en modo local.' }, 503);
@@ -46,6 +54,17 @@ export const POST: APIRoute = async ({ url, cookies, request }) => {
       if (!EMAIL_RE.test(email)) return json({ error: 'Email inválido' }, 400);
       if (password.length < 8) return json({ error: 'La contraseña debe tener al menos 8 caracteres' }, 400);
 
+      // Rate limiting por IP: frena el alta masiva de cuentas (miles de
+      // registros con correos distintos desde la misma dirección).
+      const keyRegistro = claveRegistro(ipDeRequest(request));
+      const limite = await consultarLimite(keyRegistro);
+      if (limite.bloqueado) {
+        return demasiadosIntentos(
+          'Demasiados registros desde esta conexión. Espera unos minutos antes de reintentar.',
+          limite.reintentarEnSeg,
+        );
+      }
+
       const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
       if (existing.length > 0) {
         return json({ error: 'Ya existe una cuenta con ese email' }, 409);
@@ -58,6 +77,9 @@ export const POST: APIRoute = async ({ url, cookies, request }) => {
         .returning({ id: users.id, email: users.email, name: users.name });
 
       const user = inserted[0];
+      // Cada alta consume cuota: aquí el abuso es el volumen de cuentas
+      // creadas, no los fallos, así que se cuenta el registro exitoso.
+      await registrarFallo(keyRegistro);
       const { token, expiresAt } = await createSession(user.id);
       const res = json({ user });
       res.headers.append('Set-Cookie', `${SESSION_COOKIE}=${token}; ${cookieAttrs(expiresAt)}`);
@@ -72,11 +94,28 @@ export const POST: APIRoute = async ({ url, cookies, request }) => {
 
       const rows = await db.select().from(users).where(eq(users.email, email)).limit(1);
       const user = rows[0];
-      // Mensaje genérico para no filtrar si el email existe
-      if (!user || !(await verifyPassword(password, user.passwordHash))) {
+
+      // Rate limiting por cuenta: frena el credential stuffing. Va ANTES de
+      // verificar la contraseña para que un atacante no pueda usar intentos
+      // gratis como oráculo de fuerza bruta.
+      const keyLogin = claveLogin(email);
+      const limite = await consultarLimite(keyLogin);
+      if (limite.bloqueado) {
+        return demasiadosIntentos(
+          'Demasiados intentos. Espera unos minutos antes de reintentar.',
+          limite.reintentarEnSeg,
+        );
+      }
+
+      const ok = user ? await verifyPassword(password, user.passwordHash) : false;
+      if (!user || !ok) {
+        // Un único camino para "no existe" y "contraseña mala": ni el mensaje
+        // ni el status permiten distinguir un email registrado de uno que no.
+        await registrarFallo(keyLogin);
         return json({ error: 'Email o contraseña incorrectos' }, 401);
       }
 
+      await limpiarFallos(keyLogin);
       const { token, expiresAt } = await createSession(user.id);
       const res = json({ user: { id: user.id, email: user.email, name: user.name } });
       res.headers.append('Set-Cookie', `${SESSION_COOKIE}=${token}; ${cookieAttrs(expiresAt)}`);
