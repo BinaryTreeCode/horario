@@ -89,19 +89,19 @@
     const off = onSyncChange((s, d) => { syncStatus = s; syncDetail = { pending: d.pending, lastSyncAt: d.lastSyncAt }; });
     return off;
   });
+  // $t (no tNow) para que el título del badge se re-evalúe al cambiar de
+  // idioma: era un $derived.by que solo dependía de syncStatus.
   const syncTitulo = $derived.by(() => {
-    const base = syncStatus === 'synced'
-      ? 'Sincronizado con la nube'
-      : syncStatus === 'syncing'
-        ? 'Sincronizando…'
-        : syncStatus === 'offline'
-          ? 'Sin conexión — se sincronizará al volver'
-          : syncStatus === 'error'
-            ? 'Error de sincronización'
-            : 'Solo local — sin respaldo en la nube';
+    const base = $t(`sync.${syncStatus}`);
     const extras: string[] = [];
-    if (syncDetail.lastSyncAt) extras.push('Última sincronización: ' + new Date(syncDetail.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    if (syncDetail.pending > 0) extras.push(syncDetail.pending + ' cambio' + (syncDetail.pending === 1 ? '' : 's') + ' pendiente' + (syncDetail.pending === 1 ? '' : 's') + ' de subir');
+    if (syncDetail.lastSyncAt) {
+      extras.push($t('sync.lastAt', {
+        time: new Date(syncDetail.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }));
+    }
+    if (syncDetail.pending > 0) {
+      extras.push($t(syncDetail.pending === 1 ? 'sync.pending' : 'sync.pendingMany', { n: syncDetail.pending }));
+    }
     return extras.length ? base + ' — ' + extras.join(' — ') : base;
   });
 
@@ -581,8 +581,8 @@
   {#if syncStatus === 'error' || syncStatus === 'offline'}
     <div class="sync-banner glass-panel" role="alert">
       <CloudOff size={16} />
-      <span>{syncStatus === 'error' ? 'No se pudo sincronizar con la nube.' : 'Sin conexión: los cambios se guardan localmente.'}</span>
-      <button class="sync-retry" onclick={() => syncNow(true).catch(() => {})}>Reintentar</button>
+      <span>{$t(syncStatus === 'error' ? 'sync.bannerError' : 'sync.bannerOffline')}</span>
+      <button class="sync-retry" onclick={() => syncNow(true).catch(() => {})}>{$t('sync.retry')}</button>
     </div>
   {/if}
 

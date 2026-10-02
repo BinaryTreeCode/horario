@@ -39,6 +39,22 @@ const es: Catalogo = {
   'header.viewWeek': 'Ver semana',
   'header.viewDay': 'Ver día',
 
+  // ── Sincronización ──
+  // El estado de la nube vive en el badge del header y en el banner de error.
+  // Estaban en español literal dentro de Dashboard.svelte: con la app en
+  // inglés el usuario leía "Sincronizado con la nube".
+  'sync.synced': 'Sincronizado con la nube',
+  'sync.syncing': 'Sincronizando…',
+  'sync.offline': 'Sin conexión — se sincronizará al volver',
+  'sync.error': 'Error de sincronización',
+  'sync.local': 'Solo local — sin respaldo en la nube',
+  'sync.lastAt': 'Última sincronización: {time}',
+  'sync.pending': '{n} cambio pendiente de subir',
+  'sync.pendingMany': '{n} cambios pendientes de subir',
+  'sync.bannerError': 'No se pudo sincronizar con la nube.',
+  'sync.bannerOffline': 'Sin conexión: los cambios se guardan localmente.',
+  'sync.retry': 'Reintentar',
+
   // ── Días ──
   'day.0': 'Lunes',
   'day.1': 'Martes',
@@ -320,6 +336,18 @@ const en: Catalogo = {
   'header.privacy': 'Privacy mode',
   'header.viewWeek': 'View week',
   'header.viewDay': 'View day',
+
+  'sync.synced': 'Synced to the cloud',
+  'sync.syncing': 'Syncing…',
+  'sync.offline': 'Offline — it will sync when you are back',
+  'sync.error': 'Sync error',
+  'sync.local': 'Local only — no cloud backup',
+  'sync.lastAt': 'Last sync: {time}',
+  'sync.pending': '{n} change waiting to upload',
+  'sync.pendingMany': '{n} changes waiting to upload',
+  'sync.bannerError': 'Could not sync with the cloud.',
+  'sync.bannerOffline': 'Offline: your changes are saved locally.',
+  'sync.retry': 'Retry',
 
   'day.0': 'Monday',
   'day.1': 'Tuesday',
