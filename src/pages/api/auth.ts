@@ -66,22 +66,29 @@ export const POST: APIRoute = async ({ url, cookies, request }) => {
       }
 
       const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+
+      // Anti-enumeración: el registro responde SIEMPRE 200 con el mismo
+      // cuerpo, exista o no el correo. Un 409 con "ya existe una cuenta"
+      // confirmaba qué correos están registrados y es justo lo que permite
+      // enumerar cuentas (y luego atacarlas por el login).
+      // La respuesta no lleva datos de usuario en ninguno de los dos casos:
+      // devolverlos solo en el camino feliz volvería a filtrar la existencia.
       if (existing.length > 0) {
-        return json({ error: 'Ya existe una cuenta con ese email' }, 409);
+        return json({ ok: true });
       }
 
       const passwordHash = await hashPassword(password);
       const inserted = await db
         .insert(users)
         .values({ email, name, passwordHash })
-        .returning({ id: users.id, email: users.email, name: users.name });
+        .returning({ id: users.id });
 
       const user = inserted[0];
       // Cada alta consume cuota: aquí el abuso es el volumen de cuentas
       // creadas, no los fallos, así que se cuenta el registro exitoso.
       await registrarFallo(keyRegistro);
       const { token, expiresAt } = await createSession(user.id);
-      const res = json({ user });
+      const res = json({ ok: true });
       res.headers.append('Set-Cookie', `${SESSION_COOKIE}=${token}; ${cookieAttrs(expiresAt)}`);
       return res;
     }

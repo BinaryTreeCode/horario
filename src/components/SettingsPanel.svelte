@@ -91,6 +91,17 @@
         authError = data?.error ?? tNow('settings.authError');
         return;
       }
+      // El registro responde 200 tanto si creó la cuenta como si el correo ya
+      // existía (para no filtrar qué correos están registrados). La verdad la
+      // sabe el cliente por su propia cookie: si no hay sesión, la cuenta ya
+      // existía y su contraseña sigue siendo la anterior.
+      const conSesion = await isLoggedIn();
+      if (!conSesion) {
+        syncMessage = tNow('settings.authMaybeCreated');
+        authEmail = '';
+        authPassword = '';
+        return;
+      }
       loggedIn = true;
       // E2E: derivar la clave del password ANTES de limpiar el formulario —
       // vive solo en memoria; la nube recibe blobs que no puede leer.
@@ -562,6 +573,7 @@
           {#if syncMessage}<p class="sync-hint">{syncMessage}</p>{/if}
         {:else}
           <p class="sync-hint">{$t('settings.loginPrompt')}</p>
+          {#if syncMessage}<p class="sync-hint sync-hint-auth">{syncMessage}</p>{/if}
           <div class="auth-tabs">
             <button class:active={authMode === 'login'} onclick={() => authMode = 'login'}>{$t('settings.login')}</button>
             <button class:active={authMode === 'register'} onclick={() => authMode = 'register'}>{$t('settings.register')}</button>
@@ -1436,6 +1448,16 @@
     color: #666;
     margin: 0;
     line-height: 1.45;
+  }
+
+  /* Aviso informativo tras un registro ambiguo (respuesta 200 uniforme). */
+  .sync-hint-auth {
+    color: var(--color-green-dark, #2f6b3f);
+    background: rgba(76, 175, 120, 0.1);
+    border: 1px solid rgba(76, 175, 120, 0.28);
+    border-radius: 8px;
+    padding: 0.5rem 0.65rem;
+    margin-top: 0.5rem;
   }
 
   .sync-status-row {
