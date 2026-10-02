@@ -51,11 +51,6 @@ export function isPlaceholderImagen(v: unknown): v is { i: number; f: string } {
   );
 }
 
-/** Acepta UUID string (v4) o número (formatos v2/v3 legacy). */
-function isValidId(v: unknown): v is string | number {
-  return (typeof v === 'string' && v.length > 0 && v.length <= 64) || typeof v === 'number';
-}
-
 export function isValidActivityData(a: any): boolean {
   if (
     typeof a?.name !== 'string' || !a.name.trim() ||

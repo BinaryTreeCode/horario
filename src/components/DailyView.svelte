@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types';
   import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
-  import { resolveDayCascade, resolveResizeDay, resolveNudgeDay } from '../lib/cascade';
+  import { resolveDayCascade, resolveResizeDay } from '../lib/cascade';
   import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
   import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon, Plus, ChevronLeft, ChevronRight } from '@lucide/svelte';
   import { db, newId } from '../lib/db';
@@ -624,19 +624,6 @@
       // no puede quedar en modo fantasma hasta el próximo arrastre.
       draggedActivityId = null;
     }
-  }
-
-  /** M6: mueve una actividad ±15 min (teclado) respetando la cascada. */
-  async function nudgeActivity(activity: Activity, deltaH: number) {
-    const dur = parseTime(activity.endTime) - parseTime(activity.startTime);
-    let newStart = Math.round((parseTime(activity.startTime) + deltaH) * 4) / 4;
-    newStart = Math.max(startHour, Math.min(newStart, endHour - dur));
-    const slots = dayActivities.map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-    // ±15 min es un deseo exacto: pared anclada que empuja lo que pisa.
-    // Si el empuje en cadena desborda el día → ⛔ y NADA se escribe.
-    const res = resolveNudgeDay(slots, activity.id!, newStart, startHour, endHour);
-    if (!res.valido) { toastErrRepetido(`teclado:${activity.id}`, tNow('toast.noFit')); return; }
-    await commitResolved(toSlotMap(res.slots));
   }
 
   /**

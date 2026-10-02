@@ -302,21 +302,9 @@
   let draggedActivityId = $state<string | null>(null);
   let dragSourceDay = $state<number | null>(null);
   let dragOffsetHours = 0;
-  /** Última mitad elegida por pisado: histéresis ±10% — cruzar el centro no
-   *  alterna antes/después hasta alejarse del umbral (mata la vibración). */
-  let mitadActual = new Map<string, 'antes' | 'despues'>();
   /** Firma del último preview publicado: si no cambió por CONTENIDO, no se
    *  reasigna (las transiciones CSS no se relanzan → cero parpadeo). */
   let firmaPreview = '';
-
-  /** Histéresis del umbral de mitades: ZONA 0.5 con banda muerta ±0.1. */
-  function decidirMitad(pisadoId: string, rel: number): 'antes' | 'despues' {
-    const previa = mitadActual.get(pisadoId) ?? 'antes';
-    const zona = previa === 'antes' ? 0.5 + 0.1 : 0.5 - 0.1;
-    const nueva = rel < zona ? 'antes' : 'despues';
-    mitadActual.set(pisadoId, nueva);
-    return nueva;
-  }
 
   /** Columna + grid bajo el puntero (null = fuera de la grilla). */
   function dropTargetAt(x: number, y: number): { day: number; grid: HTMLElement } | null {
@@ -327,20 +315,12 @@
     return day >= 0 && grid ? { day, grid } : null;
   }
 
-  /** Inicio (horas, snap 15min) para un drop en un grid — el preview y el
-   *  commit usan la MISMA matemática: lo que se ve es lo que se guarda. */
-  function slotStartAt(grid: HTMLElement, y: number, duration: number): number {
-    const rect = grid.getBoundingClientRect();
-    let start = (y - rect.top) / (slotHeightPx * slotsPerHour) + startHour - dragOffsetHours;
-    start = Math.round(start * 4) / 4;
-    return Math.max(startHour, Math.min(start, endHour - duration));
-  }
+  
 
   const dragHooks: DragHooks = {
     onActivate(t) {
       draggedActivityId = t.activityId;
       dragSourceDay = (t.meta as { day: number }).day;
-      mitadActual.clear();
       firmaPreview = '';
     },
     onMove(t, x, y) {
@@ -655,7 +635,6 @@
     dragGhostXY = null;
     dragGhostHora = '';
     firmaPreview = '';
-    mitadActual.clear();
   }
 
   // ── Resize bidireccional (estirar arriba/abajo) en la grilla semanal ──

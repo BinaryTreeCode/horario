@@ -1,6 +1,6 @@
 import { db } from './db';
 import { onDataChanged } from './dataBus';
-import type { Activity, Category, AppSettings, DayOverride, SyncState } from './types';
+import type { Activity, Category, AppSettings, DayOverride } from './types';
 
 // ── Stores reactivas propias (reemplazan liveQuery) ─────────────────────────
 // liveQuery de Dexie 4.3/4.4 no notifica updates de filas que ya existían al
@@ -92,10 +92,6 @@ export const dayOverridesStore = createDataSignal<DayOverride[]>(['dayOverrides'
   const all = await db.dayOverrides.toArray();
   return all.filter(o => !o.deletedAt);
 });
-export const syncStateStore = createDataSignal<SyncState | undefined>('syncState', () =>
-  db.syncState.get('1')
-);
-
 export function getActivityColor(categoryId: string, categories: any[]) {
     return categories.find(c => c.id === categoryId)?.color || '#999';
 }

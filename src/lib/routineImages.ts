@@ -111,13 +111,6 @@ export async function recomprimirParaRespaldo(
   }
 }
 
-/** Tamaño binario real de una data-URL (el navegador decodifica el base64). */
-export async function bytesDeDataUrl(dataUrl: string): Promise<number> {
-  try {
-    return (await (await fetch(dataUrl)).blob()).size;
-  } catch {
-    return dataUrl.length; // peor caso: estimo por longitud de texto
-  }
-}
+
 
 export { UMBRAL_BINARIO };

@@ -136,10 +136,6 @@ function setStatus(next: SyncStatus, error?: string) {
   for (const fn of listeners) fn(status, { pending: pendingCount, error: lastError, lastSyncAt });
 }
 
-export function getSyncStatus(): SyncStatus {
-  return status;
-}
-
 async function persistState() {
   try {
     // MERGE con lo persistido: lastPushAt/lastServerPullAt son cursores del

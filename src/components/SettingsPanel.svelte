@@ -339,10 +339,6 @@
     );
   }
 
-  function restoreDefaults() {
-    confirmRestoreCats = true;
-  }
-
   async function restoreDefaultsConfirm() {
     const { INITIAL_CATEGORIES } = await import('../lib/db');
     localCategories = [...INITIAL_CATEGORIES];
