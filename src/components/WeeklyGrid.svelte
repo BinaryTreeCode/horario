@@ -113,6 +113,10 @@
   onDestroy(() => engine.destroy());
 
   const days = $derived([0, 1, 2, 3, 4, 5, 6].map(i => $t(`day.${i}`)));
+  // Estado vacío de la SEMANA. Se deriva de `activities` (el prop crudo) y no
+  // de getDayActivitiesWithLayout(): pedirle el layout a los 7 dias otra vez
+  // solo para contar activities duplicaria el trabajo mas caro del render.
+  const semanaVacia = $derived(activities.filter(a => !a.deletedAt).length === 0);
   // Señalización del día actual: JS getDay() → 0=domingo…6=sábado, igual que
   // el índice de columnas. Se fija al montar (la vista no vive cruzando
   // medianoche: el usuario recarga o cambia de pestaña antes).
@@ -1073,6 +1077,16 @@
   </div>
 
   <div class="days-columns">
+    {#if semanaVacia}
+      <!-- Sin actividades no hay nada que arrastrar ni ningun bloque que
+           leer: la rejilla a secas no le dice al usuario que hacer. El icono
+           y el texto son los mismos que usa la vista Día para su "día libre",
+           de modo que las dos vistas se leen igual. -->
+      <div class="empty-state glass-panel" aria-live="polite">
+        <span class="empty-icon">🌱</span>
+        <p>{$t('weekView.empty', { btn: $t('header.newActivity') })}</p>
+      </div>
+    {/if}
     {#each days as day, i}
       {@const dayData = getDayActivitiesWithLayout(i, dropPreview?.day === i ? dropPreview.slots : undefined, draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i) ? draggedActivityId : null)}
       <div class="day-column" class:col-dragging={draggedActivityId !== null} class:col-hoy={i === hoyIdx}
@@ -1419,6 +1433,10 @@
   .days-columns {
     flex: 1;
     display: grid;
+    /* El estado vacío se superpone a la rejilla, no la empuja: sin
+       actividades las columnas siguen ahí (con su rejilla de fondo) y el
+       aviso flota encima. grid-area lo saca del flujo de las 7 columnas. */
+    position: relative;
     /* Ajuste dinámico con piso y tope (pedido del usuario): reparte el ancho
        sin aplastar los días ni dejarlos gigantes.
        % y NO fr dentro de clamp (fr invalida la declaración entera):
@@ -1443,6 +1461,35 @@
     .days-columns {
       grid-template-columns: repeat(7, clamp(66px, calc(14.2857% - 1px), 420px));
     }
+  }
+  /* Estado vacío de la semana: misma idea y mismo aspecto que el de la vista
+     Día (icono + una frase que dice qué hacer), pero flotando sobre la
+     rejilla en vez de anclado al track. grid-area 1/1/-1/-1 lo hace ocupar
+     las siete columnas sin pushar los días: si no, aparecería como una
+     octava columna y descuadraría la rejilla entera. */
+  .empty-state {
+    grid-area: 1 / 1 / -1 / -1;
+    align-self: start;
+    justify-self: center;
+    margin-top: 12%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1.25rem 1rem;
+    text-align: center;
+    pointer-events: none;
+    color: var(--color-brown-bark);
+    opacity: 0.85;
+    max-width: min(90%, 22rem);
+  }
+  .empty-state .empty-icon {
+    font-size: 1.75rem;
+  }
+  .empty-state p {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.45;
   }
   @container weekly-grid (width < 480px) {
     .days-columns {

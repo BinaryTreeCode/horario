@@ -62,6 +62,9 @@ const es: Catalogo = {
   // ── Vista Día ──
   'dayView.title': 'Horario del día',
   'dayView.empty': 'Día libre — tocá cualquier hueco del horario para crear una actividad',
+
+  // ── Vista Semana ──
+  'weekView.empty': 'Semana libre — tocá «{btn}» para empezar a planear',
   'dayView.dragHint': 'Arrastrar o tocar para editar',
   'dayView.edit': 'Editar {name}',
   'dayView.viewImage': 'Ver imagen de {name}',
@@ -335,6 +338,8 @@ const en: Catalogo = {
 
   'dayView.title': 'Day schedule',
   'dayView.empty': 'Free day — tap any slot in the schedule to create an activity',
+
+  'weekView.empty': 'Free week — tap «{btn}» to start planning',
   'dayView.dragHint': 'Drag or tap to edit',
   'dayView.edit': 'Edit {name}',
   'dayView.viewImage': 'View {name} image',
