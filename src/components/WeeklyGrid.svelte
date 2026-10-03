@@ -317,11 +317,36 @@
   function bandaHres(): { top: string; height: string } | null {
     const a = activities.find(x => x.id === draggedActivityId);
     if (!a) return null;
-    const s = parseTime(a.startTime);
-    const e = parseTime(a.endTime);
-    const topPct = ((s - startHour) / totalHours) * 100;
-    const heightPct = ((e - s) / totalHours) * 100;
+    return pctHoras(parseTime(a.startTime), parseTime(a.endTime));
+  }
+
+  /** Porcentajes del alto de la columna para una franja horaria. */
+  function pctHoras(inicio: number, fin: number): { top: string; height: string } {
+    const topPct = ((inicio - startHour) / totalHours) * 100;
+    const heightPct = ((fin - inicio) / totalHours) * 100;
     return { top: `${topPct}%`, height: `calc(${heightPct}% - 3px)` };
+  }
+
+  /**
+   * Vecinos que el empuje en cadena movería si se suelta ahora: los que su
+   * horario resuelto difiere del que tienen guardado. El bloque que se gana no
+   * cuenta (su destino es la banda).
+   */
+  function vecinosEmpujados(dia: number): { id: string; top: string; height: string }[] {
+    const r = hresPreview?.resueltos;
+    if (!r || !hresPreview?.valido) return [];
+    const salida: { id: string; top: string; height: string }[] = [];
+    for (const [id, slot] of r) {
+      if (id === draggedActivityId) continue;
+      const actual = activities.find(a => a.id === id);
+      if (!actual) continue;
+      const ini = parseTime(actual.startTime);
+      const fin = parseTime(actual.endTime);
+      if (Math.abs(ini - slot.start) < 1e-9 && Math.abs(fin - slot.end) < 1e-9) continue;
+      const g = pctHoras(slot.start, slot.end);
+      salida.push({ id, ...g });
+    }
+    return salida;
   }
 
   // Drag and Drop handlers (mecánica en src/lib/dragEngine.ts)
@@ -760,7 +785,17 @@
   // aleja de la tarjeta (gana/retira el vecino, según quién lo tenga);
   // 'haciaDentro' = se dirige a la propia tarjeta (retira el día actual).
   // La vista pinta la columna afectada y el rótulo con esta info.
-  let hresPreview = $state<{ accion: 'ganar' | 'retirar'; dias: number[]; x: number; y: number } | null>(null);
+  // `resueltos` = horario final del día tal como quedaría si se suelta ahora
+  // (incluye el empuje en cadena a los vecinos). Preview y commit usan LA
+  // MISMA función, así que lo que se ve es lo que se guarda.
+  let hresPreview = $state<{
+    accion: 'ganar' | 'retirar';
+    dias: number[];
+    x: number;
+    y: number;
+    resueltos?: Map<string, { start: number; end: number }>;
+    valido?: boolean;
+  } | null>(null);
 
   /** Resuelve qué haría el gesto (compartido por preview y commit):
    *  null = sin gesto/no cruza umbral/borde del arreglo; si decide, devuelve
@@ -775,6 +810,27 @@
    *  - El vecino exterior YA tiene la actividad: hacia afuera no hay gesto,
    *    pero el asa sigue visible porque el barrido hacia adentro sí existe
    *    (asaLateralUtil). */
+  /**
+   * Horario final del día que GANARÍa el bloque, con el empuje en cadena ya
+   * resuelto. Única fuente para el preview y para el commit: si fueran dos
+   * cálculos distintos, el fantasma podría mentir.
+   */
+  function resolverGanarDia(act: Activity, diaVecino: number) {
+    const dur = parseTime(act.endTime) - parseTime(act.startTime);
+    const inicio = parseTime(act.startTime);
+    const slots = activities
+      .filter(a => a.daysOfWeek.includes(diaVecino))
+      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
+    return resolveDayCascade(
+      slots,
+      { id: act.id!, start: inicio, end: inicio + dur },
+      inicio,
+      true,
+      startHour,
+      endHour
+    );
+  }
+
   function resolverHResize(m: WeekHResizeMeta, clientX: number): { accion: 'ganar' | 'retirar'; dias: number[]; diaOrigen: number } | null {
     const act = activities.find(a => a.id === m.activityId);
     if (!act) return null;
@@ -810,7 +866,19 @@
     onMove(t, clientX, _y) {
       const m = t.meta as WeekHResizeMeta;
       const r = resolverHResize(m, clientX);
-      hresPreview = r ? { accion: r.accion, dias: r.dias, x: clientX, y: _y } : null;
+      if (!r) { hresPreview = null; return; }
+      const act = activities.find(a => a.id === t.activityId);
+      // Al ganar un día el commit puede EMPUJAR en cadena a los vecinos si a
+      // esa hora están ocupados: el preview tiene que mostrar a dónde caerían,
+      // o el bloque saltaría al soltar sin previo aviso.
+      let resueltos: Map<string, { start: number; end: number }> | undefined;
+      let valido: boolean | undefined;
+      if (r.accion === 'ganar' && act) {
+        const res = resolverGanarDia(act, r.dias[0]);
+        valido = res.valido;
+        resueltos = new Map(res.slots.map(sl => [sl.id, { start: sl.start, end: sl.end }]));
+      }
+      hresPreview = { accion: r.accion, dias: r.dias, x: clientX, y: _y, resueltos, valido };
     },
     async onDrop(t, clientX) {
       const m = t.meta as WeekHResizeMeta;
@@ -836,19 +904,7 @@
       const diaVecino = r.dias[0];
       const newDays = [...act.daysOfWeek, diaVecino].sort((a, b) => a - b);
       // Validar el día ganado: ¿cabe el bloque (cascada con empuje)?
-      const dur = parseTime(act.endTime) - parseTime(act.startTime);
-      const slots = activities
-        .filter(a => a.daysOfWeek.includes(diaVecino))
-        .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-      const inicio = parseTime(act.startTime);
-      const res = resolveDayCascade(
-        slots,
-        { id: act.id!, start: inicio, end: inicio + dur },
-        inicio,
-        true,
-        startHour,
-        endHour
-      );
+      const res = resolverGanarDia(act, diaVecino);
       if (!res.valido) { toastErrRepetido(`hres:${act.id}`, '⛔ No cabe: el día vecino está lleno a esa hora'); return; }
       // Commit: mismas horas en el nuevo día + empuje en cadena del día ganado
       const times = new Map<string, { start: number; end: number }>();
@@ -1149,9 +1205,21 @@
                entera de arriba abajo, así que trabajo, Desayuno y Aseo 1
                parecían participar del gesto cuando no lo hacen: el mismo
                error que ya se corrigió para el retiro (.hres-afectado). -->
-          {#if hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i) && bandaHres()}
-            {@const banda = bandaHres()}
-            <div class="hres-ganar-banda" style="top: {banda.top}; height: {banda.height}" aria-hidden="true"></div>
+          {#if hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i)}
+            {#if bandaHres()}
+              {@const banda = bandaHres()}
+              <div
+                class="hres-ganar-banda"
+                class:no-cabe={hresPreview.valido === false}
+                style="top: {banda.top}; height: {banda.height}"
+                aria-hidden="true"
+              ></div>
+            {/if}
+            <!-- Dónde caerían los VECINOS que el empuje en cadena desplazaría.
+                 Sin esto el bloque se veía saltar recién al soltar. -->
+            {#each vecinosEmpujados(i) as v (v.id)}
+              <div class="hres-empuje-fantasma" style="top: {v.top}; height: {v.height}" aria-hidden="true"></div>
+            {/each}
           {/if}
           {#each dayData.items as activity (activity.id)}
             {@const numSlots = activity.numSlots}
@@ -1173,6 +1241,7 @@
               class:drag-ghost={draggedActivityId === activity.id}
               class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
               class:hres-afectado={hresPreview?.accion === 'retirar' && hresPreview.dias.includes(i) && activity.id === draggedActivityId}
+              class:hres-se-mueve={hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i) && vecinosEmpujados(i).some(v => v.id === activity.id)}
               onpointerdown={(e) => handleItemPointerDown(e, activity, i)}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
               style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {catColor}; --fg-color: {catFg.text}; --fg-shadow: {catFg.shadow}"
@@ -1647,6 +1716,26 @@
   .day-column.col-hres-ganar .day-header {
     background: rgba(74, 124, 68, 0.9);
     color: #fff;
+  }
+  /* El día no cabe: la banda y los fantasmas se ponen rojos. */
+  .hres-ganar-banda.no-cabe {
+    background: rgba(224, 69, 58, 0.25);
+    border-color: rgba(224, 69, 58, 0.9);
+  }
+  /* Fantasma del empuje en cadena: dónde CAERÁ este vecino al soltar. */
+  .hres-empuje-fantasma {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    border-radius: 8px;
+    border: 2px dashed rgba(74, 124, 68, 0.8);
+    background: rgba(74, 124, 68, 0.14);
+    pointer-events: none;
+    z-index: 2;
+  }
+  /* El bloque original se apaga: se está moviendo a donde marca el fantasma. */
+  .activity-item.hres-se-mueve {
+    opacity: 0.4;
   }
   .hres-ganar-banda {
     position: absolute;

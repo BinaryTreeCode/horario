@@ -76,6 +76,40 @@ async function asaIzquierda(page: import('@playwright/test').Page) {
   return info!;
 }
 
+/**
+ * Crea una actividad por la UI real (mismo camino que un usuario) para forzar
+ * una colisión. Los toggles de día son `.day-toggle` con `aria-pressed` en
+ * orden Lunes..Domingo, así que se eligen por índice y no por texto: el test
+ * tiene que pasar igual en español y en inglés.
+ */
+async function crearActividad(
+  page: import('@playwright/test').Page,
+  nombre: string,
+  inicio: string,
+  fin: string,
+  dias: number[]
+) {
+  await page.locator('.header-actions .btn-plus').click();
+  const modal = page.locator('.modal-content[role="dialog"]');
+  await expect(modal).toBeVisible({ timeout: 30_000 });
+
+  await modal.locator('#act-name').fill(nombre);
+  await modal.locator('#act-start').selectOption(inicio);
+  await modal.locator('#act-end').selectOption(fin);
+
+  const toggles = modal.locator('.day-toggle');
+  const total = await toggles.count();
+  expect(total, 'no se encontraron los toggles de día').toBe(7);
+  for (let i = 0; i < total; i++) {
+    const pressed = (await toggles.nth(i).getAttribute('aria-pressed')) === 'true';
+    if (pressed !== dias.includes(i)) await toggles.nth(i).click();
+  }
+
+  await modal.locator('button[type="submit"]').click();
+  await expect(modal).toBeHidden({ timeout: 30_000 });
+  await page.waitForTimeout(400);
+}
+
 test('Barrido del asa: al ganar un día, la marca es una banda, no la columna', async ({ page }) => {
   const asa = await asaIzquierda(page);
 
@@ -136,6 +170,81 @@ test('Barrido del asa: al ganar un día, la marca es una banda, no la columna', 
   ).toEqual([]);
 
   await page.mouse.up();
+});
+
+/**
+ * El empuje en cadena tiene que verse ANTES de soltar. Ganar un día a una
+ * hora ocupada no solo agrega el bloque: corre a los vecinos que estén debajo.
+ * Si eso no se anticipa, el bloque y los vecinos saltan al soltar.
+ *
+ * El guard mira la firma del preview contra la de la resolución real: si
+ * divergen, el fantasma miente, que es peor que no dibujarlo.
+ */
+test('Barrido: el fantasma del empuje coincide con lo que hace el commit', async ({ page }) => {
+  // Con la semilla el gesto NUNCA choca: 'Trabajo' (09-13) es la única
+  // actividad con días acotados y en Lunes esa franja está libre, así que el
+  // guard pasaría sin comprobar nada. Creamos el choque de verdad: una
+  // actividad que ocupa 09-13 SOLO el Lunes, y ganamos 'Trabajo' en el Lunes.
+  await crearActividad(page, 'Choque de prueba', '09:00', '13:00', [0]);
+
+  const asa = await asaIzquierda(page);
+  expect(asa.titulo, 'el asa elegida no es Trabajo: el guard no probaría el empuje')
+    .toContain('Trabajo');
+
+  await page.mouse.move(asa.x, asa.y);
+  await page.mouse.down();
+  await page.mouse.move(asa.x - asa.colW * 1.2, asa.y, { steps: 6 });
+
+  const banda = page.locator('.hres-ganar-banda');
+  await expect(banda, 'no apareció la banda del barrido').toBeVisible({ timeout: 30_000 });
+
+  // Estado del preview: ids y franjas de los fantasmas de empuje.
+  // La columna destino se identifica por ÍNDICE: al soltar, la clase
+  // col-hres-ganar desaparece con el preview.
+  const destino = asa.dia - 1;
+  const antes = await page.evaluate((d) => {
+    const col = document.querySelectorAll('.day-column')[d]!;
+    const fantasmas = [...col.querySelectorAll('.hres-empuje-fantasma')].map((el) => {
+      const r = el.getBoundingClientRect();
+      const colR = col.getBoundingClientRect();
+      return { top: +(r.top - colR.top).toFixed(1), h: +r.height.toFixed(1) };
+    });
+    const apagados = col.querySelectorAll('.activity-item.hres-se-mueve').length;
+    return { fantasmas, apagados, valido: !!col.querySelector('.hres-ganar-banda:not(.no-cabe)') };
+  }, destino);
+
+  // Soltar y comparar con el horario REALMENTE escrito en la grilla.
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+
+  const despues = await page.evaluate((d) => {
+    const col = document.querySelectorAll('.day-column')[d]!;
+    return [...col.querySelectorAll('.activity-item')].map((el) => {
+      const r = el.getBoundingClientRect();
+      const colR = col.getBoundingClientRect();
+      return { top: +(r.top - colR.top).toFixed(1), h: +r.height.toFixed(1) };
+    });
+  }, destino);
+
+  // Si el preview decía que el día no cabe, no debe haberse escrito nada:
+  // todos los bloques deben seguir donde estaban (ningún apagado en preview).
+  if (!antes.valido) {
+    expect(antes.apagados, 'el preview marcaría movimiento en un día inválido').toBe(0);
+    return;
+  }
+
+  // Cada fantasma tiene que existir después, en la misma franja.
+  for (const f of antes.fantasmas) {
+    const existe = despues.some(d => Math.abs(d.top - f.top) < 3 && Math.abs(d.h - f.h) < 3);
+    expect(
+      existe,
+      `el fantasma (top ${f.top}, alto ${f.h}) no aparece en la grilla tras soltar`
+    ).toBe(true);
+  }
+  expect(antes.fantasmas.length, 'sinmove nún sin fantasma').toBe(antes.apagados);
+  // El guard solo sirve si hubo empuje de verdad: sin choques, 0 fantasmas.
+  expect(antes.fantasmas.length, 'el test pasó sin comprobar nada: no hubo empuje').toBeGreaterThan(0);
+  console.log('FANTASMAS VISTOS:', antes.fantasmas.length, 'APAGADOS:', antes.apagados);
 });
 
 test('Barrido del asa: el día del asa también se retira', async ({ page }) => {
