@@ -249,6 +249,14 @@
     return lang === 'en' ? 'en-US' : 'es-AR';
   }
 
+  /**
+   * Duración de la animación de CIERRE del menú, en ms. Tiene que coincidir
+   * con .menuDatosAnim.menuDatosSaliendo (0.12s) o el panel se desmonta a
+   * medias y el último fotograma se ve como un parpadeo. Se sube un pelo por
+   * el retardo de pintado del navegador.
+   */
+  const MENU_CIERRE_MS = 130;
+
   function alternarMenuDatos() {
     if (!menuDatos) {
       ultimoRespaldo = leerUltimoRespaldo();
@@ -272,7 +280,7 @@
       // Cierre animado: el menú sube (menuDatosSaliendo) y se desmonta al
       // terminar la animación, no antes.
       menuDatosSaliendo = true;
-      setTimeout(() => { menuDatos = false; menuDatosSaliendo = false; }, 140);
+      setTimeout(() => { menuDatos = false; menuDatosSaliendo = false; }, MENU_CIERRE_MS);
     } else {
       menuDatos = true;
     }
@@ -281,7 +289,7 @@
   function cerrarMenuDatos() {
     if (!menuDatos || menuDatosSaliendo) return;
     menuDatosSaliendo = true;
-    setTimeout(() => { menuDatos = false; menuDatosSaliendo = false; }, 140);
+    setTimeout(() => { menuDatos = false; menuDatosSaliendo = false; }, MENU_CIERRE_MS);
   }
 
   // Click afuera + Esc cierran el menú (patrón del menú contextual existente).
@@ -965,23 +973,77 @@
     display: flex;
     flex-direction: column;
     box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    /* El menú se ancla a la IZQUIERDA del botón (que está a la derecha del
+       header), así que la escala tiene que crecer desde su esquina superior
+       derecha: si el origen fuera top-left, el panel "crecería" hacia el
+       botón y se vería que se estira en vez de abrirse. */
+    transform-origin: top right;
   }
-  /* Subida/bajada del dropdown: baja al abrir (desde -8px), sube al cerrar
-     (hacia -8px). Sin depender de la opacity computada al montar: keyframes
-     explícitos 0→1 y 1→0. */
+  /* ── Animación del menú ────────────────────────────────────────────────
+     Un fade de 160 ms pasaba desapercibido: el menú aparecía de golpe. Ahora
+     el panel escala desde la esquina anclada al botón y sus ítems entran
+     escalonados (stagger de 40 ms), que es lo que comunica "se abrió" sin
+     tener que esperarlo.
+     Direcciones fijas: el menú siempre abre hacia abajo (y = botón.bottom),
+     así que entra desde arriba y sale hacia arriba. */
   .menuDatosAnim {
-    animation: menuDatosIn 0.16s ease-out;
+    animation: menuDatosIn 0.18s cubic-bezier(0.22, 1.15, 0.36, 1) both;
   }
   .menuDatosAnim.menuDatosSaliendo {
-    animation: menuDatosOut 0.14s ease-in forwards;
+    animation: menuDatosOut 0.12s ease-in both;
   }
   @keyframes menuDatosIn {
-    from { opacity: 0; transform: translateY(-8px); }
-    to { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; transform: translateY(-10px) scale(0.92); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
   }
   @keyframes menuDatosOut {
-    from { opacity: 1; transform: translateY(0); }
-    to { opacity: 0; transform: translateY(-8px); }
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 0; transform: translateY(-6px) scale(0.96); }
+  }
+  /* Stagger: 3 botones (2 items + 1 checkbox) y 2 filas informativas. El
+     nth-child cuenta TODOS los hijos, por eso el checkbox es el 4º. */
+  .menuDatosAnim > button {
+    animation: menuItemIn 0.16s ease-out both;
+  }
+  .menuDatosAnim > button:nth-child(1) { animation-delay: 0.02s; }
+  .menuDatosAnim > button:nth-child(2) { animation-delay: 0.06s; }
+  .menuDatosAnim > button:nth-child(4) { animation-delay: 0.10s; }
+  .menuDatosAnim > .menu-datos-sep,
+  .menuDatosAnim > .menu-datos-pie {
+    animation: menuFadeIn 0.16s ease-out both;
+  }
+  .menuDatosAnim > .menu-datos-sep { animation-delay: 0.13s; }
+  .menuDatosAnim > .menu-datos-pie { animation-delay: 0.17s; }
+  @keyframes menuItemIn {
+    from { opacity: 0; transform: translateY(-7px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes menuFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  /* Al cerrar manda el panel: los hijos vuelven a su estado natural sin
+     esperar su retardo, si no el menú se encogía a medias. */
+  .menuDatosAnim.menuDatosSaliendo > * {
+    animation: none;
+  }
+  /* El ✓ del modo privacidad asienta con un rebote corto al aparecer. */
+  .menu-check {
+    color: var(--color-green-dark);
+    font-weight: 700;
+    animation: menuCheckIn 0.24s cubic-bezier(0.3, 1.7, 0.5, 1) both;
+  }
+  @keyframes menuCheckIn {
+    from { opacity: 0; transform: scale(0.3); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  /* Respeto a la preferencia del sistema: sin movimiento, el menú aparece. */
+  @media (prefers-reduced-motion: reduce) {
+    .menuDatosAnim,
+    .menuDatosAnim > *,
+    .menu-check {
+      animation: none !important;
+    }
   }
   .menu-datos button {
     display: flex;
@@ -1002,6 +1064,16 @@
   }
   .menu-datos button:hover {
     background: rgba(92, 64, 51, 0.08);
+  }
+  /* El icono acompaña al puntero: un desplazamiento de 2px da el gesto de
+     "esto se abre" sin mover el texto (mover el texto saca el blanco del
+     objetivo de lectura). */
+  .menu-datos button svg {
+    transition: transform 0.15s ease-out;
+    flex-shrink: 0;
+  }
+  .menu-datos button:hover svg {
+    transform: translateX(2px);
   }
 
   .menu-datos button[role="menuitemcheckbox"] {
