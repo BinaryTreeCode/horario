@@ -546,6 +546,60 @@
    * predicha. null = sin drag activo.
    */
   let dropPreview = $state<{ day: number; slots: Map<string, { start: number; end: number }> } | null>(null);
+
+  /**
+   * Preview del ESTIRAR vertical: la duración es GLOBAL, así que al soltar el
+   * cambio viaja a TODOS los días de la actividad (propagateWeekly), pero el
+   * preview solo pintaba el día donde se agarró el asa. Resultado: estirar
+   * desde el lunes se veía crecer solo el lunes y el martes ya salía otro al
+   * soltar. Acá va el horario final por día, tal como lo va a dejar el commit.
+   */
+  let redimPreview = $state<Map<number, Map<string, { start: number; end: number }>> | null>(null);
+  let redimDiaOrigen = $state<number | null>(null);
+
+  /** Preview que aplica al día `i`, venga del estirar o de un drop. */
+  function previewDelDia(i: number): Map<string, { start: number; end: number }> | undefined {
+    const delRedim = redimPreview?.get(i);
+    if (delRedim) return delRedim;
+    if (dropPreview && dropPreview.day === i) return dropPreview.slots;
+    return undefined;
+  }
+
+  /** Ids que se mueven en el día `i`: para pintarlos como "aún no guardado". */
+  function pendientesDelDia(i: number): Set<string> {
+    const pre = previewDelDia(i);
+    const out = new Set<string>();
+    if (!pre) return out;
+    for (const [id, slot] of pre) {
+      const a = activities.find(x => x.id === id);
+      if (!a) continue;
+      if (Math.abs(parseTime(a.startTime) - slot.start) > 1e-9 ||
+          Math.abs(parseTime(a.endTime) - slot.end) > 1e-9) out.add(id);
+    }
+    return out;
+  }
+
+  /**
+   * Horario final de TODOS los días al estirar, con la misma función que
+   * usa el commit. Preview y commit no pueden divergir porque no son dos
+   * cálculos: es el mismo.
+   */
+  function previewEstirarSemanal(
+    act: Activity | undefined,
+    actId: string,
+    ancla: number,
+    nuevaDur: number,
+    lado: 'arriba' | 'abajo'
+  ) {
+    const sem = propagateWeekly(activities, actId, ancla, endHour, CODEC, act?.daysOfWeek ?? [], nuevaDur, 0, true, undefined, lado);
+    const porDia = new Map<number, Map<string, { start: number; end: number }>>();
+    if (sem.valido) {
+      for (const [dia, slots] of sem.byDay) {
+        porDia.set(dia, new Map([...slots].map(([id, sl]) => [id, { start: sl.start, end: sl.end }])));
+      }
+    }
+    return { sem, porDia };
+  }
   /** Drop inválido: no cabe / pisaría — tarjeta roja y al soltar vuelve. */
   let dragInvalid = $state(false);
   /** Shake one-shot del clon flotante: solo en la transición válido→inválido;
@@ -719,6 +773,8 @@
   const weekResizeHooks: DragHooks = {
     onActivate(t) {
       draggedActivityId = t.activityId; // excluye la tarjeta del clustering
+      redimPreview = null;
+      redimDiaOrigen = null;
     },
     onMove(t, _x, clientY) {
       const m = t.meta as WeekResizeMeta;
@@ -728,7 +784,17 @@
         // F4: la capacidad global acotó el deseo → feedback del por qué.
         dragHint = calc.limitadoPor ? `↕ Limitado por ${calc.limitadoPor}` : '';
         vresHint = dragHint ? { texto: dragHint, x: _x, y: clientY } : null;
-        dropPreview = { day: m.day, slots: calc.slots };
+        // La duración es global: el preview tiene que pintar los días que van a
+        // cambiar, no solo el día del asa.
+        const act = activities.find(a => a.id === t.activityId);
+        const nuevaDur = m.lado === 'abajo'
+          ? calc.newEnd! - m.origStart
+          : m.origEnd - calc.newStart!;
+        const ancla = m.lado === 'abajo' ? m.origStart : calc.newStart!;
+        const { sem, porDia } = previewEstirarSemanal(act, t.activityId, ancla, nuevaDur, m.lado);
+        redimPreview = sem.valido ? porDia : null;
+        redimDiaOrigen = m.day;
+        if (sem.valido) dropPreview = { day: m.day, slots: calc.slots };
       }
     },
     async onDrop(t, _x, clientY) {
@@ -740,8 +806,8 @@
       shakeInvalid = false;
       dragHint = '';
       vresHint = null;
-      if (!calc) { dropPreview = null; return; }
-      if (!calc.valido) { toastErrRepetido(`estirar-sem:${m.day}`, '⛔ No cabe: estirar desbordaría el día'); dropPreview = null; return; }
+      if (!calc) { dropPreview = null; redimPreview = null; return; }
+      if (!calc.valido) { toastErrRepetido(`estirar-sem:${m.day}`, '⛔ No cabe: estirar desbordaría el día'); dropPreview = null; redimPreview = null; return; }
       // Commit global: el borde del PUNTERO manda. Con lado 'arriba' el fin
       // queda fijo (ancla = nuevo inicio) y la nueva duración viaja a todos
       // los días; el rechazo multi-día del candado protege el límite.
@@ -753,10 +819,12 @@
       // Lado del estirar: 'arriba' ancla el FIN y lo pisado sube en cadena
       // (igual que el preview de resolveResizeDay) — antes el commit
       // re-derivaba con pared anclada al inicio y los vecinos traspasaban.
-      const sem = propagateWeekly(activities, t.activityId, ancla, endHour, CODEC, act?.daysOfWeek ?? [], nuevaDur, 0, true, undefined, m.lado);
-      if (!sem.valido) { toastErrRepetido(`estirar-sem:${m.day}`, sem.motivo); dropPreview = null; return; }
+      // Misma función que el preview: lo que se vio es lo que se guarda.
+      const { sem } = previewEstirarSemanal(act, t.activityId, ancla, nuevaDur, m.lado);
+      if (!sem.valido) { toastErrRepetido(`estirar-sem:${m.day}`, sem.motivo); dropPreview = null; redimPreview = null; return; }
       await commitWeeklyTimes(sem.times, `Estirar ${act?.name ?? 'actividad'}`);
       dropPreview = null;
+      redimPreview = null;
     },
     onCancel() {
       draggedActivityId = null;
@@ -1178,7 +1246,7 @@
       </div>
     {/if}
     {#each days as day, i}
-      {@const dayData = getDayActivitiesWithLayout(i, dropPreview?.day === i ? dropPreview.slots : undefined, draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i) ? draggedActivityId : null)}
+      {@const dayData = getDayActivitiesWithLayout(i, previewDelDia(i), draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i || redimDiaOrigen === i) ? draggedActivityId : null)}
       <div class="day-column" class:col-dragging={draggedActivityId !== null} class:col-hoy={i === hoyIdx}
         class:col-hres-ganar={hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i)}>
         <!-- Nombre completo SIEMPRE accesible: en columna angosta el header muestra
@@ -1242,6 +1310,7 @@
               class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
               class:hres-afectado={hresPreview?.accion === 'retirar' && hresPreview.dias.includes(i) && activity.id === draggedActivityId}
               class:hres-se-mueve={hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i) && vecinosEmpujados(i).some(v => v.id === activity.id)}
+              class:redim-pendiente={pendientesDelDia(i).has(activity.id)}
               onpointerdown={(e) => handleItemPointerDown(e, activity, i)}
               oncontextmenu={(e) => handleContextMenu(e, activity.id!)}
               style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; --bg-color: {catColor}; --fg-color: {catFg.text}; --fg-shadow: {catFg.shadow}"
@@ -1736,6 +1805,14 @@
   /* El bloque original se apaga: se está moviendo a donde marca el fantasma. */
   .activity-item.hres-se-mueve {
     opacity: 0.4;
+  }
+  /* Bloque que va a cambiar por el estirar GLOBAL y todavía no está guardado:
+     se ve en todos los días de la actividad, no solo en el del asa. Antes el
+     estirar desde el lunes solo creía el lunes y el resto aparecía al soltar. */
+  .activity-item.redim-pendiente {
+    outline: 2px dashed rgba(45, 90, 39, 0.9);
+    outline-offset: -2px;
+    opacity: 0.92;
   }
   .hres-ganar-banda {
     position: absolute;

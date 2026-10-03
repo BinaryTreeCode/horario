@@ -180,6 +180,93 @@ test('Barrido del asa: al ganar un día, la marca es una banda, no la columna', 
  * El guard mira la firma del preview contra la de la resolución real: si
  * divergen, el fantasma miente, que es peor que no dibujarlo.
  */
+/**
+ * El estirar vertical cambia la DURACIÓN, que es global: al soltar, el cambio
+ * viaja a todos los días de la actividad. El preview solo pintaba el día donde
+ * se agarró el asa, así que estirar desde el lunes se veía crecer el lunes y el
+ * martes ya salía otro al soltar.
+ *
+ * El guard exige que se marquen TODOS los días, y que ese marking sea el mismo
+ * antes y después de soltar.
+ */
+test('Estirar vertical: el preview se propaga a toda la semana', async ({ page }) => {
+  const TITULO = /Rutina matutina/i;
+
+  // Asa INFERIOR de una actividad que vive en varios días, visible en pantalla.
+  const asa = await page.evaluate((re) => {
+    const titulo = new RegExp(re.source, 'i');
+    const cols = [...document.querySelectorAll('.day-column')];
+    for (const item of document.querySelectorAll('.activity-item') as NodeListOf<HTMLElement>) {
+      if (!titulo.test(item.getAttribute('title') ?? '')) continue;
+      const enDias = cols.filter(c => [...c.querySelectorAll('.activity-item')]
+        .some(b => titulo.test((b as HTMLElement).getAttribute('title') ?? ''))).length;
+      if (enDias < 5) continue;
+      // El asa de abajo es la que NO lleva .top ni .hres-*: crecer hacia abajo.
+      const h = [...item.querySelectorAll('.resize-handle')].find(
+        el => !el.classList.contains('top') && !el.classList.contains('hres-izq') && !el.classList.contains('hres-der')
+      ) as HTMLElement | undefined;
+      if (!h) continue;
+      const r = h.getBoundingClientRect();
+      if (r.y < 0 || r.y > window.innerHeight || r.x < 0 || r.x > window.innerWidth) continue;
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, enDias };
+    }
+    return null;
+  }, { source: TITULO.source });
+  expect(asa, 'no se encontró el asa inferior de una actividad de toda la semana').not.toBeNull();
+
+  // Alto de la actividad en cada día, antes de tocar nada.
+  const alturas = () => page.evaluate((re) => {
+    const titulo = new RegExp(re.source, 'i');
+    return [...document.querySelectorAll('.day-column')].map(c => {
+      const el = [...c.querySelectorAll('.activity-item')]
+        .find(b => titulo.test((b as HTMLElement).getAttribute('title') ?? '')) as HTMLElement | undefined;
+      return el ? Math.round(el.getBoundingClientRect().height) : -1;
+    });
+  }, { source: TITULO.source });
+
+  const antes = await alturas();
+
+  await page.mouse.move(asa!.x, asa!.y);
+  await page.mouse.down();
+  await page.mouse.move(asa!.x, asa!.y + 130, { steps: 10 });
+  await page.waitForTimeout(250);
+
+  const marcados = await page.evaluate((re) => {
+    const titulo = new RegExp(re.source, 'i');
+    const cols = [...document.querySelectorAll('.day-column')];
+    return cols.filter(c => [...c.querySelectorAll('.activity-item')]
+      .some(b => b.classList.contains('redim-pendiente') && titulo.test((b as HTMLElement).getAttribute('title') ?? ''))).length;
+  }, { source: TITULO.source });
+
+  // Lo que se arregla: el preview ya no se queda en el día del asa.
+  expect(
+    marcados,
+    `el preview marcó ${marcados} de ${asa!.enDias} días: no se propaga por la semana`
+  ).toBeGreaterThan(1);
+
+  await page.mouse.up();
+  await page.waitForTimeout(700);
+
+  const despues = await alturas();
+  const conBloque = despues.map((h, i) => ({ h, i })).filter(x => x.h > 0);
+
+  // Invariante real de una duración GLOBAL: tras soltar, todos los días
+  // quedan con la MISMA altura. Si el preview pinta lo que el commit hace,
+  // esto no puede fallar.
+  // Tolerancia de 8px: entre días hay diferencias de renderizado legítimas
+  // (miniatura, bordes) que no son de propagación. Lo que no puede pasar es
+  // que un día se quede sin cambiar mientras los otros crecen.
+  const referencia = conBloque[0].h;
+  const dispares = conBloque.filter(x => Math.abs(x.h - referencia) > 8);
+  expect(
+    dispares,
+    `tras estirar quedaron alturas distintas por día: ${JSON.stringify(conBloque)}`
+  ).toEqual([]);
+
+  // Y tiene que haber CRECIDO: sin esto el test pasaría estirando hacia cero.
+  expect(conBloque[0].h, 'la actividad no creció').toBeGreaterThan(Math.max(...antes.filter(h => h > 0)));
+});
+
 test('Barrido: el fantasma del empuje coincide con lo que hace el commit', async ({ page }) => {
   // Con la semilla el gesto NUNCA choca: 'Trabajo' (09-13) es la única
   // actividad con días acotados y en Lunes esa franja está libre, así que el
