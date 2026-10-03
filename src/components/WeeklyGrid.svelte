@@ -309,6 +309,21 @@
     };
   }
 
+  /**
+   * Geometría de la BANDA del barrido horizontal (porcentajes del alto de la
+   * columna), con la misma fórmula que usa un bloque normal en ghostItem: el
+   * preview tiene que caer EXACTO donde caería el bloque al soltar.
+   */
+  function bandaHres(): { top: string; height: string } | null {
+    const a = activities.find(x => x.id === draggedActivityId);
+    if (!a) return null;
+    const s = parseTime(a.startTime);
+    const e = parseTime(a.endTime);
+    const topPct = ((s - startHour) / totalHours) * 100;
+    const heightPct = ((e - s) / totalHours) * 100;
+    return { top: `${topPct}%`, height: `calc(${heightPct}% - 3px)` };
+  }
+
   // Drag and Drop handlers (mecánica en src/lib/dragEngine.ts)
   let draggedActivityId = $state<string | null>(null);
   let dragSourceDay = $state<number | null>(null);
@@ -1129,6 +1144,15 @@
           class="slots-grid"
           oncontextmenu={(e) => handleGridContextMenu(e, i)}
         >
+          <!-- Preview del barrido que GANA un día: la banda marca SOLO la
+               franja horaria donde caería el bloque. Antes se teñía la columna
+               entera de arriba abajo, así que trabajo, Desayuno y Aseo 1
+               parecían participar del gesto cuando no lo hacen: el mismo
+               error que ya se corrigió para el retiro (.hres-afectado). -->
+          {#if hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i) && bandaHres()}
+            {@const banda = bandaHres()}
+            <div class="hres-ganar-banda" style="top: {banda.top}; height: {banda.height}" aria-hidden="true"></div>
+          {/if}
           {#each dayData.items as activity (activity.id)}
             {@const numSlots = activity.numSlots}
             {@const catColor = getActivityColor(activity.categoryId, categories)}
@@ -1605,15 +1629,29 @@
   }
 
   /* ── Preview del hResize (asas laterales) ──
-     Verde: la actividad ganaría el día (no tiene bloque ahí — la columna
-     entera es el único feedback posible). Retiro: la marca va sobre los
+     Verde: la actividad ganaría el día, y la marca es una BANDA con su
+     franja horaria (no la columna entera: eso manchaba a los vecinos).
+     Retiro: la marca va sobre los
      BLOQUES de la actividad arrastrada en los días afectados (.hres-
      afectado), NUNCA sobre la columna entera: eso manchaba a los vecinos
      (Aseo 1, Trabajo…) que no participan en el gesto. Espejo del feedback
      del drag vertical (drop-preview). */
+  /* El día que gana el barrido se marca solo con un filete en el borde: la
+     banda de abajo es la que dice DÓNDE caería el bloque. Teñir la columna
+     entera era mentir: marcaba de verde a los vecinos (trabajo, Desayuno,
+     Aseo 1) que el gesto no toca. */
   .day-column.col-hres-ganar .slots-grid {
     box-shadow: inset 0 0 0 3px rgba(74, 124, 68, 0.55);
-    background: rgba(74, 124, 68, 0.06);
+  }
+  .hres-ganar-banda {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    border-radius: 8px;
+    background: rgba(74, 124, 68, 0.28);
+    border: 2px dashed rgba(74, 124, 68, 0.85);
+    pointer-events: none;
+    z-index: 1;
   }
   /* Fantasmas del retiro: los bloques de la actividad que dejarían de
      existir en esos días se ponen rojos. */

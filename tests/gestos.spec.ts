@@ -42,6 +42,83 @@ async function asaDerecha(page: import('@playwright/test').Page) {
   return info!;
 }
 
+/** Rectángulo del asa lateral IZQUIERDA de un bloque visible. */
+async function asaIzquierda(page: import('@playwright/test').Page) {
+  const info = await page.evaluate(() => {
+    const cols = [...document.querySelectorAll('.day-column')];
+    const manejas = [...document.querySelectorAll('.resize-handle.hres-izq')] as HTMLElement[];
+    for (const h of manejas) {
+      const col = h.closest('.day-column');
+      if (!col) continue;
+      const r = h.getBoundingClientRect();
+      if (r.y < 0 || r.y > window.innerHeight || r.x < 0 || r.x > window.innerWidth) continue;
+      const dia = cols.indexOf(col);
+      if (dia === 0) continue; // sin día previo no hay qué ganar
+      const item = h.closest('.activity-item') as HTMLElement | null;
+      const titulo = item?.getAttribute('title') ?? '';
+      // Ganar el día previo solo se ofrece si la actividad NO está ahí: si ya
+      // está, resolverHResize devuelve null y no hay gesto que medir.
+      const yaEsta = [...cols[dia - 1].querySelectorAll('.activity-item')].some(
+        b => (b as HTMLElement).getAttribute('title') === titulo
+      );
+      if (yaEsta) continue;
+      return {
+        x: r.x + r.width / 2,
+        y: r.y + r.height / 2,
+        colW: col.getBoundingClientRect().width,
+        dia,
+        titulo,
+      };
+    }
+    return null;
+  });
+  expect(info, 'No se encontró un asa IZQUIERDA visible que pueda ganar el día previo').not.toBeNull();
+  return info!;
+}
+
+test('Barrido del asa: al ganar un día, la marca es una banda, no la columna', async ({ page }) => {
+  const asa = await asaIzquierda(page);
+
+  // El asa IZQUIERDA arrastrada hacia AFUERA (izquierda) gana el día previo.
+  await page.mouse.move(asa.x, asa.y);
+  await page.mouse.down();
+  await page.mouse.move(asa.x - asa.colW * 1.2, asa.y, { steps: 6 });
+
+  const banda = page.locator('.hres-ganar-banda');
+  await expect(banda, 'no apareció la banda del barrido').toBeVisible({ timeout: 30_000 });
+
+  const medida = await banda.evaluate((el) => {
+    const b = el.getBoundingClientRect();
+    const col = el.closest('.day-column')!.getBoundingClientRect();
+    return {
+      altoBanda: b.height,
+      altoColumna: col.height,
+      // ¿La banda cubre los vecinos? Si sí, el indicador sigue siendo la columna.
+      tocaVecinos: b.height > col.height * 0.5,
+    };
+  });
+
+  // El problema reportado: el indicador se extendía de arriba abajo y teñía
+  // trabajo, Desayuno y Aseo 1, que no participan del gesto. La banda tiene
+  // que marcar la franja horaria del bloque, no la columna.
+  expect(
+    medida.tocaVecinos,
+    `la banda ocupa ${Math.round(medida.altoBanda)}px de una columna de ${Math.round(medida.altoColumna)}px: sigue siendo vertical`
+  ).toBe(false);
+  expect(medida.altoBanda, 'la banda no tiene altura').toBeGreaterThan(4);
+
+  // Y además la columnaya no debe teñirse de fondo: solo un filete.
+  const fondo = await page.locator('.day-column.col-hres-ganar .slots-grid').evaluate(
+    el => getComputedStyle(el).backgroundColor
+  );
+  expect(
+    fondo,
+    `la columna sigue con fondo ${fondo}: vuelve a teñir a los vecinos`
+  ).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+
+  await page.mouse.up();
+});
+
 test('Barrido del asa: el día del asa también se retira', async ({ page }) => {
   const asa = await asaDerecha(page);
 
