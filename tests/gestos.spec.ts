@@ -334,6 +334,121 @@ test('Barrido: el fantasma del empuje coincide con lo que hace el commit', async
   console.log('FANTASMAS VISTOS:', antes.fantasmas.length, 'APAGADOS:', antes.apagados);
 });
 
+/**
+ * El reporte: "quiero estirar toda la semana pero solo me sirve hasta el
+ * martes". Ganar días tenía barrido SOLO hacia adentro (el de retiro); hacia
+ * afuera el asa se quedaba en el vecino inmediato, así que extender una
+ * actividad a la semana entera obligaba a repetir el gesto día por día.
+ *
+ * Con la semilla esto se puede probar sin crear nada: la única actividad con
+ * días acotados es 'Trabajo' (Lun–Vie), así que su asa derecha vive en el
+ * Viernes, con Sábado y Domingo libres al otro lado.
+ *
+ * El guard exige que un barrido de 2 columnas paintE las DOS columnas ganadas
+ * (banda + cabecera), que la pista las nombre a las dos, y que al soltar la
+ * actividad exista en los dos días.
+ */
+/**
+ * Asa DERECHA de la actividad `nombre`, exigiendo que las `libres` columnas
+ * siguientes estén libres de esa misma actividad (si no, el barrido se frena y
+ * el gesto no probaría nada) y que el asa esté en pantalla.
+ */
+async function asaDerechaConEspacio(page: import('@playwright/test').Page, nombre: string, libres: number) {
+  const info = await page.evaluate(({ nombre, libres }) => {
+    const cols = [...document.querySelectorAll('.day-column')];
+    for (const h of document.querySelectorAll('.resize-handle.hres-der') as NodeListOf<HTMLElement>) {
+      const col = h.closest('.day-column');
+      if (!col) continue;
+      const dia = cols.indexOf(col);
+      if (dia + libres > 6) continue; // la tira no cabe en la semana
+      const item = h.closest('.activity-item') as HTMLElement | null;
+      if ((item?.getAttribute('title') ?? '') !== nombre) continue;
+      const hay = Array.from({ length: libres }, (_, k) => dia + 1 + k).some(d =>
+        [...cols[d].querySelectorAll('.activity-item')]
+          .some(b => (b as HTMLElement).getAttribute('title') === nombre)
+      );
+      if (hay) continue;
+      const r = h.getBoundingClientRect();
+      if (r.y < 0 || r.y > window.innerHeight || r.x < 0 || r.x > window.innerWidth) continue;
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, colW: col.getBoundingClientRect().width, dia };
+    }
+    return null;
+  }, { nombre, libres });
+  expect(info, `no se vio un asa derecha de "${nombre}" con ${libres} días libres al otro lado`).not.toBeNull();
+  return info!;
+}
+
+test('Barrido del asa: hacia afuera gana la tira entera de días, no solo el vecino', async ({ page }) => {// Con la semilla no alcanza: los ases de "Trabajo" caen en el borde de la
+  // semana (donde solo queda un día libre) o fuera de pantalla. Se crea una
+  // actividad en un solo día a las 08:30: la única franja libre de la semilla
+  // que queda a la vista sin hacer scroll (07:00–08:30 es Rutina+Desayuno,
+  // 09:00–13:00 es Trabajo).
+  const NOMBRE = 'Tira de prueba';
+  await crearActividad(page, NOMBRE, '08:30', '09:00', [1]); // solo Martes
+
+  const asa = await asaDerechaConEspacio(page, NOMBRE, 2);
+  expect(asa.dia, 'la actividad debía vivir solo en el Martes').toBe(1);
+
+  await page.mouse.move(asa.x, asa.y);
+  await page.mouse.down();
+  // 2,4 columnas hacia AFUERA (derecha): el asa está en el BORDE de la
+  // columna, así que el dedo cruzó 2 columnas enteras y quedó dentro de la
+  // tercera → se ganan las dos cruzadas MÁS la del dedo (el día bajo el dedo
+  // entra al ganar; al retirar se salvaba — asimetría ya asumida).
+  await page.mouse.move(asa.x + asa.colW * 2.4, asa.y, { steps: 10 });
+  await page.waitForTimeout(250);
+
+  const esperados = [asa.dia + 1, asa.dia + 2, asa.dia + 3];
+
+  // Una banda por día ganado (la banda es la franja horaria del bloque).
+  const bandas = page.locator('.hres-ganar-banda');
+  await expect(bandas.first(), 'no apareció la banda del barrido').toBeVisible({ timeout: 30_000 });
+  expect(
+    await bandas.count(),
+    'el barrido solo pintó el vecino inmediato: no se extendió con el dedo'
+  ).toBe(esperados.length);
+
+  // Y una cabecera marcada por día ganado (la marca del día, 44px, no la columna).
+  expect(
+    await page.locator('.day-column.col-hres-ganar').count(),
+    'solo se marcó una cabecera de día: la vista no cree en la tira'
+  ).toBe(esperados.length);
+
+  // La pista tiene que nombrar los tres días, no solo el primero.
+  const pista = page.locator('.hres-float');
+  await expect(pista).toBeVisible({ timeout: 30_000 });
+  const texto = (await pista.textContent()) ?? '';
+  const ganados = esperados;
+  const nombres = await page.evaluate((ds) => {
+    const headers = [...document.querySelectorAll('.day-header')];
+    return ds.map(d => headers[d]?.getAttribute('title') ?? '');
+  }, ganados);
+  for (const nombre of nombres) {
+    expect(nombre, 'no se encontró el nombre del día para comparar').toBeTruthy();
+    expect(texto, `la pista "${texto}" no incluye ${nombre}`).toContain(nombre);
+  }
+
+  // ¿Cabe la tira? Si no, el gesto se rechaza entero (nada se escribe).
+  const cabe = await bandas.first().evaluate(el => !el.classList.contains('no-cabe'));
+  await page.mouse.up();
+  await page.waitForTimeout(700);
+
+  const dias = await page.evaluate((re) => {
+    const t = new RegExp(re.source, 'i');
+    return [...document.querySelectorAll('.day-column')].filter(c =>
+      [...c.querySelectorAll('.activity-item')]
+        .some(b => t.test((b as HTMLElement).getAttribute('title') ?? ''))
+    ).length;
+  }, { source: NOMBRE });
+
+  if (cabe) {
+    // La actividad pasó de 1 día (Martes) a los 4 de la tira.
+    expect(dias, `tras el barrido la actividad quedó en ${dias} días: no ganó la tira`).toBe(4);
+  } else {
+    expect(dias, 'un barrido que no cabe no puede cambiar los días').toBe(1);
+  }
+});
+
 test('Barrido del asa: el día del asa también se retira', async ({ page }) => {
   const asa = await asaDerecha(page);
 

@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types';
   import { parseTime, getActivityColor, textOn, formatTime, format12h } from '../lib/stores';
-  import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeWeekly, barridoRetiro } from '../lib/cascade';
+  import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeWeekly, barridoRetiro, barridoGanar, resolverGanarDias } from '../lib/cascade';
   import type { WeeklyResolution } from '../lib/cascade';
   import { db } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
@@ -333,7 +333,7 @@
    * cuenta (su destino es la banda).
    */
   function vecinosEmpujados(dia: number): { id: string; top: string; height: string }[] {
-    const r = hresPreview?.resueltos;
+    const r = hresPreview?.resueltos?.get(dia);
     if (!r || !hresPreview?.valido) return [];
     const salida: { id: string; top: string; height: string }[] = [];
     for (const [id, slot] of r) {
@@ -861,42 +861,44 @@
     dias: number[];
     x: number;
     y: number;
-    resueltos?: Map<string, { start: number; end: number }>;
+    resueltos?: Map<number, Map<string, { start: number; end: number }>>;
     valido?: boolean;
   } | null>(null);
 
   /** Resuelve qué haría el gesto (compartido por preview y commit):
    *  null = sin gesto/no cruza umbral/borde del arreglo; si decide, devuelve
    *  la acción y los días afectados. Reglas:
-   *  - Asa hacia AFUERA a un día que NO tiene la actividad: GANA ese día.
+   *  - Asa hacia AFUERA: BARRIDO de ganancia. El dedo dice HASTA dónde: cruzar
+   *    columnas mete la actividad en toda esa tira de una vez ("estirar la
+   *    Rutina a toda la semana"), no de día en día. Menos de una columna
+   *    cruzada = el gesto clásico de siempre: ganar SOLO el vecino.
    *  - Asa hacia ADENTRO (hacia el bloque): BARRIDO de retiro. El dedo dice
    *    HASTA dónde: "de Domingo a Jueves" elimina los días CRUZADOS
    *    (Sábado y Viernes) — el día bajo el dedo queda como nuevo borde y el
    *    día del asa se conserva. Menos de una columna cruzada = el gesto
    *    clásico de siempre: retirar SOLO el día del asa. Límites: solo se
    *    retiran días que la actividad tiene, y jamás queda sin ningún día.
+   *  - Los dos barridos viven en cascade.ts: la vista solo mide la
+   *    geometría (cuántas columnas COMPLETAS cruzó el dedo).
    *  - El vecino exterior YA tiene la actividad: hacia afuera no hay gesto,
    *    pero el asa sigue visible porque el barrido hacia adentro sí existe
    *    (asaLateralUtil). */
   /**
-   * Horario final del día que GANARÍa el bloque, con el empuje en cadena ya
+   * Horario final de los días que GANARÍA el bloque, con el empuje en cadena ya
    * resuelto. Única fuente para el preview y para el commit: si fueran dos
-   * cálculos distintos, el fantasma podría mentir.
+   * cálculos distintos, el fantasma podría mentir. La matemática vive entera en
+   * cascade.ts (resolverGanarDias: pared anclada + propagación por la semana).
    */
-  function resolverGanarDia(act: Activity, diaVecino: number) {
-    const dur = parseTime(act.endTime) - parseTime(act.startTime);
-    const inicio = parseTime(act.startTime);
-    const slots = activities
-      .filter(a => a.daysOfWeek.includes(diaVecino))
-      .map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
-    return resolveDayCascade(
-      slots,
-      { id: act.id!, start: inicio, end: inicio + dur },
-      inicio,
-      true,
-      startHour,
-      endHour
-    );
+  function resolverGanarDiasVista(act: Activity, dias: number[]) {
+    const res = resolverGanarDias(activities, act.id!, dias, CODEC, endHour);
+    return {
+      valido: res.valido,
+      motivo: res.motivo,
+      times: res.times,
+      resueltos: new Map([...res.porDia].map(([d, m]) => [
+        d, new Map([...m].map(([id, sl]) => [id, { start: sl.start, end: sl.end }]))
+      ]))
+    };
   }
 
   function resolverHResize(m: WeekHResizeMeta, clientX: number): { accion: 'ganar' | 'retirar'; dias: number[]; diaOrigen: number } | null {
@@ -910,20 +912,22 @@
     if (!cruzo) return null;
     const dirAsa = m.lado === 'der' ? 1 : -1;      // hacia afuera
     const haciaDentro = Math.sign(delta) === -dirAsa; // arrastre opuesto al lado del asa
+    const columnas = Math.floor(Math.abs(delta) / colAncho); // columnas COMPLETAS cruzadas
     if (haciaDentro) {
       // Devolverse: BARRIDO de retiro hacia adentro. La matemática vive en
       // cascade.ts (barridoRetiro, dueño único con tests): aquí solo la
       // geometría del gesto (columnas completas cruzadas y dirección).
       const dirIn: 1 | -1 = -dirAsa;
-      const n = Math.floor(Math.abs(delta) / colAncho); // columnas COMPLETAS cruzadas
-      const dias = barridoRetiro(act.daysOfWeek, m.day, dirIn, n);
+      const dias = barridoRetiro(act.daysOfWeek, m.day, dirIn, columnas);
       if (dias.length === 0) return null; // único día: retirar no se ofrece
       return { accion: 'retirar', dias, diaOrigen: m.day };
     }
-    const diaVecino = m.day + dirAsa;
-    if (diaVecino < 0 || diaVecino > 6) return null;
-    if (act.daysOfWeek.includes(diaVecino)) return null; // el bloque ya sigue hacia allá: sin gesto hacia afuera
-    return { accion: 'ganar', dias: [diaVecino], diaOrigen: m.day };
+    // Ganar HACIA AFUERA también es barrido: cruzar columnas mete la actividad
+    // en toda la tira de una. Antes se quedaba en el vecino y "estirar a toda la
+    // semana" obligaba a repetir el gesto día por día.
+    const dias = barridoGanar(act.daysOfWeek, m.day, dirAsa, columnas);
+    if (dias.length === 0) return null; // el bloque ya sigue hacia allá: sin gesto
+    return { accion: 'ganar', dias, diaOrigen: m.day };
   }
 
   const hResizeHooks: DragHooks = {
@@ -936,15 +940,17 @@
       const r = resolverHResize(m, clientX);
       if (!r) { hresPreview = null; return; }
       const act = activities.find(a => a.id === t.activityId);
-      // Al ganar un día el commit puede EMPUJAR en cadena a los vecinos si a
-      // esa hora están ocupados: el preview tiene que mostrar a dónde caerían,
-      // o el bloque saltaría al soltar sin previo aviso.
-      let resueltos: Map<string, { start: number; end: number }> | undefined;
+      // Al ganar días el commit puede EMPUJAR en cadena a los vecinos si a esa
+      // hora están ocupados: el preview tiene que mostrar a dónde caerían, o el
+      // bloque saltaría al soltar sin previo aviso. Y el empuje es GLOBAL: si el
+      // vecino vive en días que NO se están ganando, también se corre ahí, así
+      // que el preview trae el horario por día (no solo del día del asa).
+      let resueltos: Map<number, Map<string, { start: number; end: number }>> | undefined;
       let valido: boolean | undefined;
       if (r.accion === 'ganar' && act) {
-        const res = resolverGanarDia(act, r.dias[0]);
+        const res = resolverGanarDiasVista(act, r.dias);
         valido = res.valido;
-        resueltos = new Map(res.slots.map(sl => [sl.id, { start: sl.start, end: sl.end }]));
+        resueltos = res.resueltos;
       }
       hresPreview = { accion: r.accion, dias: r.dias, x: clientX, y: _y, resueltos, valido };
     },
@@ -968,17 +974,17 @@
           : tNow('toast.daysRemoved', { dias: quitados.map(d => days[d]).join(', ') }));
         return;
       }
-      // Ganancia: el vecino no tiene la actividad → agregar el día.
-      const diaVecino = r.dias[0];
-      const newDays = [...act.daysOfWeek, diaVecino].sort((a, b) => a - b);
-      // Validar el día ganado: ¿cabe el bloque (cascada con empuje)?
-      const res = resolverGanarDia(act, diaVecino);
-      if (!res.valido) { toastErrRepetido(`hres:${act.id}`, '⛔ No cabe: el día vecino está lleno a esa hora'); return; }
-      // Commit: mismas horas en el nuevo día + empuje en cadena del día ganado
-      const times = new Map<string, { start: number; end: number }>();
-      for (const s of res.slots) times.set(s.id, { start: s.start, end: s.end });
-      await commitWeeklyTimes(times, `${act.name} → ${days[diaVecino]}`, { id: act.id!, days: newDays });
-      toastOk(tNow('toast.dayExtended', { dia: days[diaVecino] }));
+      // Ganancia: la tira de días del barrido entra de una, con las MISMAS horas.
+      // La resolución es la del preview (una sola fuente): si no entra, ⛔ con
+      // el motivo de cascade.ts, que nombra el día que quedó apretado.
+      const res = resolverGanarDiasVista(act, r.dias);
+      if (!res.valido) { toastErrRepetido(`hres:${act.id}`, res.motivo); return; }
+      const newDays = [...new Set([...act.daysOfWeek, ...r.dias])].sort((a, b) => a - b);
+      const nombres = r.dias.map(d => days[d]).join(', ');
+      await commitWeeklyTimes(res.times, `${act.name} → ${nombres}`, { id: act.id!, days: newDays });
+      toastOk(r.dias.length === 1
+        ? tNow('toast.dayExtended', { dia: days[r.dias[0]] })
+        : tNow('toast.daysExtended', { dias: nombres }));
     },
     onCancel() {
       hresPreview = null;
@@ -1283,8 +1289,13 @@
                 aria-hidden="true"
               ></div>
             {/if}
-            <!-- Dónde caerían los VECINOS que el empuje en cadena desplazaría.
-                 Sin esto el bloque se veía saltar recién al soltar. -->
+          {/if}
+          <!-- Dónde caerían los VECINOS que el empuje en cadena desplazaría.
+               Sin esto el bloque se veía saltar recién al soltar. Y se pintan en
+               TODOS los días del bloque movido, no solo en los ganados: su
+               horario es global, así que si vive en más columnas también se
+               corre ahí y al soltar el salto se vería a medias. -->
+          {#if hresPreview?.accion === 'ganar' && hresPreview.valido !== false}
             {#each vecinosEmpujados(i) as v (v.id)}
               <div class="hres-empuje-fantasma" style="top: {v.top}; height: {v.height}" aria-hidden="true"></div>
             {/each}

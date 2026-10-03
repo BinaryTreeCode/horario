@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeDay, capacidadResizeWeekly, barridoRetiro, horarioEfectivoDia, chocaHoras } from './cascade';
+import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeDay, capacidadResizeWeekly, barridoRetiro, barridoGanar, resolverGanarDias, horarioEfectivoDia, chocaHoras } from './cascade';
 import type { Activity } from './types';
 
 const codec = {
@@ -620,6 +620,212 @@ describe('barridoRetiro — asa lateral: los días cruzados se eliminan', () => 
     // dirIn=+1 solo cruza Domingo (6), que no está en days → sin cruces
     // válidos → cae al gesto clásico (retirar el Sábado, el día del asa).
     expect(barridoRetiro(LUN_VIE, 5, 1, 4)).toEqual([5]);
+  });
+});
+
+describe('barridoGanar — asa lateral: la tira de días ganados (el caso reportado)', () => {
+  // El reporte: "quiero estirar toda la semana pero solo me sirve hasta el
+  // martes". El barrido de retiro cruzaba días; el de ganancia se quedaba en el
+  // vecino inmediato, así que había que repetir el gesto día por día.
+  //
+  // Los fixtures usan bloques con la CORRIDA TERMINADA en el asa (solo Lunes, o
+  // Lun–Mié): es la única situación en la que el asa hacia afuera existe (si el
+  // vecino ya lo tiene, no hay qué ganar).
+  const LUN = [0];
+  const MIER = [2];
+
+  test('umbral de media columna (0 columnas): gesto clásico — un solo día', () => {
+    expect(barridoGanar(LUN, 0, 1, 0)).toEqual([1]);      // Lunes → Martes
+    expect(barridoGanar([6], 6, -1, 0)).toEqual([5]);     // Domingo → Sábado
+    expect(barridoGanar(LUN, 0, -1, 0)).toEqual([]);       // sin día previo: nada
+  });
+
+  test('el barrido gana el vecino MÁS cada columna COMPLETA que cruza el dedo', () => {
+    // Bloque solo el Miércoles, asa a la derecha, 2 columnas completas: el
+    // dedo cruzó Jueves(3) y Viernes(4) entero → se ganan Jueves, Viernes y
+    // Sábado (el día bajo el dedo entra).
+    expect(barridoGanar(MIER, 2, 1, 2)).toEqual([3, 4, 5]);
+    // Una sola columna: vecino + 1.
+    expect(barridoGanar(MIER, 2, 1, 1)).toEqual([3, 4]);
+    // Hacia la izquierda: Lunes (1) y el barrido frena en 0. No "da la vuelta"
+    // al Domingo: la semana es una tira, no un círculo.
+    expect(barridoGanar(MIER, 2, -1, 2)).toEqual([1, 0]);
+    expect(barridoGanar(MIER, 2, -1, 3)).toEqual([1, 0]);
+  });
+
+  test('ganar toda la semana desde el borde (el gesto pedido)', () => {
+    // Bloque solo el Lunes, asa a la derecha: 4 columnas completas (el dedo
+    // está DENTRO del Sábado) → Martes a Sábado.
+    expect(barridoGanar(LUN, 0, 1, 4)).toEqual([1, 2, 3, 4, 5]);
+    // 5 columnas: el dedo cruzó el Sábado entero y entra también el Domingo.
+    expect(barridoGanar(LUN, 0, 1, 5)).toEqual([1, 2, 3, 4, 5, 6]);
+    // Y al revés, desde el Domingo hasta el Lunes.
+    expect(barridoGanar([6], 6, -1, 4)).toEqual([5, 4, 3, 2, 1]);
+    expect(barridoGanar([6], 6, -1, 5)).toEqual([5, 4, 3, 2, 1, 0]);
+  });
+
+  test('la tira es contigua: se frena en el primer día que la actividad ya tiene', () => {
+    // Bloque en Lun(0), Mié(2) y Vie(4): asa del Lunes, el dedo cruza Martes(1)
+    // — libre, se gana — y Miércoles(2), que ya lo tiene: ahí corta, sin saltar
+    // al Jueves(3) ni al Viernes(4).
+    expect(barridoGanar([0, 2, 4], 0, 1, 4)).toEqual([1]);
+    // Corrida Lun–Mié con el asa en el Miércoles: gana hasta el Domingo.
+    expect(barridoGanar([0, 1, 2], 2, 1, 3)).toEqual([3, 4, 5, 6]);
+    // Vecino ya ocupado → no hay gesto hacia afuera (como antes del barrido).
+    expect(barridoGanar([0, 1, 2, 3, 4], 1, 1, 3)).toEqual([]);
+  });
+
+  test('bordes de la semana y columnas negativas (defensivo)', () => {
+    expect(barridoGanar(LUN, 0, -1, 3)).toEqual([]);    // asa del Lunes a la izquierda
+    expect(barridoGanar([6], 6, 1, 3)).toEqual([]);     // asa del Domingo a la derecha
+    expect(barridoGanar(LUN, 0, 1, -3)).toEqual([1]);   // columnas negativas = gesto clásico
+  });
+
+  test('espejo del retiro: los dos barridos cuentan las columnas igual', () => {
+    // Mismo bloque (Lun–Vie), asa en el Miércoles: 1 columna completa hacia
+    // afuera gana 2 días; hacia adentro retira 2. La asimetría que sí se
+    // conserva es la del extremo: el día bajo el dedo entra al ganar y se
+    // salva al retirar.
+    const dias = [0, 1, 2];
+    expect(barridoGanar(dias, 2, 1, 1)).toEqual([3, 4]);
+    expect(barridoRetiro(dias, 2, -1, 1)).toEqual([2, 1]);
+    expect(barridoGanar(dias, 2, 1, 1).length).toBe(barridoRetiro(dias, 2, -1, 1).length);
+  });
+});
+
+describe('resolverGanarDias — ganar varios días con la misma hora (el gesto de días)', () => {
+  const a = (id: string, start: string, end: string, days: number[]): Activity => ({
+    id, name: id, categoryId: 'c', startTime: start, endTime: end, daysOfWeek: days,
+    updatedAt: 0
+  });
+
+  test('sin colisión: nadie se mueve y la actividad entra en todos los días ganados', () => {
+    const acts = [
+      a('r', '09:00', '10:00', [0]),        // Rutina, solo el Lunes
+      a('d', '10:30', '11:00', [1, 2])      // Desayuno en Mar y Mié, sin choque
+    ];
+    const res = resolverGanarDias(acts, 'r', [1, 2], codec, 22);
+    expect(res.valido).toBe(true);
+    expect(res.motivo).toBe('');
+    expect(res.times.get('d')).toEqual(s('d', 10.5, 11)); // nadie corrido
+    expect(res.times.get('r')).toEqual(s('r', 9, 10));     // la hora NO cambia
+    // El preview tiene que traer el día completo de cada día ganado.
+    expect([...res.porDia.keys()].sort((x, y) => x - y)).toEqual([0, 1, 2]);
+    expect(res.porDia.get(1)!.get('r')).toEqual(s('r', 9, 10));
+    expect(res.porDia.get(2)!.get('r')).toEqual(s('r', 9, 10));
+  });
+
+  test('la actividad conserva su hora aunque el día tenga hueco antes (el gesto es de DÍAS)', () => {
+    // El día del Martes está libre de 7:00 a las 11:00. Ganar el Martes no
+    // puede correr la Rutina a las 8:00: el gesto no es de horario.
+    const acts = [a('r', '09:00', '10:00', [0]), a('e', '11:00', '12:00', [1])];
+    const res = resolverGanarDias(acts, 'r', [1], codec, 22);
+    expect(res.valido).toBe(true);
+    expect(res.times.get('r')).toEqual(s('r', 9, 10));
+    expect(res.times.get('e')).toEqual(s('e', 11, 12));
+  });
+
+  test('con colisión: empuja en cadena en el día ganado, una sola vez por bloque', () => {
+    // Rutina 9-10 entra al Martes, donde Ejercicio ocupa 9:30-10:15 → la pared
+    // empuja la cadena hacia abajo conservando duraciones.
+    const acts = [
+      a('r', '09:00', '10:00', [0]),
+      a('e', '09:30', '10:15', [1]),
+      a('c', '10:15', '10:30', [1])
+    ];
+    const res = resolverGanarDias(acts, 'r', [1], codec, 22);
+    expect(res.valido).toBe(true);
+    expect(res.times.get('e')).toEqual(s('e', 10, 10.75));
+    expect(res.times.get('c')).toEqual(s('c', 10.75, 11));
+    // El preview del día ganado es el horario que se va a guardar.
+    expect(res.porDia.get(1)!.get('e')).toEqual(s('e', 10, 10.75));
+  });
+
+  test('ganar una tira entera empuja en todos los días (y no solo en el primero)', () => {
+    const acts = [
+      a('r', '09:00', '10:00', [0]),
+      a('e', '09:30', '10:15', [1, 2, 3])
+    ];
+    const res = resolverGanarDias(acts, 'r', [1, 2, 3], codec, 22);
+    expect(res.valido).toBe(true);
+    // Un solo horario global para el vecino, y es el corrido en cada día.
+    expect(res.times.get('e')).toEqual(s('e', 10, 10.75));
+    for (const d of [1, 2, 3]) expect(res.porDia.get(d)!.get('e')).toEqual(s('e', 10, 10.75));
+  });
+
+  test('el empuje es GLOBAL: si el vecino vive en más días, también se los lleva', () => {
+    // Ejercicio vive en Mar(1) y Vie(4). Ganar solo el Mar lo corre: su hora
+    // es global, así que el Viernes queda corrido también y el preview tiene
+    // que avisarlo (si no, al soltar el bloque salta de golpe).
+    const acts = [
+      a('r', '09:00', '10:00', [0]),
+      a('e', '09:30', '10:15', [1, 4])
+    ];
+    const res = resolverGanarDias(acts, 'r', [1], codec, 22);
+    expect(res.valido).toBe(true);
+    expect(res.times.get('e')).toEqual(s('e', 10, 10.75));
+    expect(res.porDia.get(4)!.get('e')).toEqual(s('e', 10, 10.75));
+  });
+
+  test('⛔ si la cadena desborda el día: el motivo NOMBRA el día y no se escribe nada', () => {
+    // Día del Miércoles lleno hasta las 22:00: la pared no tiene dónde empujar.
+    const acts = [
+      a('r', '09:00', '10:00', [0]),
+      a('e', '09:30', '21:59', [2]),
+      a('c', '21:59', '22:00', [2])
+    ];
+    const res = resolverGanarDias(acts, 'r', [2], codec, 22);
+    expect(res.valido).toBe(false);
+    expect(res.motivo).toContain('Miércoles');
+    expect(res.times.size).toBe(0);
+    expect(res.porDia.size).toBe(0);
+  });
+
+  test('sin días nuevos no hay gesto (no escribe nada)', () => {
+    const acts = [a('r', '09:00', '10:00', [0, 1])];
+    expect(resolverGanarDias(acts, 'r', [1], codec, 22).valido).toBe(false);
+    expect(resolverGanarDias(acts, 'r', [9, -1], codec, 22).valido).toBe(false);
+    expect(resolverGanarDias(acts, 'no-existe', [2], codec, 22).valido).toBe(false);
+  });
+
+  test('un solape que YA existía no veta el gesto; uno nuevo sí', () => {
+    // El Martes ya tenía a "e" y "c" encima (estado heredado, no lo introduce
+    // el gesto). Ganar el Martes con la Rutina a las 9 no crea solape nuevo:
+    // el horario de e/c no se toca.
+    const acts = [
+      a('r', '09:00', '10:00', [0]),
+      a('e', '10:00', '11:00', [1]),
+      a('c', '10:00', '11:00', [1])   // se solapa con e desde antes
+    ];
+    const res = resolverGanarDias(acts, 'r', [1], codec, 22);
+    expect(res.valido).toBe(true);
+    expect(res.times.get('e')).toEqual(s('e', 10, 11));
+    expect(res.times.get('c')).toEqual(s('c', 10, 11));
+  });
+
+  test('dos días ganados con empujes distintos NO producen dos horarios', () => {
+    // El Martes solo tiene hueco a medias: la pared lo acomoda más arriba; el
+    // Miércoles tiene la cadena completa. Con un horario global por bloque hay
+    // que elegir UN valor que sirva en los dos días (el que empuja más lejos).
+    const acts = [
+      a('r', '09:00', '10:00', [0]),
+      a('e', '09:30', '10:15', [1, 2]),
+      a('l', '10:15', '10:30', [2])
+    ];
+    const res = resolverGanarDias(acts, 'r', [1, 2], codec, 22);
+    expect(res.valido).toBe(true);
+    // Un solo horario para "e"...
+    expect(res.times.get('e')!.start).toBe(10);
+    // ...y en NINGÚN día queda pisado (el punto de este test).
+    for (const d of [1, 2]) {
+      const slots = [...res.porDia.get(d)!.values()];
+      for (let i = 0; i < slots.length; i++) {
+        for (let j = i + 1; j < slots.length; j++) {
+          expect(slots[i].start < slots[j].end && slots[j].start < slots[i].end,
+            `solape en el día ${d}: ${slots[i].id} vs ${slots[j].id}`).toBe(false);
+        }
+      }
+    }
   });
 });
 

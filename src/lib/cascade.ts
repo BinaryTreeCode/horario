@@ -723,26 +723,28 @@ export function propagateWeekly(
         }
       }
       if (!changed) break;
-    }
-    // Candado del límite: NINGÚN día puede quedar fuera de rango (sin
-    // recorte) — salvo al ENCOGER, que siempre está permitido.
-    // Igual que en resolveResizeDay: un bloque PREEXISTENTE fuera de rango
-    // (p. ej. Rutina 6:45 con inicio de día configurado a las 7) no debe
-    // invalidar estiramientos que NO lo empeoran — el gesto lo toca solo si
-    // la cadena lo empuja, y al empujarlo su lugar lo fija la pared. Se
-    // compara contra el estado ORIGINAL del día: solo rechaza un bloque que
-    // estaba DENTRO y queda FUERA (desborde nuevo).
-    if (!encogeRedim) {
-      for (const day of daySet) {
-        const slotsDia = slotsOn(day);
-        const origDia = activities
-          .filter(a => isOnDay(a, day))
-          .map(a => ({ id: a.id!, start: codec.parse(a.startTime), end: codec.parse(a.endTime) }));
-        const estabaFuera = new Set(origDia.filter(s => s.start < startHour - EPS || s.end > endHour + EPS).map(s => s.id));
-        const fuera = slotsDia.find(s => !estabaFuera.has(s.id) && (s.start < startHour - EPS || s.end > endHour + EPS));
-        if (fuera) return rechazar('⛔ No cabe: estirar desbordaría el día');
+    }// Candado del límite: NINGÚN día puede quedar fuera de rango (sin
+      // recorte) — salvo al ENCOGER, que siempre está permitido.
+      // Igual que en resolveResizeDay: un bloque PREEXISTENTE fuera de rango
+      // (p. ej. Rutina 6:45 con inicio de día configurado a las 7) no debe
+      // invalidar estiramientos que NO lo empeoran — el gesto lo toca solo si
+      // la cadena lo empuja, y al empujarlo su lugar lo fija la pared. Se
+      // compara contra el estado ORIGINAL del día: solo rechaza un bloque que
+      // estaba DENTRO y queda FUERA (desborde nuevo).
+      if (!encogeRedim) {
+        for (const day of daySet) {
+          const slotsDia = slotsOn(day);
+          const origDia = activities
+            .filter(a => isOnDay(a, day))
+            .map(a => ({ id: a.id!, start: codec.parse(a.startTime), end: codec.parse(a.endTime) }));
+          const estabaFuera = new Set(origDia.filter(s => s.start < startHour - EPS || s.end > endHour + EPS).map(s => s.id));
+          const fuera = slotsDia.find(s => !estabaFuera.has(s.id) && (s.start < startHour - EPS || s.end > endHour + EPS));
+          // El motivo NOMBRA el día: "no cabe" sin decir dónde deja al usuario
+          // sin saber qué día está apretado (y con la duración siendo global,
+          // puede ser un día que ni siquiera está mirando).
+          if (fuera) return rechazar(`⛔ No cabe: estirar desbordaría ${DIAS_SEMANA[day] ?? `día ${day}`}`);
+        }
       }
-    }
   }
 
   const byDay = new Map<number, Map<string, Slot>>();
@@ -810,6 +812,48 @@ export function capacidadResizeWeekly(
 }
 
 /**
+ * BARRIDO DE GANANCIA del asa lateral: el espejo de barridoRetiro. El asa del
+ * día `origen` se arrastra HACIA AFUERA `columnasCruzadas` columnas COMPLETAS
+ * y la actividad gana esa tira de días de un solo gesto.
+ *
+ * Por qué existe: el barrido de retiro ya sabía cruzar varios días, pero el de
+ * ganancia se quedaba en el vecino inmediato. "Estirar la Rutina a toda la
+ * semana" obligaba a repetir el gesto día por día, y en el camino una pasada
+ * de más pisaba un día que el usuario solo quería ver.
+ *
+ * Reglas (espejo de las del retiro, con la asimetría del dedo ya acordada):
+ *  - Gana el vecino INMEDIATO más cada columna COMPLETAMENTE cruzada: el día
+ *    bajo el dedo entra (al revés que el retiro, donde el día bajo el dedo se
+ *    salva). 0 columnas cruzadas = el gesto clásico de siempre, un solo día.
+ *  - La tira es CONTIGUA y nunca salta huecos: si la actividad ya está en un
+ *    día, el barrido se detiene ahí (no se gana el tramo que viene después).
+ *  - Se detiene en el borde de la semana.
+ *
+ * @param days días actuales de la actividad
+ * @param origen día donde está el asa
+ * @param dirOut dirección de la ganancia: +1 (asa a la derecha) o -1 (izq.)
+ * @param columnasCruzadas columnas COMPLETAS cruzadas por el dedo
+ * @returns lista de días a ganar en orden (vacía = no hay gesto posible)
+ */
+export function barridoGanar(
+  days: number[],
+  origen: number,
+  dirOut: 1 | -1,
+  columnasCruzadas: number
+): number[] {
+  const set = new Set(days);
+  const n = Math.max(0, columnasCruzadas);
+  const out: number[] = [];
+  for (let k = 0; k <= n; k++) {
+    const d = origen + (1 + k) * dirOut;
+    if (d < 0 || d > 6) break;   // borde de la semana
+    if (set.has(d)) break;       // ya lo tiene: la tira no salta el día
+    out.push(d);
+  }
+  return out;
+}
+
+/**
  * BARRIDO DE RETIRO del asa lateral (matemática pura, dueño único — la
  * vista solo le pasa columnas cruzadas): el asa del día `origen` se arrastra
  * HACIA ADENTRO (hacia el bloque) `columnasCruzadas` columnas COMPLETAS.
@@ -858,6 +902,105 @@ export function barridoRetiro(
   // se salva (shift) y quedan solo los cruzados — el gesto clásico de siempre.
   if (dias.length >= days.length) dias.shift();
   return dias.slice(0, days.length - 1);
+}
+
+/** Resultado de ganar varios días con un solo barrido. */
+export interface GanarDiasResolution {
+  /** Horario final de cada día ganado (incluye la actividad que gana). */
+  porDia: Map<number, Map<string, Slot>>;
+  /** Horario GLOBAL a escribir: un bloque tiene un solo horario en la semana. */
+  times: Map<string, Slot>;
+  valido: boolean;
+  motivo: string;
+}
+
+/**
+ * GANAR DÍAS con el asa lateral (matemática pura, dueño único): el bloque entra en
+ * `diasGanados` con SUS MISMAS horas y empuja en cadena a los vecinos de cada
+ * día donde colisione.
+ *
+ * Es el mismo gesto que el ESTIRAR vertical, no uno nuevo: el bloque queda
+ * anclado en su hora y la actividad aparece en más días, así que la PARED
+ * empuja en cadena en TODOS ellos (propagateWeekly, semántica de estirar).
+ * Esa es la única forma de resolverlo bien, porque el horario de un bloque es
+ * GLOBAL: si el mismo vecino se reubicara distinto en dos días ganados no
+ * habría dos respuestas, habría una sola, y la pared la busca empujando
+ * hasta que cierra en todos. Resolver día por día y fusionar "el más
+ * tardío" parece más simple y estalla: el día perdedor queda pisado.
+ *
+ * Encima del resultado de propagateWeekly se valida una cosa que él no
+ * promete: que no quede SOLAPE. Su candado de empuje prefiere dejar un solape
+ * local antes que romper otro día (ex-C3), y en este gesto un solape local se
+ * vería en la columna que el usuario está mirando, así que se rechaza
+ * nombrando el día. Un solape que YA estaba antes del gesto no se toca: solo
+ * se veta el que el gesto introduce.
+ */
+export function resolverGanarDias(
+  activities: Activity[],
+  actId: string,
+  diasGanados: number[],
+  codec: TimeCodec,
+  endHour = 24
+): GanarDiasResolution {
+  const byId = new Map(activities.map(a => [a.id!, a]));
+  const act = byId.get(actId);
+  const rechazar = (motivo: string): GanarDiasResolution => ({
+    porDia: new Map(), times: new Map(), valido: false, motivo
+  });
+  if (!act) return rechazar('⛔ No se encontró la actividad');
+
+  const inicio = codec.parse(act.startTime);
+  const dur = codec.parse(act.endTime) - inicio;
+  const nuevos = [...new Set(diasGanados)]
+    .filter(d => d >= 0 && d <= 6 && !act.daysOfWeek.includes(d))
+    .sort((a, b) => a - b);
+  if (nuevos.length === 0) return rechazar('');
+
+  // Misma llamada que el estirar vertical: la actividad anclada en su hora,
+  // ahora presente en los días nuevos. El límite inferior es 0 (no el
+  // startHour configurable) por el mismo motivo que allí: hay bloques que ya
+  // viven antes del inicio del día y no son un desborde.
+  const sem = propagateWeekly(
+    activities, actId, inicio, endHour, codec,
+    [...act.daysOfWeek, ...nuevos], dur, 0, true, undefined, 'abajo'
+  );
+  if (!sem.valido) return rechazar(sem.motivo);
+
+  // La propia actividad entra al mapa aunque no se mueva: el commit la escribe
+  // por el cambio de DÍAS, y sin esta fila el gesto no guardaría nada.
+  sem.times.set(actId, { id: actId, start: inicio, end: inicio + dur });
+
+  // Quién cambió de horario: son los que pueden dejar el día con un solape
+  // nuevo. La actividad cuenta solo en los días GANADOS (en los suyos ya
+  // estaba, y sus choques son de antes).
+  const movido = (id: string): boolean => {
+    const t = sem.times.get(id);
+    const a = byId.get(id);
+    if (!t || !a) return false;
+    return Math.abs(codec.parse(a.startTime) - t.start) > EPS ||
+           Math.abs(codec.parse(a.endTime) - t.end) > EPS;
+  };
+  for (const [day, slots] of sem.byDay) {
+    const nombreDia = DIAS_SEMANA[day] ?? `día ${day}`;
+    const arr = [...slots.values()];
+    const esNuevo = (id: string) => (id === actId ? nuevos.includes(day) : movido(id));
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i + 1; j < arr.length; j++) {
+        if (!overlaps(arr[i], arr[j])) continue;
+        if (!esNuevo(arr[i].id) && !esNuevo(arr[j].id)) continue;
+        return rechazar(
+          `⛔ No cabe: en ${nombreDia} "${porNombre(byId, arr[i].id)}" se pondría sobre "${porNombre(byId, arr[j].id)}"`
+        );
+      }
+    }
+  }
+
+  return { porDia: sem.byDay, times: sem.times, valido: true, motivo: '' };
+}
+
+/** Nombre legible de un bloque para los motivos de rechazo (con fallback). */
+function porNombre(byId: Map<string, Activity>, id: string): string {
+  return byId.get(id)?.name ?? id;
 }
 
 /**
