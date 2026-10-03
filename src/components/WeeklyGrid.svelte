@@ -1636,12 +1636,17 @@
      afectado), NUNCA sobre la columna entera: eso manchaba a los vecinos
      (Aseo 1, Trabajo…) que no participan en el gesto. Espejo del feedback
      del drag vertical (drop-preview). */
-  /* El día que gana el barrido se marca solo con un filete en el borde: la
-     banda de abajo es la que dice DÓNDE caería el bloque. Teñir la columna
-     entera era mentir: marcaba de verde a los vecinos (trabajo, Desayuno,
-     Aseo 1) que el gesto no toca. */
-  .day-column.col-hres-ganar .slots-grid {
-    box-shadow: inset 0 0 0 3px rgba(74, 124, 68, 0.55);
+  /* El único indicador del día que gana es la BANDA (abajo), que ocupa la
+     franja horaria del bloque y nada más. Antes esta regla ponía un filete
+     de 3px alrededor del .slots-grid, y ese elemento mide el 100% del alto de
+     la columna: el "filete" resultaba ser un rectángulo verde de arriba abajo,
+     igual de vertical que el tinte que se quitó antes. El dedo se mueve en
+     horizontal, así que el indicador también: nada que abarque la columna
+     entera. Para saber QUÉ día es alcanza con pintar el encabezado, que
+     mide 44px y no deja línea vertical. */
+  .day-column.col-hres-ganar .day-header {
+    background: rgba(74, 124, 68, 0.9);
+    color: #fff;
   }
   .hres-ganar-banda {
     position: absolute;

@@ -107,14 +107,33 @@ test('Barrido del asa: al ganar un día, la marca es una banda, no la columna', 
   ).toBe(false);
   expect(medida.altoBanda, 'la banda no tiene altura').toBeGreaterThan(4);
 
-  // Y además la columnaya no debe teñirse de fondo: solo un filete.
-  const fondo = await page.locator('.day-column.col-hres-ganar .slots-grid').evaluate(
-    el => getComputedStyle(el).backgroundColor
-  );
+  // NADA dentro de la columna puede marcar la columna completa. Un filete
+  // de 3px sobre .slots-grid (que mide el 100% del alto) también es un
+  // indicador vertical: el dedo se mueve en horizontal.
+  const verticales = await banda.evaluate((el) => {
+    const col = el.closest('.day-column')!;
+    const altoCol = col.getBoundingClientRect().height;
+    const culpables: string[] = [];
+    for (const n of col.querySelectorAll('*')) {
+      const r = n.getBoundingClientRect();
+      if (r.height < altoCol * 0.5) continue; // no abarca la columna
+      const cs = getComputedStyle(n);
+      const marca =
+        (cs.boxShadow && cs.boxShadow !== 'none') ||
+        (cs.borderLeftWidth !== '0px' && cs.borderLeftStyle !== 'none') ||
+        (cs.borderRightWidth !== '0px' && cs.borderRightStyle !== 'none') ||
+        (cs.outlineStyle !== 'none' && cs.outlineWidth !== '0px');
+      if (!marca) continue;
+      const sel = n.tagName.toLowerCase() +
+        (typeof n.className === 'string' && n.className.trim() ? '.' + n.className.trim().split(/\s+/).join('.') : '');
+      culpables.push(`${sel} (alto ${Math.round(r.height)}px de ${Math.round(altoCol)}px)`);
+    }
+    return culpables;
+  });
   expect(
-    fondo,
-    `la columna sigue con fondo ${fondo}: vuelve a teñir a los vecinos`
-  ).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+    verticales,
+    `indicadores verticales dentro de la columna: ${verticales.join(' | ')}`
+  ).toEqual([]);
 
   await page.mouse.up();
 });
