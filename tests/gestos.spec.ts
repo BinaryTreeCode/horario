@@ -449,6 +449,53 @@ test('Barrido del asa: hacia afuera gana la tira entera de días, no solo el vec
   }
 });
 
+/**
+ * El reporte: "después de interactuar con el objeto queda opaco". El gesto del
+ * asa lateral apagaba la tarjeta al agarrarla (.drag-ghost, opacity 0.45) pero
+ * su onDrop no limpiaba el id — el resto de gestos sí lo hacen — así que al
+ * soltar la actividad quedaba translúcida en TODOS sus días hasta que
+ * .= arrastrara otra cosa.
+ *
+ * El guard barre la rejilla después de soltar y no tolera ninguna tarjeta
+ * apagada: mide lo que se ve, no el estado interno.
+ */
+test('Tras soltar el asa, ninguna tarjeta queda opaca', async ({ page }) => {
+  const asa = await asaDerecha(page);
+
+  await page.mouse.move(asa.x, asa.y);
+  await page.mouse.down();
+  await page.mouse.move(asa.x + asa.colW * 1.4, asa.y, { steps: 6 });
+  await page.waitForTimeout(150);
+  // Durante el gesto SÍ tiene que estar apagada (si no, el gesto no se ve).
+  const durante = await page.locator('.activity-item.drag-ghost').count();
+  expect(durante, 'el gesto del asa no apaga la tarjeta: no se está probando nada').toBeGreaterThan(0);
+
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+
+  const apagadas = await page.evaluate(() => {
+    const cols = [...document.querySelectorAll('.day-column')];
+    const malas: string[] = [];
+    for (const b of document.querySelectorAll('.activity-item')) {
+      const cs = getComputedStyle(b);
+      const op = parseFloat(cs.opacity);
+      const clases = [...b.classList];
+      const apagada = clases.includes('drag-ghost') || clases.includes('hres-se-mueve') || op < 0.5;
+      if (!apagada) continue;
+      malas.push(
+        `${b.getAttribute('title')} (día ${cols.indexOf(b.closest('.day-column')!)}, ` +
+        `opacidad ${op}, clases: ${clases.filter(c => c !== 'activity-item' && !c.startsWith('s-')).join(' ')})`
+      );
+    }
+    return malas;
+  });
+
+  expect(
+    apagadas,
+    `tarjetas que quedaron apagadas tras soltar: ${apagadas.join(' | ')}`
+  ).toEqual([]);
+});
+
 test('Barrido del asa: el día del asa también se retira', async ({ page }) => {
   const asa = await asaDerecha(page);
 

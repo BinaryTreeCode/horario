@@ -957,7 +957,14 @@
     async onDrop(t, clientX) {
       const m = t.meta as WeekHResizeMeta;
       const act = activities.find(a => a.id === t.activityId);
+      // El preview y el id mueren AL SOLTAR, en ese orden (convención del resto
+      // de gestos). Faltaba el id en esta ruta: la actividad se quedaba con
+      // .drag-ghost (opacity 0.45) en TODOS sus días hasta el siguiente
+      // arrastre — el reporte: "después de interactuar con el objeto queda
+      // opaco". El reset va ANTES de los returns tempranos: jiggle, borde del
+      // arreglo y gesto sin día también tienen que soltar la tarjeta entera.
       hresPreview = null;
+      draggedActivityId = null;
       if (!act) return;
       const r = resolverHResize(m, clientX);
       if (!r) return; // jiggle / borde del arreglo / único día: nada se escribe
