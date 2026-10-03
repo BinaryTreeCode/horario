@@ -1660,6 +1660,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Separador entre la lista de días y el nombre: con solo 4px de gap se
+     leía "− Sábado, Viernes, Jueves Rutina" — no se sabe dónde acaba la lista. */
+  .hres-float .hf-act::before {
+    content: '\00b7';
+    margin-right: 6px;
+    opacity: 0.55;
+  }
   .hres-float.hres-retirar {
     background: #e0453a;
   }

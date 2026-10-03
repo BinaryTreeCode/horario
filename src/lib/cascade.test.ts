@@ -543,29 +543,54 @@ describe('barridoRetiro — asa lateral: los días cruzados se eliminan', () => 
 
   test('barrido de Domingo a Jueves: elimina Sábado y Viernes (el ejemplo del usuario)', () => {
     // days = Lun–Dom (el bloque completo), asa en Domingo (6), dirIn=-1,
-    // 2 columnas completas cruzadas → Sábado (5) y Viernes (4) fuera;
-    // Jueves (3) queda como nuevo borde y Domingo se conserva.
+    // 2 columnas completas cruzadas → Domingo (6, el día del asa), Sábado (5)
+    // y Viernes (4) fuera; Jueves (3) queda como nuevo borde.
+    //
+    // El día del asa entra al barrido: el gesto es recortar la corrida DESDE
+    // ahí. Antes se conservaba y la actividad quedaba huérfana en Domingo,
+    // desconectada del Miércoles que quedaba al otro lado del hueco.
     const TODO_SEMANA = [0, 1, 2, 3, 4, 5, 6];
-    expect(barridoRetiro(TODO_SEMANA, 6, -1, 2)).toEqual([5, 4]);
+    expect(barridoRetiro(TODO_SEMANA, 6, -1, 2)).toEqual([6, 5, 4]);
+  });
+
+  test('el barrido retira el día del asa (regresión del reporte)', () => {
+    // Caso reportado: Rutina de Miércoles a Domingo, asa en el borde derecho
+    // del Domingo, el dedo cruza Sábado/Viernes/Jueves. Antes se retiraban
+    // solo los tres cruzados y el Domingo sobrevivía solo.
+    const RUTINA = [2, 3, 4, 5, 6];
+    expect(barridoRetiro(RUTINA, 6, -1, 3)).toEqual([6, 5, 4, 3]);
+    // Un solo día de barrido: se va el asa y el cruzado, ni más ni menos.
+    expect(barridoRetiro(RUTINA, 6, -1, 1)).toEqual([6, 5]);
+    // Y el gesto clásico (sin cruzar columnas) sigue siendo solo el asa.
+    expect(barridoRetiro(RUTINA, 6, -1, 0)).toEqual([6]);
+    // Cruzando los 4 días restantes el barrido vaciaría el bloque: ahí el
+    // día del asa se salva y quedan solo los cruzados (nunca sin días).
+    expect(barridoRetiro(RUTINA, 6, -1, 4)).toEqual([5, 4, 3, 2]);
+    // Al revés (asa en el Miércoles, la punta izquierda de la corrida) el asa
+    // también entra: 3 columnas cruzadas se llevan Miércoles, Jueves, Viernes
+    // y Sábado, y queda solo el Domingo.
+    expect(barridoRetiro(RUTINA, 2, 1, 2)).toEqual([2, 3, 4]);
+    expect(barridoRetiro(RUTINA, 2, 1, 3)).toEqual([2, 3, 4, 5]);
   });
 
   test('extremos exclusivos: el día bajo el dedo (columna incompleta) sobrevive', () => {
     // Asa en Viernes (4) de Lun–Vie, 2 columnas COMPLETAS hacia adentro
     // (dirIn=-1): el dedo cruzó Jueves(3) y Miércoles(2) y está DENTRO de
     // Martes (2.4 columnas en la vista → floor 2) → Martes sobrevive como
-    // nuevo borde junto con el origen Viernes.
-    expect(barridoRetiro(LUN_VIE, 4, -1, 2)).toEqual([3, 2]);
+    // nuevo borde. El origen (Viernes) también cae: el gesto recorta desde ahí.
+    expect(barridoRetiro(LUN_VIE, 4, -1, 2)).toEqual([4, 3, 2]);
     // Con 3 columnas COMPLETAS el dedo ya cruzó Martes entero: se retira
     // también (la vista pasa floor(|delta|/ancho), así que la columna bajo
     // el dedo solo sobrevive cuando el dedo está dentro de ella).
-    expect(barridoRetiro(LUN_VIE, 4, -1, 3)).toEqual([3, 2, 1]);
+    expect(barridoRetiro(LUN_VIE, 4, -1, 3)).toEqual([4, 3, 2, 1]);
   });
 
   test('solo se retiran días que la actividad tiene (corrida con hueco)', () => {
     // Baño real: Lun(0), Mié(2), Vie(4). Asa del Viernes hacia adentro 3
     // columnas cruza Jueves(4-1*? no lo tiene), Miércoles(2, sí), Martes(1,
-    // no lo tiene) → solo se retiran los que tiene: Miércoles.
-    expect(barridoRetiro([0, 2, 4], 4, -1, 3)).toEqual([2]);
+    // no lo tiene) → se retiran los que tiene: el asa (Vie) y Miércoles;
+    // queda solo el Lunes.
+    expect(barridoRetiro([0, 2, 4], 4, -1, 3)).toEqual([4, 2]);
   });
 
   test('corrida rota sin cruces válidos: cae al gesto clásico (día del asa)', () => {

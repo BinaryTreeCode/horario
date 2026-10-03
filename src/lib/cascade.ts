@@ -815,14 +815,15 @@ export function capacidadResizeWeekly(
  * HACIA ADENTRO (hacia el bloque) `columnasCruzadas` columnas COMPLETAS.
  *
  * Reglas (acordadas con el usuario):
- *  - 0 columnas cruzadas (umbral de media columna): gesto clásico — se
- *    retira SOLO el día del asa.
- *  - ≥1 columna: BARRIDO — se retiran los días CRUZADOS entre el asa y el
- *    dedo (extremos exclusivos: el día bajo el dedo queda como nuevo borde
- *    y el día del asa se conserva). "De Domingo a Jueves" (origen=6,
- *    dirIn=-1, 2 columnas) elimina [5, 4] = Sábado y Viernes.
- *  - Solo se retiran días que la actividad tiene (nunca salta huecos: una
- *    corrida rota devuelve, si no hubo cruces válidos, el gesto clásico).
+ *  - El barrido retira el día del asa MÁS cada día COMPLETAMENTE cruzado:
+ *    el gesto es "recortar la corrida desde acá", así que el día que se
+ *    agarró va con el resto. El extremo del dedo queda excluido: el día bajo
+ *    el dedo sobrevive y queda como nuevo borde.
+ *  - 0 columnas cruzadas (umbral de media columna) es el caso degenerado de esa
+ *    misma regla: solo el día del asa.
+ *  - Solo se retiran días que la actividad tiene (nunca salta huecos).
+ *  - Jamás deja el bloque sin días: si el barrido lo vaciaría, el día del asa
+ *    se salva y se retiran solo los cruzados.
  *  - Jamás deja el bloque sin ningún día (máximo days.length - 1 retiros;
  *    se conservan los PRIMEROS del barrido, los más cercanos al asa).
  *
@@ -841,25 +842,22 @@ export function barridoRetiro(
 ): number[] {
   if (days.length <= 1) return []; // retirar el único día no se ofrece
   const set = new Set(days);
-  let dias: number[] = [];
-  if (columnasCruzadas <= 0) {
-    // Umbral de media columna: gesto clásico — solo el día del asa.
-    dias = [origen];
-  } else {
-    // Extremos exclusivos: el día bajo el dedo y el día del asa se conservan.
-    for (let k = 1; k <= columnasCruzadas; k++) {
-      const d = origen + k * dirIn;
-      if (d < 0 || d > 6) break;
-      if (set.has(d)) dias.push(d);
-    }
-    if (dias.length === 0) dias = [origen]; // corrida rota: vale el gesto clásico
+  // El día del asa entra al barrido (k = 0). Antes el bucle arrancaba en 1 y
+  // lo conservaba, así que el gesto clásico (0 columnas) lo retiraba pero el
+  // barrido no: los dos modos del mismo gesto discrepaban sobre el día que
+  // agarraste, y tras barrer te quedaba la actividad huérfana en ese día.
+  const dias: number[] = [origen];
+  const n = Math.max(0, columnasCruzadas);
+  // Extremo del dedo EXCLUSIVO: el día bajo el dedo queda como nuevo borde.
+  for (let k = 1; k <= n; k++) {
+    const d = origen + k * dirIn;
+    if (d < 0 || d > 6) break;
+    if (set.has(d)) dias.push(d);
   }
-  // Jamás deja el bloque sin días: se conservan los primeros del barrido
-  // (los más cercanos al asa — el dedo barre desde ahí).
-
-  const maxQuitar = days.length - 1;
-  if (dias.length > maxQuitar) dias = dias.slice(0, maxQuitar);
-  return dias;
+  // Jamás deja el bloque sin días: si el barrido lo vaciaría, el día del asa
+  // se salva (shift) y quedan solo los cruzados — el gesto clásico de siempre.
+  if (dias.length >= days.length) dias.shift();
+  return dias.slice(0, days.length - 1);
 }
 
 /**
