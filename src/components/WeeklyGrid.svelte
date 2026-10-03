@@ -830,6 +830,9 @@
       draggedActivityId = null;
       dragSourceDay = null;
       dropPreview = null;
+      redimPreview = null;
+      redimDiaOrigen = null;
+      dragHint = '';
       vresHint = null;
       setInvalid(false);
       shakeInvalid = false;

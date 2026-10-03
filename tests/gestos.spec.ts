@@ -496,6 +496,100 @@ test('Tras soltar el asa, ninguna tarjeta queda opaca', async ({ page }) => {
   ).toEqual([]);
 });
 
+/**
+ * El mismo olvido que el del asa lateral, en el gesto hermano: al CANCELAR un
+ * estirar vertical (Esc, blur, pointercancel) el preview por día sobrevivia y
+ * dejaba el borde discontinuo (.redim-pendiente) en los bloques que se iban a
+ * cambiar, en toda la semana, hasta el siguiente gesto.
+ *
+ * Cancelar es un final de gesto tan válido como soltar: tiene que dejar la
+ * rejilla como estaba.
+ */
+test('Cancelar un estirar vertical no deja marcas de preview', async ({ page }) => {
+  const asa = await page.evaluate(() => {
+    const titulo = /Rutina matutina/i;
+    for (const item of document.querySelectorAll('.activity-item') as NodeListOf<HTMLElement>) {
+      if (!titulo.test(item.getAttribute('title') ?? '')) continue;
+      // El asa vertical de ABAJO: la que no lleva .top ni .hres-*.
+      const h = [...item.querySelectorAll('.resize-handle')].find(
+        el => !el.classList.contains('top') && !el.classList.contains('hres-izq') && !el.classList.contains('hres-der')
+      ) as HTMLElement | undefined;
+      if (!h) continue;
+      const r = h.getBoundingClientRect();
+      if (r.y < 0 || r.y > window.innerHeight || r.x < 0 || r.x > window.innerWidth) continue;
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }
+    return null;
+  });
+  expect(asa, 'no se encontró un asa vertical visible para estirar').not.toBeNull();
+
+  await page.mouse.move(asa!.x, asa!.y);
+  await page.mouse.down();
+  await page.mouse.move(asa!.x, asa!.y + 140, { steps: 8 });
+  await page.waitForTimeout(250);
+
+  // Durante el estirar tienen a estar marcadas: si no, el guard no probaría nada.
+  const marcadas = await page.locator('.activity-item.redim-pendiente').count();
+  expect(marcadas, 'el estirar no marcó bloques: el guard no probaría nada').toBeGreaterThan(0);
+
+  // Cancelar con Esc (el motor llama onCancel, no onDrop).
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+
+  const residuo = await page.evaluate(() => {
+    const malas: string[] = [];
+    for (const b of document.querySelectorAll('.activity-item')) {
+      const c = [...b.classList];
+      if (c.includes('redim-pendiente') || c.includes('drag-ghost') || c.includes('hres-se-mueve') ||
+          parseFloat(getComputedStyle(b).opacity) < 0.5) {
+        malas.push(`${b.getAttribute('title')} (${c.filter(x => !x.startsWith('s-') && x !== 'activity-item').join(' ')})`);
+      }
+    }
+    return malas;
+  });
+  expect(
+    residuo,
+    `tras cancelar el estirar quedaron marcas: ${residuo.join(' | ')}`
+  ).toEqual([]);
+});
+
+/**
+ * El gemelo del bug reportado, en la vista Día: tras soltar un arrastre, la
+ * tarjeta no puede quedar en modo fantasma (clase .dragging = sombra de
+ * bloque levantado, y el track en modo arrastre sin hover en las vecinas).
+ */
+test('Vista Día: tras soltar el arrastre no queda ninguna tarjeta fantasma', async ({ page }) => {
+  await page.locator('#tab-day').click();
+  await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(400);
+
+  const carta = await page.evaluate(() => {
+    const t = [...document.querySelectorAll('.daily-activity-card')] as HTMLElement[];
+    for (const c of t) {
+      const r = c.getBoundingClientRect();
+      if (r.y < 40 || r.y > window.innerHeight - 40 || r.width < 20) continue;
+      return { x: r.x + r.width / 2, y: r.y + 20, titulo: c.getAttribute('aria-label') ?? '' };
+    }
+    return null;
+  });
+  expect(carta, 'no se encontró una tarjeta visible en la vista Día').not.toBeNull();
+
+  await page.mouse.move(carta!.x, carta!.y);
+  await page.mouse.down();
+  await page.mouse.move(carta!.x, carta!.y + 90, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(700);
+
+  const residuo = await page.evaluate(() => ({
+    fantasma: document.querySelectorAll('.daily-activity-card.dragging').length,
+    track: document.querySelectorAll('.activities-track.track-dragging').length,
+  }));
+  expect(
+    residuo,
+    `tras soltar en la vista Día quedó modo fantasma: ${JSON.stringify(residuo)}`
+  ).toEqual({ fantasma: 0, track: 0 });
+});
+
 test('Barrido del asa: el día del asa también se retira', async ({ page }) => {
   const asa = await asaDerecha(page);
 

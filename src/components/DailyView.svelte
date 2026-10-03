@@ -612,16 +612,18 @@
   /** Aplica el drop: el mapa resuelto del preview ES lo que se guarda
    *  (misma matemática que se vio mientras se arrastraba). */
   async function commitDropAt(resolved: Map<string, { start: number; end: number }>) {
-    if (resolved.size === 0) return;
-
     // Metodología acordada: en la vista Día, el drag SIEMPRE es una edición
     // temporal del día (override ⚡) — nunca reescribe la plantilla master.
     // "Guardar como plantilla" es la acción explícita que la promueve.
     try {
-      await commitResolved(resolved);
+      // Mapa vacío = nada que guardar (no debería pasar en un drop válido,
+      // pero si pasara el ghost se tiene que soltar igual).
+      if (resolved.size > 0) await commitResolved(resolved);
     } finally {
       // C2: el estado del drag se limpia SIEMPRE — error o no, la tarjeta
-      // no puede quedar en modo fantasma hasta el próximo arrastre.
+      // no puede quedar en modo fantasma hasta el próximo arrastre. Por eso
+      // el return temprano de "mapa vacío" quedó DENTRO del try: antes se
+      // escapaba antes del finally y dejaba la tarjeta en modo fantasma.
       draggedActivityId = null;
     }
   }
