@@ -110,6 +110,82 @@ async function crearActividad(
   await page.waitForTimeout(400);
 }
 
+/** Abre el modal de una actividad con el teclado (Enter sobre el bloque). */
+async function abrirModalDe(page: import('@playwright/test').Page, nombre: string, dia: number) {
+  const bloque = page.locator(`.day-column:nth-of-type(${dia + 1}) .activity-item[title="${nombre}"]`).first();
+  await expect(bloque, `no se encontró "${nombre}" en el día ${dia}`).toBeVisible({ timeout: 30_000 });
+  await bloque.focus();
+  await page.keyboard.press('Enter');
+  const modal = page.locator('.modal-content[role="dialog"]');
+  await expect(modal).toBeVisible({ timeout: 30_000 });
+  return modal;
+}
+
+/**
+ * El reporte: "quiero aumentar un bloque desde la pestaña de configuración con
+ * el espacio disponible como en el deslizable". El modal rechazaba con "Ya
+ * existe X" mientras el asa topaba y empujaba en cadena.
+ *
+ * El guard hace lo que haría la persona: abrir la actividad, mover "Hasta" más
+ * allá del vecino que tiene debajo, guardar. Después exige tres cosas:
+ *  1. que la actividad haya CRECIDO (no un rechazo),
+ *  2. que el vecino se haya corrido justo a donde termina,
+ *  3. que UN solo deshacer devuelva AMBAS a su sitio.
+ */
+test('Modal: aumentar usa el espacio disponible y empuja al vecino como el asa', async ({ page }) => {
+  // "Desayuno" (10:30-11:00, toda la semana) tiene a "Trabajo" (11:00-13:00,
+  // martes a sábado) justo debajo. Lo estiramos hasta las 11:30 → empuja.
+  const Estado = () => page.evaluate(() => {
+    const leer = (re: RegExp) => {
+      const out: { dia: number; top: number; h: number }[] = [];
+      document.querySelectorAll('.day-column').forEach((col, i) => {
+        for (const b of col.querySelectorAll('.activity-item')) {
+          if (!re.test((b as HTMLElement).getAttribute('title') ?? '')) continue;
+          const r = b.getBoundingClientRect();
+          const c = col.getBoundingClientRect();
+          out.push({ dia: i, top: Math.round(r.top - c.top), h: Math.round(r.height) });
+        }
+      });
+      return out;
+    };
+    return { desayunos: leer(/^Desayuno$/i), trabajo: leer(/^Trabajo$/i) };
+  });
+
+  const antes = await Estado();
+  expect(antes.desayunos.length, 'el guard necesita Desayuno en la rejilla').toBeGreaterThan(0);
+  expect(antes.trabajo.length, 'el guard necesita un vecino al que empujar').toBeGreaterThan(0);
+
+  const modal = await abrirModalDe(page, 'Desayuno', 0);
+  await modal.locator('#act-end').selectOption('11:30');
+  await modal.locator('button[type="submit"]').click();
+  await expect(modal).toBeHidden({ timeout: 30_000 });
+  await page.waitForTimeout(800);
+
+  const despues = await Estado();
+
+  // 1) Creció de verdad: más alta que antes, sin que la rechazaran.
+  const altoAntes = antes.desayunos[0].h;
+  for (const d of despues.desayunos) {
+    expect(d.h, `Desayuno no creció el día ${d.dia}: el modal sigue rechazando`).toBeGreaterThan(altoAntes);
+  }
+
+  // 2) El vecino quedó pegado a su fin (empujado, no solapado).
+  const solapes = despues.desayunos.filter(d => {
+    const w = despues.trabajo.find(t => t.dia === d.dia);
+    return !!w && w.top < d.top + d.h - 2;
+  });
+  expect(solapes.map(s => s.dia), `Desayuno se solapa con Trabajo en los días: ${solapes.map(s => s.dia).join(', ')}`).toEqual([]);
+
+  // 3) Un SOLO deshacer devuelve AMBAS filas a su sitio.
+  await page.locator('#btn-undo').click();
+  await page.waitForTimeout(800);
+  const tras = await Estado();
+  expect(
+    JSON.stringify(tras) === JSON.stringify(antes),
+    `un solo deshacer no revirtió el conjunto:\n  antes  ${JSON.stringify(antes)}\n  tras   ${JSON.stringify(tras)}`
+  ).toBe(true);
+});
+
 test('Barrido del asa: al ganar un día, la marca es una banda, no la columna', async ({ page }) => {
   const asa = await asaIzquierda(page);
 

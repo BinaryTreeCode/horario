@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeDay, capacidadResizeWeekly, barridoRetiro, barridoGanar, resolverGanarDias, horarioEfectivoDia, chocaHoras } from './cascade';
+import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeDay, capacidadResizeWeekly, barridoRetiro, barridoGanar, resolverGanarDias, resolverEstirarGlobal, horarioEfectivoDia, chocaHoras } from './cascade';
 import type { Activity } from './types';
 
 const codec = {
@@ -690,6 +690,87 @@ describe('barridoGanar — asa lateral: la tira de días ganados (el caso report
     expect(barridoGanar(dias, 2, 1, 1)).toEqual([3, 4]);
     expect(barridoRetiro(dias, 2, -1, 1)).toEqual([2, 1]);
     expect(barridoGanar(dias, 2, 1, 1).length).toBe(barridoRetiro(dias, 2, -1, 1).length);
+  });
+});
+
+describe('resolverEstirarGlobal — crecer desde el modal como con el deslizable', () => {
+  const a = (id: string, start: string, end: string, days: number[]): Activity => ({
+    id, name: id, categoryId: 'c', startTime: start, endTime: end, daysOfWeek: days,
+    updatedAt: 0
+  });
+
+  test('día apretado: topa por la capacidad del día más apretado y NO se rechaza', () => {
+    // Rutina 9-10 en Lun-Vie. El Martes tiene detrás 2h + 8h hasta las 20: la
+    // cadena hasta el fin del día (22) da 2h de recorrido. El deseo del modal
+    // es 9-13 (crece 3h) pero la capacidad global es 2h → crece 2h y topa.
+    const acts = [
+      a('r', '09:00', '10:00', [0, 1, 2, 3, 4]),
+      a('e', '10:00', '12:00', [1]),
+      a('f', '12:00', '20:00', [1])
+    ];
+    const res = resolverEstirarGlobal(acts, 'r', 9, 13, codec, 7, 22, 'abajo');
+    expect(res.valido).toBe(true);
+    expect(res.toco, 'el deseo no entró entero y no lo avisó').toBe(true);
+    expect(res.fin).toBe(12);                       // 10 + 2h de cadena
+    expect(res.times.get('e')).toEqual(s('e', 12, 14));
+    expect(res.times.get('f')).toEqual(s('f', 14, 22)); // hasta el borde del día
+    expect(res.movidos.map(m => m.nombre)).toEqual(['e', 'f']);
+  });
+
+  test('con hueco de sobra: crece entero y empuja solo a quien choca', () => {
+    const acts = [
+      a('r', '09:00', '10:00', [0, 1]),
+      a('e', '10:00', '11:00', [0, 1])
+    ];
+    const res = resolverEstirarGlobal(acts, 'r', 9, 12, codec, 7, 22, 'abajo');
+    expect(res.valido).toBe(true);
+    expect(res.toco).toBe(false);
+    expect(res.fin).toBe(12);
+    expect(res.times.get('r')).toEqual(s('r', 9, 12));
+    expect(res.times.get('e')).toEqual(s('e', 12, 13));
+    expect(res.movidos.map(m => m.nombre)).toEqual(['e']);
+  });
+
+  test('el empuje viaja a TODOS los días del vecino (horario global)', () => {
+    const acts = [
+      a('r', '09:00', '10:00', [0, 1]),
+      a('e', '10:00', '11:00', [0, 1, 4])   // el vecino vive en 3 días
+    ];
+    const res = resolverEstirarGlobal(acts, 'r', 9, 12, codec, 7, 22, 'abajo');
+    expect(res.valido).toBe(true);
+    // Un solo horario global para "e": se aplicó a todos sus días.
+    expect(res.times.get('e')).toEqual(s('e', 12, 13));
+  });
+
+  test('lado "arriba" (el modal movió el inicio): empuja la cadena hacia ARRIBA', () => {
+    const acts = [
+      a('r', '10:00', '11:00', [0]),
+      a('e', '09:00', '09:30', [0])
+    ];
+    // El usuario quiere 7-11 (el fin 11 queda fijo): hay 2.5h hasta el inicio
+    // del día menos lo que ocupa "e" → entra 7:30-11 y "e" sube a 7-7:30.
+    const res = resolverEstirarGlobal(acts, 'r', 7, 11, codec, 7, 22, 'arriba');
+    expect(res.valido).toBe(true);
+    expect(res.inicio).toBe(7.5);
+    expect(res.fin).toBe(11);
+    expect(res.times.get('e')).toEqual(s('e', 7, 7.5));  // corrido hacia arriba
+    expect(res.movidos.map(m => m.nombre)).toEqual(['e']);
+  });
+
+  test('sin crecimiento: NO empuja a nadie (mover/encoger lo valida el caller)', () => {
+    const acts = [a('r', '09:00', '10:00', [0]), a('e', '10:00', '11:00', [0])];
+    // Misma duración (1h), movida 1h antes: el choque lo valida el caller, no
+    // hay empuje que resolver.
+    const res = resolverEstirarGlobal(acts, 'r', 8, 9, codec, 7, 22, 'abajo');
+    expect(res.valido).toBe(true);
+    expect(res.toco).toBe(false);
+    expect(res.movidos).toEqual([]);
+    expect([...res.times.keys()]).toEqual(['r']);       // solo la actividad
+    expect(res.times.get('r')).toEqual(s('r', 8, 9));
+  });
+
+  test('actividad inexistente o días sin la actividad: motivo, no excepción', () => {
+    expect(resolverEstirarGlobal([], 'nope', 9, 12, codec, 7, 22).valido).toBe(false);
   });
 });
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { db, newId } from '../lib/db';
+  import { parseTime, formatTime } from '../lib/stores';
   import type { Activity, Category, ActivityStep } from '../lib/types';
   import { X, Trash2, CheckCircle, Plus, CheckSquare, Square, ListChecks, Sparkles, Zap, Calendar, ImageIcon, Link2, RefreshCw } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
@@ -344,6 +345,98 @@
     return null;
   }
 
+  /**
+   * Plan de escritura del modal: growing es un GESTO, no un error.
+   *
+   * El reporte: "quiero aumentar un bloque desde la pestaña de configuración
+   * con el espacio disponible como en el deslizable". El modal rechazaba con
+   * "Ya existe X" mientras el asa topaba y empujaba en cadena. Ahora:
+   *
+   *  - CRECE → se resuelve con la MISMA matemática del asa
+   *    (resolverEstirarGlobal / resolveResizeDay): empuja a quien choca, y si
+   *    el día está apretado crece solo hasta donde hay lugar (nunca se rechaza).
+   *  - MOVER o ENCOGER → el choque se sigue rechazando como antes: empujar a
+   *    los vecinos al mover el bloque es otra decisión, y esa es del deslizable.
+   *  - CREAR (id === null) → sin "antes" no hay crecimiento que medir: valida.
+   */
+  interface PlanEstirar {
+    /** No entra: se avisa y no se escribe nada. */
+    rechazo?: { name: string; dia: string; rango: string };
+    /** id → horario final (la actividad estirada MÁS los vecinos empujados). */
+    times?: Map<string, { start: number; end: number }>;
+    /** Fin efectivo tras acotar por la capacidad. */
+    fin?: number;
+    /** El deseo no entró entero: topó con el día más apretado. */
+    toco?: boolean;
+    /** Vecines que se mueven, para el aviso. */
+    movidos?: { id: string; nombre: string; despues: { start: number; end: number } }[];
+  }
+
+  async function planEstirar(nueva: Activity): Promise<PlanEstirar | null> {
+    if (id === null) return null; // crear: no hay "antes" con qué comparar
+    const scopeDia = targetDay !== null && saveScope === 'day';
+    const CODEC = { parse: parseTime, format: formatTime };
+    const dur = (a: string, b: string) => (parseTime(b) - parseTime(a)) * 60;
+
+    // El "antes": la fila del override si el alcance es un día (el override ES
+    // ese día), si no la de la plantilla.
+    let antes: Activity | null = null;
+    if (scopeDia) {
+      const ov = await db.dayOverrides.get(targetDay!);
+      antes = ov?.activities?.find(a => a.id === id) ?? await db.activities.get(id);
+    } else {
+      antes = await db.activities.get(id);
+    }
+    if (!antes) return null;
+
+    if (dur(nueva.startTime, nueva.endTime) <= dur(antes.startTime, antes.endTime)) {
+      const choque = await buscarChoque(nueva); // mover/encoger: valida como antes
+      return choque ? { rechazo: choque } : null;
+    }
+
+    const { resolverEstirarGlobal, resolveResizeDay, horarioEfectivoDia } = await import('../lib/cascade');
+    // El borde fijo es el que el usuario NO tocó: si movió el inicio, el fin
+    // queda anclado y la cadena sube (como el asa de arriba).
+    const lado = nueva.endTime === antes.endTime ? 'arriba' : 'abajo';
+
+    if (scopeDia) {
+      // Un solo día (override ⚡): la matemática del deslizable de la vista Día.
+      const override = await db.dayOverrides.get(targetDay!);
+      const plantilla = await db.activities.toArray();
+      const vigente = horarioEfectivoDia(plantilla, override, targetDay!, id);
+      const slots = vigente.map(a => ({ id: a.id!, start: parseTime(a.startTime), end: parseTime(a.endTime) }));
+      const deseado = lado === 'abajo' ? parseTime(nueva.endTime) : parseTime(nueva.startTime);
+      const res = resolveResizeDay(slots, id, lado, deseado, settings.startHour, settings.endHour);
+      if (!res.valido) return { rechazo: { name: antes.name, dia: '', rango: res.motivo } };
+      const times = new Map<string, { start: number; end: number }>();
+      for (const sl of res.slots) times.set(sl.id, { start: sl.start, end: sl.end });
+      times.set(id, { start: res.movido.start, end: res.movido.end });
+      const movidos = res.slots
+        .filter(sl => sl.id !== id)
+        .filter(sl => {
+          const a = vigente.find(v => v.id === sl.id);
+          return !!a && (parseTime(a.startTime) !== sl.start || parseTime(a.endTime) !== sl.end);
+        })
+        .map(sl => ({ id: sl.id, nombre: vigente.find(v => v.id === sl.id)?.name ?? sl.id, despues: { start: sl.start, end: sl.end } }));
+      const finEfectivo = res.movido.end;
+      return {
+        times,
+        fin: finEfectivo,
+        toco: Math.abs(finEfectivo - deseado) > 1e-6 && lado === 'abajo',
+        movidos
+      };
+    }
+
+    // Plantilla semanal: la duración es GLOBAL y el tope es el día más apretado.
+    const plantilla = await db.activities.toArray();
+    const res = resolverEstirarGlobal(
+      plantilla, id, parseTime(nueva.startTime), parseTime(nueva.endTime),
+      CODEC, settings.startHour, settings.endHour, lado
+    );
+    if (!res.valido) return { rechazo: { name: antes.name, dia: '', rango: res.motivo } };
+    return { times: res.times, fin: res.fin, toco: res.toco, movidos: res.movidos };
+  }
+
   async function save() {
     try {
       if (!categoryId) {
@@ -363,10 +456,11 @@
         updatedAt: Date.now()
       };
 
-      // ⛔ Choque de horarios: crear sobre una existente no está permitido.
-      const choque = await buscarChoque(activity);
-      if (choque) {
-        toastErr(tNow('toast.choca', choque));
+      // Crecer usa el espacio disponible (como el asa). Mover o encoger
+      // siguen validando el choque de antes.
+      const plan = await planEstirar(activity);
+      if (plan?.rechazo) {
+        toastErr(tNow('toast.choca', plan.rechazo));
         return;
       }
 
@@ -395,6 +489,14 @@
           } else {
             overrideActs.push(activity);
           }
+          // Estirado con empuje: los vecinos del día se van a la hora resuelta
+          // (el override se guarda entero, así que alcanza con escribirlos).
+          if (plan?.times) {
+            overrideActs = overrideActs.map(a => {
+              const t = plan.times!.get(a.id!);
+              return t ? { ...a, startTime: formatTime(t.start), endTime: formatTime(t.end) } : a;
+            });
+          }
         } else {
           // New activity: assign a temporary ID
           activity.id = newId();
@@ -406,6 +508,23 @@
           activities: overrideActs,
           updatedAt: Date.now()
         });
+      } else if (plan?.times && id !== null) {
+        // ESTIRADO CON EMPUJE en la plantilla: la actividad editada MÁS los
+        // vecinos movidos entran en UN commit (transacción atómica + un solo
+        // paso de deshacer + updatedAt fresco en cada fila). Escrituras sueltas
+        // dejarían la semana a medio camino si algo fallara en el medio.
+        const acts: Activity[] = [];
+        for (const [actId, slot] of plan.times) {
+          if (actId === id) {
+            acts.push({ ...activity, id, startTime: formatTime(slot.start), endTime: formatTime(slot.end) });
+            continue;
+          }
+          const before = await db.activities.get(actId);
+          if (!before) continue;
+          acts.push({ ...before, startTime: formatTime(slot.start), endTime: formatTime(slot.end) });
+        }
+        const { commitCambios } = await import('../lib/commit');
+        await commitCambios({ label: `${tNow('modal.stretched')} — ${activity.name}`, acts });
       } else {
         // Save to master db.activities (permanent)
         if (id !== null) {
@@ -420,7 +539,21 @@
         }
       }
 
-      toastOk(id !== null ? tNow('toast.saved') : tNow('toast.created'));
+      if (plan?.times && plan.fin !== undefined) {
+        // El aviso dice la verdad: hasta dónde llegó y a qué hora se movió cada
+        // vecino. Sin esto el usuario ve bloques corridos sin explicación.
+        const fin = formatTime(plan.fin);
+        const movidos = (plan.movidos ?? []).map(m => `${m.nombre} ${format12h(formatTime(m.despues.start))}`).join(', ');
+        toastOk(
+          plan.toco
+            ? tNow('modal.grewCapped', { name: activity.name, fin: format12h(fin) })
+            : movidos
+              ? tNow('modal.grewPushed', { name: activity.name, fin: format12h(fin), movidos })
+              : tNow('modal.grewTo', { name: activity.name, fin: format12h(fin) })
+        );
+      } else {
+        toastOk(id !== null ? tNow('toast.saved') : tNow('toast.created'));
+      }
       onClose();
     } catch (error: any) {
       console.error('Failed to save activity:', error);

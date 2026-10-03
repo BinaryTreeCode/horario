@@ -904,6 +904,90 @@ export function barridoRetiro(
   return dias.slice(0, days.length - 1);
 }
 
+/** Resultado de estirar desde el modal: qué queda, qué se movió y si topó. */
+export interface EstirarResultado {
+  /** Horario final a escribir: la actividad estirada MÁS los vecinos empujados. */
+  times: Map<string, Slot>;
+  /** Inicio y fin EFECTIVOS (ya acotados por la capacidad del día más apretado). */
+  inicio: number;
+  fin: number;
+  /** true = el deseo no entró entero: topó con la capacidad. */
+  toco: boolean;
+  /** Vecinos que se mueven, para poder avisarle al usuario. */
+  movidos: { id: string; nombre: string; antes: Slot; despues: Slot }[];
+  valido: boolean;
+  motivo: string;
+}
+
+/**
+ * ESTIRAR desde un editor (el modal) con el espacio disponible, IGUAL que el
+ * gesto del asa. El reporte: "cuando quiero aumentar un bloque desde la
+ * pestaña de configuración con el espacio disponible como en el deslizable"
+ * — el modal rechazaba con "Ya existe X" mientras el deslizable topaba y
+ * empujaba en cadena.
+ *
+ * No es una matemática nueva: es la del estirar vertical, con el puntero
+ * reemplazado por un par (inicio, fin) deseado. El deseo se acota por la
+ * capacidad GLOBAL (regla del usuario: estirar SIEMPRE topa, nunca se
+ * rechaza) y después propaga la pared por la semana.
+ *
+ * `lado` = el borde FIJO: 'abajo' ancla el inicio (el usuario movió el fin),
+ * 'arriba' ancla el fin (movió el inicio). Si el deseo NO crece, no empuja a
+ * nadie: devuelve solo la actividad, porque en ese caso el choque lo valida el
+ * caller (mover o encoger nunca reacomoda a los vecinos).
+ */
+export function resolverEstirarGlobal(
+  actividades: Activity[],
+  actId: string,
+  inicio: number,
+  fin: number,
+  codec: TimeCodec,
+  startHour = 0,
+  endHour = 24,
+  lado: 'arriba' | 'abajo' = 'abajo'
+): EstirarResultado {
+  const act = actividades.find(a => a.id === actId);
+  const vacio = (motivo: string): EstirarResultado => ({
+    times: new Map(), inicio, fin, toco: false, movidos: [], valido: false, motivo
+  });
+  if (!act) return vacio('\u26d4 No se encontr\u00f3 la actividad');
+
+  const durActual = toMin(codec.parse(act.endTime) - codec.parse(act.startTime));
+  const durDeseo = toMin(fin - inicio);
+  const solo: Slot = { id: actId, start: inicio, end: fin };
+  // Sin crecimiento no hay nada que empujar: el caller decide si el choque vale.
+  if (durDeseo <= durActual) {
+    return { times: new Map([[actId, solo]]), inicio, fin, toco: false, movidos: [], valido: true, motivo: '' };
+  }
+
+  const cap = capacidadResizeWeekly(actividades, actId, lado, codec, startHour, endHour);
+  const durEfectiva = Math.min(durDeseo, durActual + cap);
+  const toco = durEfectiva < durDeseo;
+  const ini = lado === 'abajo' ? inicio : fin - durEfectiva / 60;
+  const finE = ini + durEfectiva / 60;
+
+  // Misma llamada que el estirar de la Semana (limite inferior 0: hay bloques
+  // que ya viven antes del inicio configurado y no son un desborde).
+  const sem = propagateWeekly(
+    actividades, actId, ini, endHour, codec, act.daysOfWeek,
+    durEfectiva / 60, 0, true, undefined, lado
+  );
+  if (!sem.valido) return vacio(sem.motivo);
+  sem.times.set(actId, { id: actId, start: ini, end: finE });
+
+  const movidos: EstirarResultado['movidos'] = [];
+  for (const [id, slot] of sem.times) {
+    if (id === actId) continue;
+    const a = actividades.find(x => x.id === id);
+    if (!a) continue;
+    const antes = { id, start: codec.parse(a.startTime), end: codec.parse(a.endTime) };
+    if (sameSlot(antes, slot)) continue;
+    movidos.push({ id, nombre: a.name, antes, despues: slot });
+  }
+
+  return { times: sem.times, inicio: ini, fin: finE, toco, movidos, valido: true, motivo: '' };
+}
+
 /** Resultado de ganar varios días con un solo barrido. */
 export interface GanarDiasResolution {
   /** Horario final de cada día ganado (incluye la actividad que gana). */

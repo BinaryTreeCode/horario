@@ -123,6 +123,10 @@ const es: Catalogo = {
 
   // ── Toasts ──
   'toast.saved': 'Actividad guardada ✓',
+  'modal.stretched': 'Estirar',
+  'modal.grewTo': '{name} ahora termina {fin}',
+  'modal.grewPushed': '{name} ahora termina {fin} · se movieron: {movidos}',
+  'modal.grewCapped': '{name} creció hasta donde había lugar: {fin}',
   'toast.created': 'Actividad creada ✓',
   'toast.deleted': 'Actividad eliminada',
   'toast.deletedNamed': 'Eliminada: {name}',
@@ -406,6 +410,10 @@ const en: Catalogo = {
   'confirm.close': 'Dismiss notice',
 
   'toast.saved': 'Activity saved ✓',
+  'modal.stretched': 'Stretch',
+  'modal.grewTo': '{name} now ends at {fin}',
+  'modal.grewPushed': '{name} now ends at {fin} · moved: {movidos}',
+  'modal.grewCapped': '{name} grew as far as there was room: {fin}',
   'toast.created': 'Activity created ✓',
   'toast.deleted': 'Activity deleted',
   'toast.deletedNamed': 'Deleted: {name}',
