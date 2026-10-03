@@ -3,7 +3,7 @@
   import { initDB } from "../lib/db";
   import { iniciarIdioma } from "../lib/i18n";
   import { iniciarPrivacidad } from "../lib/privacy";
-  import { installSyncListeners, restorePushPause } from "../lib/sync";
+  import { installSyncListeners, restorePushPause, arrancarSync } from "../lib/sync";
 
   // Single entry point for initialization
   if (typeof window !== "undefined") {
@@ -16,6 +16,11 @@
       .then(() => installSyncListeners())
       .then(() => iniciarIdioma()) // preferencia de idioma tras abrir la BD
       .then(() => iniciarPrivacidad()) // modo privacidad recordado entre sesiones
+      // La cookie de sesión vive 30 días: casi ninguna sesión pasa por el login
+      // interactivo, así que el motor de nube solo arranca aquí. Sin esto el
+      // estado se quedaba en 'local' y ningún cambio local llegaba a la nube
+      // entre sesiones (el push solo ocurría al botón de Ajustes).
+      .then(() => arrancarSync())
       .catch(console.error);
   }
 </script>

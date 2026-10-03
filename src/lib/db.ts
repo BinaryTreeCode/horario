@@ -179,6 +179,65 @@ export function now(): number {
   return Date.now();
 }
 
+/**
+ * Definición del horario de ejemplo de una instalación nueva (datos puros: la
+ * fila se arma en initializeDefaults con updatedAt 0).
+ *
+ * ID FIJO, no newId(): es lo que hace que dos dispositivos converjan. La
+ * semilla no viaja a la nube (updatedAt 0), así que cada uno tiene la suya en
+ * local; si además el usuario edita "Trabajo" en el móvil y en la tablet, con
+ * ids distintos la nube guardaría dos filas homónimas que nunca se reconcilian
+ * y ambos horarios dependerían de cuál dispositivo sincronizó último. Con id
+ * fijo es la MISMA fila y decide el LWW.
+ */
+export interface SemillaAct {
+  id: string;
+  categoryId: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  daysOfWeek: number[];
+}
+
+const TODOS = [0, 1, 2, 3, 4, 5, 6];
+const LUNES_A_VIERNES = [1, 2, 3, 4, 5];
+
+export const ACTIVIDADES_SEMILLA: SemillaAct[] = [
+  { id: 'seed-rutina-matutina', categoryId: 'rutina', name: 'Rutina matutina', startTime: '07:00', endTime: '08:00', daysOfWeek: TODOS },
+  { id: 'seed-desayuno', categoryId: 'comer', name: 'Desayuno', startTime: '08:00', endTime: '08:30', daysOfWeek: TODOS },
+  { id: 'seed-trabajo', categoryId: 'trabajar', name: 'Trabajo', startTime: '09:00', endTime: '13:00', daysOfWeek: LUNES_A_VIERNES },
+  { id: 'seed-almuerzo', categoryId: 'comer', name: 'Almuerzo', startTime: '13:00', endTime: '14:00', daysOfWeek: TODOS },
+  { id: 'seed-aseo-personal', categoryId: 'aseo', name: 'Aseo personal', startTime: '22:00', endTime: '22:30', daysOfWeek: TODOS },
+  // Actividad de 15 minutos a propósito: es el caso corto que hace que la
+  // zona interactiva de un bloque baje de 44px, y sin una semilla así el
+  // guard de accesibilidad no tiene ningún caso que pueda violar la regla
+  // (la más corta del resto dura 30 min y nunca baja de 44px).
+  { id: 'seed-tomar-sol', categoryId: 'rutina', name: 'Tomar sol', startTime: '17:30', endTime: '17:45', daysOfWeek: TODOS },
+];
+
+/**
+ * Filas que se escriben de verdad en una base nueva. El `updatedAt: 0` NO es
+ * opcional: `Activity` lo exige (SyncFields) y toda la app lo lee — ordenar la
+ * rejilla, el LWW del pull, el push incremental. Una fila semilla sin él
+ * rompe el orden de la columna (NaN en las comparaciones) sin que ningún tipo
+ * lo advierta.
+ */
+export function filasSemilla(): Activity[] {
+  return ACTIVIDADES_SEMILLA.map(s => ({
+    id: s.id,
+    categoryId: s.categoryId,
+    name: s.name,
+    startTime: s.startTime,
+    endTime: s.endTime,
+    daysOfWeek: [...s.daysOfWeek],
+    description: undefined,
+    image: undefined,
+    steps: undefined,
+    updatedAt: 0,
+    deletedAt: undefined,
+  }));
+}
+
 let isInitialized = false;
 
 // Solicita persistencia de almacenamiento al navegador
@@ -291,34 +350,9 @@ async function initializeDefaults() {
   // Actividades comunes por defecto: una instalación nueva nunca arranca
   // vacía — el usuario ve un día armado de ejemplo que puede editar/borrar.
   // updatedAt 0 (igual que las categorías iniciales): datos semilla, no
-  // mutaciones del usuario — el LWW no debe tratarlos como frescos.
-  const seed = (name: string, categoryId: string, startTime: string, endTime: string, daysOfWeek: number[]): Activity => ({
-    id: newId(),
-    categoryId,
-    name,
-    description: undefined,
-    image: undefined,
-    startTime,
-    endTime,
-    daysOfWeek,
-    steps: undefined,
-    updatedAt: 0,
-    deletedAt: undefined
-  });
-  const TODOS = [0, 1, 2, 3, 4, 5, 6];
-  const LUNES_A_VIERNES = [1, 2, 3, 4, 5];
-  await db.activities.bulkAdd([
-    seed('Rutina matutina', 'rutina', '07:00', '08:00', TODOS),
-    seed('Desayuno', 'comer', '08:00', '08:30', TODOS),
-    seed('Trabajo', 'trabajar', '09:00', '13:00', LUNES_A_VIERNES),
-    seed('Almuerzo', 'comer', '13:00', '14:00', TODOS),
-    seed('Aseo personal', 'aseo', '22:00', '22:30', TODOS),
-    // Actividad de 15 minutos a propósito: es el caso corto que hace que la
-    // zona interactiva de un bloque baje de 44px, y sin una semilla así el
-    // guard de accesibilidad no tiene ningún caso que pueda violar la regla
-    // (la más corta del resto dura 30 min y nunca baja de 44px).
-    seed('Tomar sol', 'rutina', '17:30', '17:45', TODOS)
-  ]);
+  // mutaciones del usuario — el LWW no debe tratarlos como frescos, y por eso
+  // tampoco viajan a la nube (ver esSemilla en sync.ts).
+  await db.activities.bulkAdd(filasSemilla());
 }
 
 export async function initDB() {

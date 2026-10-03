@@ -569,7 +569,7 @@
           <div class="sync-status-row">
             <span class="sync-dot sync-{syncStatus}" aria-hidden="true"></span>
             <span class="sync-status-text">
-              {#if syncStatus === 'synced'}{$t('settings.synced')}{:else if syncStatus === 'syncing'}{$t('settings.syncing')}{:else if syncStatus === 'error'}{$t('settings.syncError')}{:else if syncStatus === 'offline'}{$t('settings.offline')}{:else}{$t('settings.localOnly')}{/if}
+              {#if syncStatus === 'synced'}{$t('settings.synced')}{:else if syncStatus === 'syncing'}{$t('settings.syncing')}{:else if syncStatus === 'error'}{$t('settings.syncError')}{:else if syncStatus === 'offline'}{$t('settings.offline')}{:else if pushPausado}{$t('settings.cloudPausedShort')}{:else}{$t('settings.cloudConnecting')}{/if}
             </span>
             <button class="btn-sync-refresh" onclick={handleManualSync} title={$t('settings.syncNow')} aria-label={$t('settings.syncNow')} disabled={syncStatus === 'syncing'}>
               <RefreshCw size={14} />
@@ -579,6 +579,7 @@
             </button>
           </div>
           {#if syncMessage}<p class="sync-hint">{syncMessage}</p>{/if}
+          <p class="sync-hint sync-hint-nube">{$t('settings.cloudVsFile')}</p>
         {:else}
           <p class="sync-hint">{$t('settings.loginPrompt')}</p>
           {#if syncMessage}<p class="sync-hint sync-hint-auth">{syncMessage}</p>{/if}
@@ -1461,6 +1462,11 @@
   /* Aviso informativo tras un registro ambiguo (respuesta 200 uniforme). */
   .sync-hint-auth {
     color: var(--color-green-dark, #2f6b3f);
+  }
+
+  /* La línea que separa "nube" de "archivo": no es decorativa, es la que
+     evita que el usuario piense que descargar un archivo es respaldarse. */
+  .sync-hint-nube {
     background: rgba(76, 175, 120, 0.1);
     border: 1px solid rgba(76, 175, 120, 0.28);
     border-radius: 8px;

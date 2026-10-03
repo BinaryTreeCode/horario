@@ -1,4 +1,5 @@
 import { db, now } from './db';
+import type { Table } from 'dexie';
 import type { Activity, Category, AppSettings, DayOverride, SyncState, SyncStatus } from './types';
 import { cifrarCampo, descifrarCampo, esCifrado, tieneClave } from './crypto';
 import { esDataUrlImagen, subirABlob } from './routineImages';
@@ -83,6 +84,31 @@ let lastError: string | undefined;
 let lastSyncAt: number | undefined;
 const listeners = new Set<Listener>();
 
+// ── Sesión: la cookie es la fuente de verdad, no el estado local ─────────────
+// La cookie vive 30 días, así que la mayoría de las sesiones NO pasan por el
+// login interactivo: si el motor no la comprueba al abrir la app se queda en
+// 'local' para siempre. Con eso los hooks de Dexie descartaban cada cambio
+// (`scheduleSync` retornaba temprano), los listeners de online/visibilidad no
+// hacían nada y el push solo ocurría al pulsar "Sincronizar ahora" en Ajustes.
+// Traducido: la nube no sincronizaba entre dispositivos entre sesiones.
+let sesionActiva = false;
+
+/** ¿Hay sesión cookie viva? La resuelve arrancarSync al abrir la app. */
+export function tieneSesion(): boolean {
+  return sesionActiva;
+}
+
+// El pull ESCRIBE filas y esas escrituras disparan los hooks de Dexie. Sin este
+// freno, el pull programaba un push que volvía a escribir, que programaba otro
+// pull… un ciclo de sincronización cada 3 s para siempre, en cada dispositivo
+// con sesión. Solo se apaga durante la escritura del pull (ver pullChanges).
+let escribiendoNube = false;
+
+/** ¿Hay una escritura de red en curso (los hooks no deben Encadenar) */
+function enEscrituraDeNube(): boolean {
+  return escribiendoNube;
+}
+
 // ── Pausa de push tras importación ──────────────────────────────────────────
 // Al importar un respaldo, el usuario reemplaza TODOS los datos locales. Subir
 // eso a la nube por defecto SOBREESCRIBIRÍA el respaldo remoto con LWW (los
@@ -109,7 +135,10 @@ export async function pausePushAfterImport(): Promise<void> {
   await persistState();
   // persistState escribe la fila completa; marcar la pausa en el campo dedicado.
   await db.syncState.put({ ...(await db.syncState.get('1')), id: '1', pendingPushPaused: true });
-  setStatus('local');
+  // NO se toca el estado: poner 'local' aquí apagaba los triggers de todo el
+  // motor (scheduleSync los ignora) y, con cookie viva, la nube se quedaba muda
+  // para siempre tras importar. El push ya está bloqueado por `pushPaused`;
+  // el pull automático sigue vivo, que es lo que el usuario pidió.
 }
 
 /** Reactiva el push y lanza un sync completo (sube los datos importados). */
@@ -170,6 +199,53 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error((data as any)?.error ?? `HTTP ${res.status}`);
   }
   return data as T;
+}
+
+// ── Qué viaja y hasta dónde (puros: el motor de sync no se puede testear sin
+//    IndexedDB, pero estas dos decisiones sí, y son las que rompían la nube) ──
+
+/**
+ * Un registro con updatedAt 0 (o ausente) es SEMILLA: lo puso la app al abrir
+ * una base nueva (db.initializeDefaults), no el usuario — el propio código lo
+ * anota como "el LWW no debe tratarlos como frescos". El filtro por cursor ya
+ * la dejaba fuera; esto lo vuelve un contrato explícito (y blinda el caso de
+ * una fila vieja sin updatedAt, que el where().index no garantiza).
+ */
+export function esSemilla(row: { updatedAt: number }): boolean {
+  return !(row.updatedAt > 0);
+}
+
+/** Filas que entran en un push: posteriores al cursor y que no son semilla. */
+export function seleccionables<T extends { updatedAt: number }>(rows: T[], cursor: number): T[] {
+  return rows.filter(r => r.updatedAt > cursor && !esSemilla(r));
+}
+
+/**
+ * Cursor del push tras un envío. NO puede ser el reloj del servidor: si va
+ * adelantado a los updatedAt locales, todo lo creado entre ambos relojes queda
+ * fuera del push siguiente y no vuelve a viajar nunca. Se queda con el mayor
+ * updatedAt realmente enviado — reenviar un lote viejo es inofensivo (el LWW
+ * del servidor solo acepta lo más nuevo), perderlo no.
+ */
+export function cursorPushTras(
+  serverTime: number,
+  enviados: { updatedAt: number }[],
+  cursorPrevio: number
+): number {
+  if (enviados.length === 0) return cursorPrevio; // nada enviado: no avanzar
+  const mayor = enviados.reduce((m, r) => Math.max(m, r.updatedAt), 0);
+  return Math.min(serverTime, Math.max(mayor, cursorPrevio));
+}
+
+/**
+ * Cursor del pull. El servidor fecha el lote con SU reloj y el SELECT filtra
+ * `updatedAt > since`: un cambio remoto escrito justo en la frontera
+ * (updatedAt <= serverTime, pero que el SELECT aún no veía) se perdía para
+ * siempre. Retroceder unos segundos solapa lecturas consecutivas; reaplicar
+ * filas viejas no hace daño (el LWW local solo entra si es más nuevo).
+ */
+export function cursorPull(serverTime: number, solapeMs = 5000): number {
+  return Math.max(0, serverTime - solapeMs);
 }
 
 // ── Push: enviar cambios locales (LWW en el servidor) ────────────────────────
@@ -233,20 +309,32 @@ export async function pushChanges(full = false): Promise<number> {
 
   await migrarImagenesABlob();
 
+  // Lectura por tabla + filtro por cursor y semilla (contrato explícito: lo
+  // que puso la app no es del usuario y no viaja).
   const [activities, categories, settings, dayOverrides] = await Promise.all([
-    db.activities.where('updatedAt').above(cursor).toArray(),
-    db.categories.where('updatedAt').above(cursor).toArray(),
-    db.settings.where('updatedAt').above(cursor).toArray(),
-    db.dayOverrides.where('updatedAt').above(cursor).toArray(),
+    db.activities.toArray(),
+    db.categories.toArray(),
+    db.settings.toArray(),
+    db.dayOverrides.toArray(),
   ]);
+  const actsSuben = seleccionables(activities, cursor);
+  const catsSuben = seleccionables(categories, cursor);
+  const setsSuben = seleccionables(settings, cursor);
+  const ovsSuben = seleccionables(dayOverrides, cursor);
 
   // E2E: cifrar los campos sensibles ANTES de salir del dispositivo. Solo si
   // hay clave en memoria (login reciente). Con sesión restaurada por cookie,
   // los datos viajan planos legacy hasta el próximo login con password.
-  const actsCifradas = await Promise.all(activities.map(a => cifrarActividad(a)));
-  const ovsCifrados = await Promise.all(dayOverrides.map(o => cifrarOverride(o)));
-  const payload = { activities: actsCifradas, categories, settings, dayOverrides: ovsCifrados };
-  const total = activities.length + categories.length + settings.length + dayOverrides.length;
+  const actsCifradas = await Promise.all(actsSuben.map(a => cifrarActividad(a)));
+  const ovsCifrados = await Promise.all(ovsSuben.map(o => cifrarOverride(o)));
+  const payload = {
+    activities: actsCifradas,
+    categories: catsSuben,
+    settings: setsSuben,
+    dayOverrides: ovsCifrados,
+  };
+  const enviados = [...actsCifradas, ...catsSuben, ...setsSuben, ...ovsCifrados];
+  const total = enviados.length;
   if (total === 0) return 0;
 
   pendingCount += total;
@@ -261,7 +349,11 @@ export async function pushChanges(full = false): Promise<number> {
     // MERGE: conservar los demás campos de la fila (persistState hace lo mismo
     // en la dirección contraria — los cursores nunca se pierden por un put parcial).
     const prev = await db.syncState.get('1');
-    await db.syncState.put({ ...prev, id: '1', lastPushAt: res.serverTime });
+    await db.syncState.put({
+      ...prev,
+      id: '1',
+      lastPushAt: cursorPushTras(res.serverTime, enviados, cursor),
+    });
     setStatus(pendingCount > 0 ? 'syncing' : 'synced');
     return res.pushed;
   } catch (err: any) {
@@ -282,6 +374,10 @@ export async function pullChanges(): Promise<{ applied: number }> {
   const since = state.lastServerPullAt ?? 0;
 
   setStatus('syncing');
+  // Freno de hooks: todo lo que se escriba abajo (incluido el syncState) es
+  // una RESTITUCIÓN de lo que ya está en la nube. Sin este bloqueo, cada fila
+  // aplicada programaba un push que volvía a escribir y a programar otro pull.
+  escribiendoNube = true;
   try {
     const res = await api<PullResponse>(`/api/sync?since=${since}`);
 
@@ -318,7 +414,10 @@ export async function pullChanges(): Promise<{ applied: number }> {
           applied++;
         }
       }
-      await db.syncState.put({ ...state, id: '1', lastServerPullAt: res.serverTime, lastPullAt: Date.now() });
+      // El cursor va con holgura hacia atrás (cursorPull): solapar lecturas
+      // permite que un cambio remoto escrito justo en la frontera llegue en el
+      // siguiente pull en vez de perderse entre los relojes de los dos equipos.
+      await db.syncState.put({ ...state, id: '1', lastServerPullAt: cursorPull(res.serverTime), lastPullAt: Date.now() });
     });
 
     lastSyncAt = Date.now();
@@ -327,6 +426,8 @@ export async function pullChanges(): Promise<{ applied: number }> {
   } catch (err: any) {
     setStatus(navigator.onLine ? 'error' : 'offline', err?.message ?? 'Error de red');
     throw err;
+  } finally {
+    escribiendoNube = false;
   }
 }
 
@@ -361,6 +462,49 @@ export async function syncNow(full = false): Promise<void> {
   }
 }
 
+// ── Arranque con sesión restaurada ────────────────────────────────────────────
+
+/**
+ * Única vía para que la nube funcione entre sesiones. Al abrir la app NO se
+ * pasa por el login interactivo (la cookie dura 30 días), así que esta función
+ * es la que resuelve si hay sesión y, si la hay, sincroniza de verdad.
+ *
+ * Orden: pull primero y push después. Al revés, el dispositivo nuevo subía su
+ * horario semilla recién creado (updatedAt de ahora) y por LWW pisaba el
+ * horario real que ya estaba en la nube — que es justo lo contrario de
+ * "sincronizar entre dispositivos": el otro dispositivo perdía su semana.
+ *
+ * Los hooks están instalados antes (installSyncListeners) y, como aún no había
+ * sesión, ninguno encoló nada: este es el primer y único sync del arranque.
+ */
+export async function arrancarSync(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  let haySesion = false;
+  try {
+    haySesion = await isLoggedIn();
+  } catch {
+    haySesion = false; // fetch falló (sin red, servidor caído): modo local
+  }
+  if (!haySesion) {
+    setStatus('local');
+    return;
+  }
+  sesionActiva = true;
+  if (!navigator.onLine) {
+    setStatus('offline');
+    return; // el pull al volver de la red lo dispara el listener 'online'
+  }
+  try {
+    setStatus('syncing');
+    await pullChanges();
+    // Push incremental (no full): solo lo que el usuario tocó en este
+    // dispositivo. La semilla tiene updatedAt 0 y se queda en casa.
+    if (!pushPaused) await pushChanges(false);
+  } catch {
+    /* el estado ya quedó en error/offline; se reintenta con el listener */
+  }
+}
+
 /** ¿Hay sesión activa? (la cookie httpOnly responde por nosotros) */
 export async function isLoggedIn(): Promise<boolean> {
   try {
@@ -380,8 +524,9 @@ let listenersInstalled = false;
 /** Marca que hubo cambios locales y agenda un sync (debounce 3s). */
 export function scheduleSync() {
   if (typeof window === 'undefined') return;
-  if (status === 'local') return; // sin sesión no sincroniza
+  if (!sesionActiva) return; // sin sesión no sincroniza (la cookie aún sin verificar)
   if (pushPaused) return; // tras import: cambios locales NO viajan (petición explícita)
+  if (enEscrituraDeNube()) return; // lo que sube/baja la nube no vuelve a encolar un sync
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     syncNow().catch(() => { /* el estado ya quedó en error/offline */ });
@@ -394,10 +539,10 @@ export function installSyncListeners() {
   listenersInstalled = true;
 
   window.addEventListener('online', () => {
-    if (status !== 'local') syncNow().catch(() => {});
+    if (sesionActiva) syncNow().catch(() => {});
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && status !== 'local') {
+    if (document.visibilityState === 'visible' && sesionActiva) {
       syncNow().catch(() => {});
     }
   });
@@ -411,18 +556,23 @@ export function installSyncListeners() {
 
 /**
  * Se llama tras login: sincronización inicial completa.
- * El primer pull trae todo del servidor (since=0) y el push envía todo lo local:
- * el merge LWW resuelve duplicados por id y gana la versión más nueva.
+ * Pull primero por el mismo motivo que arrancarSync —al revés, el push del
+ * dispositivo recién autenticado pisaría con su semilla el horario real que
+ * ya está en la nube— y después push completo para subir también lo que el
+ * usuario hubiera hecho antes de iniciar sesión.
  */
 export async function initialSyncAfterLogin(): Promise<void> {
+  sesionActiva = true;
   setStatus('syncing');
-  await syncNow(true);
+  await pullChanges();
+  if (!pushPaused) await pushChanges(true);
 }
 
 /** Se llama tras logout: la app vuelve a modo solo-local. La pausa de push
  *  persiste: si el usuario importó sin subir, al volver a entrar tampoco debe
  *  subir (la decisión fue sobre esos datos, no sobre la sesión). */
 export function resetSyncAfterLogout(): void {
+  sesionActiva = false;
   status = 'local';
   pendingCount = 0;
   lastError = undefined;
