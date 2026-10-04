@@ -909,3 +909,81 @@ test('Barrido del asa: una actividad de por medio no impide ganar el día', asyn
     `tras soltar, la Cinta quedó en las columnas ${JSON.stringify(dias)}: el Sábado no se ganó`
   ).toContain(5);
 });
+
+/**
+ * El reporte: "mejora la presentación de imagen para que ocupe al menos el 80%
+ * de la pantalla". El visor pintaba la imagen a su TAMAÑO INTRÍNSECO: la
+ * compresión la deja en 288x512 y eso, en un monitor grande, es un sello de
+ * 138px. Medido: 23% del ancho y 64% del alto del viewport.
+ *
+ * La causa era CSS, no la imagen: `max-width/max-height: 100%` con
+ * `width/height: auto` solo pone un TECHO, nunca agranda. Ahora la caja de la
+ * imagen llena el escenario y `object-fit: contain` decide el tamaño final.
+ */
+test('Visor de imagen: la imagen ocupa al menos el 80% de la pantalla', async ({ page }) => {
+  // Actividad con una imagen de 288x512: exactamente el tamaño que deja la
+  // compresión actual, el caso donde el bug se ve (una imagen ya pequeña no
+  //Reach nunca un 80% si no se agranda).
+  await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 288; c.height = 512;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#e8a'; ctx.fillRect(0, 0, 288, 512);
+    ctx.fillStyle = '#28a'; ctx.fillRect(20, 20, 248, 200);
+    const url = c.toDataURL('image/webp', 0.82);
+
+    const db: IDBDatabase = await new Promise((res, rej) => {
+      const r = indexedDB.open('ScheduleDB');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    await new Promise<void>((res, rej) => {
+      const tx = db.transaction('activities', 'readwrite');
+      tx.objectStore('activities').put({
+        id: 'probe-img', categoryId: 'rutina', name: 'Poster',
+        description: '', image: url, startTime: '07:00', endTime: '08:00',
+        daysOfWeek: [0], steps: [], updatedAt: Date.now(),
+      });
+      tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+    });
+  });
+  await page.reload();
+
+  // La miniatura es un botón HERMANO del bloque (vive fuera a propósito para no
+  // anidar un <button> dentro de otro interactivo, que HTML prohíbe).
+  const miniatura = page.locator('.grid-image-thumb[aria-label*="Poster"]').first();
+  await expect(miniatura, 'la actividad con imagen no muestra su miniatura')
+    .toBeVisible({ timeout: 30_000 });
+  await miniatura.click({ force: true });
+
+  const img = page.locator('.lightbox-img');
+  await expect(img, 'el click en la miniatura no abrió el visor').toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(400);
+
+  const m = await page.evaluate(() => {
+    const el = document.querySelector('.lightbox-img') as HTMLImageElement;
+    const r = el.getBoundingClientRect();
+    // `object-fit: contain` dibuja DENTRO de la caja: lo que se ve es la caja
+    // escalada al aspecto natural, no la caja entera.
+    const escala = Math.min(r.width / el.naturalWidth, r.height / el.naturalHeight);
+    return {
+      vw: window.innerWidth,
+      vh: window.innerHeight,
+      ancho: el.naturalWidth * escala,
+      alto: el.naturalHeight * escala,
+      dentro:
+        r.top >= -1 && r.left >= -1 &&
+        r.bottom <= window.innerHeight + 1 && r.right <= window.innerWidth + 1,
+    };
+  });
+
+  const pctAncho = (m.ancho / m.vw) * 100;
+  const pctAlto = (m.alto / m.vh) * 100;
+  expect(
+    Math.max(pctAncho, pctAlto),
+    `la imagen visible ocupa ${pctAncho.toFixed(0)}% del ancho y ${pctAlto.toFixed(0)}% del alto: ` +
+    `sigue sin agrandarse (${Math.round(m.ancho)}x${Math.round(m.alto)} en ${m.vw}x${m.vh})`
+  ).toBeGreaterThanOrEqual(80);
+
+  // Un 80% que se sale de la pantalla no sirve de nada: tiene que caber entera.
+  expect(m.dentro, 'la imagen se sale de la pantalla al agrandarse').toBe(true);
+});

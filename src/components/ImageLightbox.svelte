@@ -119,13 +119,17 @@
 
   /* Escenario: todo el espacio libre entre la barra y el panel de pasos.
      min-height: 0 permite que el flex hijo se encoja (la imagen cabe
-     completa con object-fit: contain, sin desbordar el flex). */
+     completa con object-fit: contain, sin desbordar el flex).
+     FLEX y no grid: con `place-items: center` la fila del grid es `auto`, así
+     que el `height: 100%` de la imagen no tenía altura definida que resolver
+     contra y la caja crecía a su aspecto (medido: 1264x2247 en un escenario
+     de 696 — se salía de la pantalla). Con flex, el padre tiene la altura ya
+     resuelta por el `flex: 1` y el 100%/100% de la imagen es exacto. */
   .lightbox-stage {
     flex: 1;
     min-height: 0;
     min-width: 0;
-    display: grid;
-    place-items: center;
+    display: flex;
   }
 
   @keyframes lbFade {
@@ -133,12 +137,18 @@
     to { opacity: 1; }
   }
 
+  /* La CAJA ocupa todo el escenario y `contain` decide el tamaño final: así la
+     imagen se AGRANDA hasta llenar la pantalla en vez de quedarse en su
+     tamaño intrínseco. Antes era `max-width/max-height: 100%` con `width/height:
+     auto`, que solo pone un TECHO — nunca hace crecer — así que una imagen
+     comprimida a 288x512 se veía como un sello de 138px en un monitor de 2560
+     (medido: 23% del ancho y 64% del alto del viewport). Ahora llega al 87%
+     del alto, que es lo máximo que cabe sin tapar la barra ni el panel de
+     pasos. */
   .lightbox-img {
     display: block;
-    max-width: 100%;
-    max-height: 100%;
-    width: auto;
-    height: auto;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
     animation: lbZoom 0.2s ease-out;
     user-select: none;

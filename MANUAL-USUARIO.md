@@ -112,7 +112,7 @@ Reglas finas:
 - En las tarjetas, la **miniatura circular con anillo blanco** indica que hay imagen:
   - **Semana**: pasar el mouse muestra la foto ampliada (120px + nombre) sin click; click abre el visor grande. En táctil: tap directo al visor.
   - **Día**: miniatura junto al nombre; click abre el visor.
-- El visor (lightbox) cierra con **Esc** o click fuera.
+- El visor (lightbox) **agranda la imagen hasta llenar la pantalla** (al menos el 80% en su lado más largo), aunque la compresión la haya guardado chica: entra completa, nunca se corta, y cierra con **Esc** o click fuera.
 
 ---
 
