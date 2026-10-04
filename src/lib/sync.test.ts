@@ -54,31 +54,41 @@ describe('seleccionables', () => {
 });
 
 describe('cursorPushTras', () => {
-  it('nunca avanza más allá del reloj del servidor', () => {
-    // Con el código viejo: lastPushAt = serverTime. Si el reloj del servidor va
-    // 10s adelantado, todo lo que el usuario creara en esos 10s quedaba con
-    // updatedAt < cursor y NO volvía a subirse nunca.
-    expect(cursorPushTras(2000, [{ updatedAt: 1900 }], 0)).toBe(1900);
+  it('nunca avanza más allá del reloj del dispositivo', () => {
+    // Las filas locales se sellan con Date.now(): un cursor por delante de ese
+    // reloj empuja al futuro todo lo que el usuario cree después.
+    expect(cursorPushTras([{ updatedAt: 1900 }], 0, 2000)).toBe(1900);
   });
 
   it('se queda en el mayor updatedAt realmente enviado', () => {
     // Reenviar un lote viejo es inofensivo (el LWW del servidor es estricto);
     // saltárselo es pérdida silenciosa. Ante la duda, atrás.
-    expect(cursorPushTras(1000, [{ updatedAt: 300 }, { updatedAt: 700 }], 200)).toBe(700);
+    expect(cursorPushTras([{ updatedAt: 300 }, { updatedAt: 700 }], 200, 1000)).toBe(700);
   });
 
   it('si no se envió nada, el cursor NO avanza (reintenta en el próximo push)', () => {
-    expect(cursorPushTras(9999, [], 400)).toBe(400);
+    expect(cursorPushTras([], 400, 9999)).toBe(400);
   });
 
   it('nunca retrocede por debajo del cursor que ya había', () => {
-    expect(cursorPushTras(1000, [{ updatedAt: 100 }], 800)).toBe(800);
+    expect(cursorPushTras([{ updatedAt: 100 }], 800, 1000)).toBe(800);
   });
 
   it('aguanta un reloj local adelantado (mayor que el del servidor)', () => {
-    // Reloj del móvil 5 min por delante: cursor = serverTime, no mayor, o el
-    // siguiente push se saltaría todo lo que hay entre medias.
-    expect(cursorPushTras(1000, [{ updatedAt: 300000 }], 0)).toBe(1000);
+    // Reloj del móvil 5 min por delante: el cursor se queda en "ahora" y no se
+    // salta nada de lo que se cree en el siguiente minuto.
+    expect(cursorPushTras([{ updatedAt: 300000 }], 0, 300000)).toBe(300000);
+  });
+
+  it('una fila que LLEGÓ del servidor no congela los cambios locales', () => {
+    // El bug que destapó el guard e2e: al arrancar, el pull trae filas
+    // selladas por el reloj del servidor y el push de arranque las reenvía. Con
+    // el servidor un minuto adelantado, "el mayor enviado" era un minuto
+    // FUTURO y todo lo que el usuario creara en esa ventana no volvía a subir
+    // nunca, sin error ni aviso.
+    const ahora = 1_000_000;
+    const filaDelServidor = { updatedAt: ahora + 60_000 };
+    expect(cursorPushTras([filaDelServidor], 0, ahora)).toBe(ahora);
   });
 });
 

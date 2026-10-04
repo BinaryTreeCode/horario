@@ -25,6 +25,32 @@ async function conSesion(page: import('@playwright/test').Page) {
 interface NubeFalsa {
   pushes: any[];
   pulls: number;
+  /** Cambia lo que hay en la nube en caliente (para probar un pull manual). */
+  setRemotas: (filas: any[]) => void;
+}
+
+/* Los textos del menú son i18n y el navegador de los tests puede arrancar en
+   español o en inglés: los guards solo verifican estructura + acción, no un
+   idioma concreto. SIN anclas ^$ a propósito: el botón de subir lleva dentro
+   el badge de pendientes ("Subir a la nube 3"), así que el texto del botón
+   nunca es exactamente la etiqueta y un regex anclado no lo encontraba. */
+const TEXTO_SUBIR = /Subir a la nube|Upload to the cloud/;
+const TEXTO_BAJAR = /Bajar de la nube|Download from the cloud/;
+const TEXTO_NUBE = /nube|cloud/i;
+
+/** Abre el menú de Datos del header (si ya está abierto, no hace nada). */
+async function abrirMenuDatos(page: import('@playwright/test').Page) {
+  const btn = page.locator('.menu-datos-wrap button');
+  await expect(btn).toBeVisible({ timeout: 20_000 });
+  if (await page.locator('.menu-datos').count() === 0) await btn.click();
+  await expect(page.locator('.menu-datos')).toBeVisible({ timeout: 10_000 });
+  // La apertura ANIMA el menú (escala + desplazamiento). Un clic mientras se
+  // mueve calcula el punto contra la caja equivocada: cae dentro del menú pero
+  // fuera del botón, así que el único efecto es cerrar el menú. Sin esto el
+  // guard de "Bajar" fallaba 3 de cada 4 veces sin que hubiera ningún error.
+  await page.locator('.menu-datos').evaluate(el =>
+    Promise.all(el.getAnimations().map(a => a.finished.catch(() => {})))
+  );
 }
 
 /**
@@ -38,8 +64,13 @@ interface NubeFalsa {
  */
 const SKEW_MS = 60_000;
 
-async function conNube(page: import('@playwright/test').Page, remotas: any[] = []): Promise<NubeFalsa> {
-  const estado: NubeFalsa = { pushes: [], pulls: 0 };
+async function conNube(page: import('@playwright/test').Page, iniciales: any[] = []): Promise<NubeFalsa> {
+  const remotas = [...iniciales];
+  const estado: NubeFalsa = {
+    pushes: [],
+    pulls: 0,
+    setRemotas: filas => { remotas.length = 0; remotas.push(...filas); },
+  };
   const serverTime = () => Date.now() + SKEW_MS;
   await page.route('**/api/sync*', async route => {
     const req = route.request();
@@ -76,13 +107,19 @@ async function conNube(page: import('@playwright/test').Page, remotas: any[] = [
 /** Actividad tal como la devuelve el servidor (updatedAt real, no semilla). */
 function remota(nombre: string, startTime = '06:00', endTime = '06:30'): any {
   return {
-    id: 'remota-1',
+    id: 'remota-' + nombre.replace(/\W+/g, '-'),
     categoryId: 'rutina',
     name: nombre,
     startTime,
     endTime,
     daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
-    updatedAt: Date.now(),
+    // Sello del reloj del SERVIDOR, no del dispositivo: es el reloj que ve la
+    // fila en la nube real y, sobre todo, el que usa el cursor del pull. Con el
+    // reloj local la fila quedaba SIEMPRE por debajo del cursor (que va 60s
+    // adelantado por SKEW_MS) y ningún pull posterior podía verla: el guard
+    // "Bajar trae lo del otro" solo pasaba por suerte, cuando el intercambio
+    // de filas ocurría antes del pull de arranque.
+    updatedAt: Date.now() + SKEW_MS,
   };
 }
 
@@ -192,5 +229,56 @@ test.describe('Sincronización entre dispositivos', () => {
     await esperarSemana(page);
     await page.waitForTimeout(4000); // por encima del debounce de 3s
     expect(nube.pushes.length, 'sin sesión no debe empujar nada').toBe(0);
+  });
+
+  test('el menú ofrece subir y bajar, no solo el archivo', async ({ page }) => {
+    // El pedido: "quiero poder subir y bajar de la nube". El menú tenía
+    // únicamente acciones de archivo (Descargar / Restaurar) y la nube solo
+    // se controlaba desde un panel aparte.
+    await esperarSemana(page);
+    await abrirMenuDatos(page);
+    await expect(page.locator('.menu-datos button', { hasText: TEXTO_SUBIR })).toBeVisible();
+    await expect(page.locator('.menu-datos button', { hasText: TEXTO_BAJAR })).toBeVisible();
+    // Y no desaparecen las de archivo: son caminos distintos.
+    await expect(page.locator('.menu-datos button')).toHaveCount(5);
+  });
+
+  test('el botón "Bajar de la nube" trae lo que cambió en el otro dispositivo', async ({ page }) => {
+    const nube = await conNube(page, [remota('Del otro, version vieja')]);
+    await conSesion(page);
+    await page.goto('/');
+    await esperarSemana(page);
+    // El arranque ya bajó la primera fila; ahora la nube recibe OTRA. Si el
+    // botón no hiciera un pull de verdad, esta nunca aparecería.
+    //
+    // Se ESPERA el pull de arranque en vez de adivinar con un timeout fijo: si
+    // el intercambio ocurre antes de que termine, el pull de arranque se
+    // lleva las dos filas y el cursor deja a la nueva por debajo — el guard
+    // fallaba 2 de cada 3 veces por esa carrera, no por el botón.
+    await expect
+      .poll(() => nube.pulls, { timeout: 20_000, message: 'el pull de arranque no ocurrió' })
+      .toBeGreaterThan(0);
+    nube.setRemotas([remota('Del otro, version vieja'), remota('Del otro, version nueva')]);
+
+    await abrirMenuDatos(page);
+    await page.locator('.menu-datos button', { hasText: TEXTO_BAJAR }).click();
+
+    await esperarSemana(page);
+    await expect(
+      page.locator('.activity-item[title="Del otro, version nueva"]').first(),
+      'el botón de bajar no trajo el cambio del otro dispositivo'
+    ).toBeVisible({ timeout: 20_000 });
+  });
+
+  test('sin sesión el menú ofrece entrar, no botones de nube que fallan', async ({ page }) => {
+    await page.unroute('**/api/auth?op=me');
+    await page.reload();
+    await esperarSemana(page);
+    await abrirMenuDatos(page);
+    await expect(page.locator('.menu-datos button', { hasText: TEXTO_SUBIR })).toHaveCount(0);
+    await expect(page.locator('.menu-datos button', { hasText: TEXTO_BAJAR })).toHaveCount(0);
+    // Un botón que lleva a error cada vez que se pulsa es peor que no tenerlo: en
+    // su lugar hay UNO que abre Ajustes para entrar.
+    await expect(page.locator('.menu-datos button', { hasText: TEXTO_NUBE })).toHaveCount(1);
   });
 });

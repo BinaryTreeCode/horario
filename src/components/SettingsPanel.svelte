@@ -1,10 +1,10 @@
 <script lang="ts">
   import { db, descargarRespaldo, exportarRespaldoBinario, estimarRespaldo, exportData, validateImport, importValidatedData, type StatsRespaldo, type ValidationResult } from '../lib/db';
   import { leerRespaldo } from '../lib/backupFile';
-  import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync } from '../lib/sync';
+  import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync, subirAhora, bajarAhora, SIN_SESION } from '../lib/sync';
   import { establecerClave, olvidarClave } from '../lib/crypto';
   import type { SyncStatus } from '../lib/types';
-  import { Cloud, CloudUpload, LogIn, LogOut, RefreshCw, UserPlus } from '@lucide/svelte';
+  import { Cloud, CloudUpload, CloudDownload, LogIn, LogOut, RefreshCw, UserPlus } from '@lucide/svelte';
   import type { Category } from '../lib/types';
   import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck, Languages } from '@lucide/svelte';
   import { idioma, cambiarIdioma, t, IDIOMAS_DISPONIBLES } from '../lib/i18n';
@@ -135,6 +135,41 @@
     } catch (err: any) {
       syncMessage = tNow('settings.syncFail', { msg: err?.message ?? tNow('settings.syncFailGeneric') });
     }
+  }
+
+  /** Subir / bajar a mano desde Ajustes. Mismo camino que el menú del header:
+   *  la orden es del usuario y el resultado se dice con un número. */
+  let nubeOcupada = $state<'subir' | 'bajar' | null>(null);
+
+  async function handleSubir() {
+    if (nubeOcupada) return;
+    nubeOcupada = 'subir';
+    try {
+      const { enviados } = await subirAhora();
+      syncMessage = enviados > 0 ? tNow('cloud.subido', { n: enviados }) : tNow('cloud.subidoNada');
+    } catch (err: any) {
+      syncMessage = tNow('cloud.error', { msg: msgDe(err) });
+    } finally {
+      nubeOcupada = null;
+    }
+  }
+
+  async function handleBajar() {
+    if (nubeOcupada) return;
+    nubeOcupada = 'bajar';
+    try {
+      const { aplicados } = await bajarAhora();
+      syncMessage = aplicados > 0 ? tNow('cloud.bajado', { n: aplicados }) : tNow('cloud.bajadoNada');
+    } catch (err: any) {
+      syncMessage = tNow('cloud.error', { msg: msgDe(err) });
+    } finally {
+      nubeOcupada = null;
+    }
+  }
+
+  /** Sin sesión, el error técnico no le dice nada al usuario: se traduce. */
+  function msgDe(err: any): string {
+    return err?.message === SIN_SESION ? tNow('cloud.sinSesion') : (err?.message ?? tNow('settings.networkError'));
   }
 
   // Cerrar con Esc y atrapar el foco dentro del panel
@@ -576,6 +611,29 @@
             </button>
             <button class="btn-sync-logout" onclick={handleLogout} title={$t('settings.logout')} aria-label={$t('settings.logout')}>
               <LogOut size={14} /> {$t('settings.logoutShort')}
+            </button>
+          </div>
+          <!-- Subir y bajar por separado: el refresco de arriba hace las dos
+               cosas de golpe, pero quien "¿ya llegó lo del otro?" o "no
+               quiero esperar" necesita la orden aislada y ver el número. -->
+          <div class="sync-acciones">
+            <button
+              class="btn btn-secondary sync-accion"
+              onclick={handleSubir}
+              title={$t('cloud.subirTitle')}
+              disabled={nubeOcupada !== null}
+            >
+              <CloudUpload size={16} />
+              <span>{nubeOcupada === 'subir' ? $t('cloud.subiendo') : $t('cloud.subir')}</span>
+            </button>
+            <button
+              class="btn btn-secondary sync-accion"
+              onclick={handleBajar}
+              title={$t('cloud.bajarTitle')}
+              disabled={nubeOcupada !== null}
+            >
+              <CloudDownload size={16} />
+              <span>{nubeOcupada === 'bajar' ? $t('cloud.bajando') : $t('cloud.bajar')}</span>
             </button>
           </div>
           {#if syncMessage}<p class="sync-hint">{syncMessage}</p>{/if}
@@ -1462,6 +1520,31 @@
   /* Aviso informativo tras un registro ambiguo (respuesta 200 uniforme). */
   .sync-hint-auth {
     color: var(--color-green-dark, #2f6b3f);
+  }
+
+  /* Subir y bajar: dos botones a media altura del panel (el panel es aside y
+     ancho 400px, así que van a lo ancho, no en la fila del estado). */
+  .sync-acciones {
+    display: flex;
+    gap: 0.6rem;
+    margin-top: 0.7rem;
+  }
+  .sync-accion {
+    flex: 1;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    font-size: 0.8rem;
+    padding: 0.5rem 0.6rem;
+  }
+  .sync-accion:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+  .sync-accion svg {
+    flex-shrink: 0;
   }
 
   /* La línea que separa "nube" de "archivo": no es decorativa, es la que

@@ -14,9 +14,9 @@
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { undoStack, redoStack } from '../lib/undo';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Download, Upload, Cloud, CloudOff, RefreshCw, Info } from '@lucide/svelte';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Download, Upload, Cloud, CloudOff, CloudUpload, CloudDownload, LogIn, RefreshCw, Info } from '@lucide/svelte';
   import { portal } from '../lib/portal';
-  import { onSyncChange, syncNow } from '../lib/sync';
+  import { onSyncChange, syncNow, subirAhora, bajarAhora, SIN_SESION } from '../lib/sync';
   import { t, tNow, idioma } from '../lib/i18n';
   import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
   import { Eye, EyeOff } from '@lucide/svelte';
@@ -84,11 +84,59 @@
   // Detalle del último sync (pendientes y fecha): el badge era invisible
   // (hallazgo amarillo de la auditoría UX) — ahora muestra punto de estado y
   // el title explica cuándo sincronizó y cuántos cambios quedan por subir.
-  let syncDetail = $state<{ pending: number; lastSyncAt?: number }>({ pending: 0 });
+  let syncDetail = $state<{ pending: number; lastSyncAt?: number; sesion: boolean }>({ pending: 0, sesion: false });
   $effect(() => {
-    const off = onSyncChange((s, d) => { syncStatus = s; syncDetail = { pending: d.pending, lastSyncAt: d.lastSyncAt }; });
+    const off = onSyncChange((s, d) => {
+      syncStatus = s;
+      syncDetail = { pending: d.pending, lastSyncAt: d.lastSyncAt, sesion: d.sesion };
+    });
     return off;
   });
+
+  // ── Nube: subir y bajar a mano ──
+  // El sync automático existe (hooks + arranque) pero es invisible, y para el
+  // "¿ya llegó lo del otro?" hace falta una acción que el usuario dispare y de
+  // la que se entienda el resultado. Estado del botón mientras vuela la orden:
+  // si no, un doble clic dispara dos pushes.
+  let nubeOcupada = $state<'subir' | 'bajar' | null>(null);
+
+  async function subirANube() {
+    if (nubeOcupada) return;
+    if (!syncDetail.sesion) { abrirSesion(); return; }
+    nubeOcupada = 'subir';
+    try {
+      const { enviados } = await subirAhora();
+      if (enviados > 0) toastOk(tNow('cloud.subido', { n: enviados }));
+      else toastOk(tNow('cloud.subidoNada'));
+      menuDatos = false;
+    } catch (err: any) {
+      toastErr(tNow('cloud.error', { msg: err?.message === SIN_SESION ? tNow('cloud.sinSesion') : (err?.message ?? tNow('settings.networkError')) }));
+    } finally {
+      nubeOcupada = null;
+    }
+  }
+
+  async function bajarDeNube() {
+    if (nubeOcupada) return;
+    if (!syncDetail.sesion) { abrirSesion(); return; }
+    nubeOcupada = 'bajar';
+    try {
+      const { aplicados } = await bajarAhora();
+      if (aplicados > 0) toastOk(tNow('cloud.bajado', { n: aplicados }));
+      else toastOk(tNow('cloud.bajadoNada'));
+      menuDatos = false;
+    } catch (err: any) {
+      toastErr(tNow('cloud.error', { msg: err?.message === SIN_SESION ? tNow('cloud.sinSesion') : (err?.message ?? tNow('settings.networkError')) }));
+    } finally {
+      nubeOcupada = null;
+    }
+  }
+
+  /** Sin sesión el camino honesto es el login, no un error: Ajustes lo tiene. */
+  function abrirSesion() {
+    menuDatos = false;
+    loadSettingsPanel().then(() => showSettings = true);
+  }
   // $t (no tNow) para que el título del badge se re-evalúe al cambiar de
   // idioma: era un $derived.by que solo dependía de syncStatus.
   const syncTitulo = $derived.by(() => {
@@ -735,6 +783,35 @@
       use:portal
       style="top: {menuDatosPos.y}px; left: {menuDatosPos.x}px"
     >
+      <div class="menu-datos-nube" role="presentation">
+        <Cloud size={14} /> {$t('cloud.title')}
+        <span class="menu-nube-estado">{syncStatus === 'synced'
+          ? $t('sync.synced')
+          : syncStatus === 'syncing'
+            ? $t('sync.syncing')
+            : syncStatus === 'offline'
+              ? $t('sync.offline')
+              : syncStatus === 'error'
+                ? $t('sync.error')
+                : $t('cloud.sinSesion')}</span>
+      </div>
+      {#if syncDetail.sesion}
+        <button role="menuitem" onclick={subirANube} title={$t('cloud.subirTitle')} disabled={nubeOcupada !== null}>
+          {#if nubeOcupada === 'subir'}<RefreshCw size={16} class="girando" />{:else}<CloudUpload size={16} />{/if}
+          <span class="menu-item-flex">{nubeOcupada === 'subir' ? $t('cloud.subiendo') : $t('cloud.subir')}</span>
+          {#if syncDetail.pending > 0}<span class="menu-check menu-nube-badge">{$t('cloud.pendientes', { n: syncDetail.pending })}</span>{/if}
+        </button>
+        <button role="menuitem" onclick={bajarDeNube} title={$t('cloud.bajarTitle')} disabled={nubeOcupada !== null}>
+          <CloudDownload size={16} />
+          <span class="menu-item-flex">{nubeOcupada === 'bajar' ? $t('cloud.bajando') : $t('cloud.bajar')}</span>
+        </button>
+      {:else}
+        <button role="menuitem" onclick={abrirSesion} title={$t('cloud.sinSesionTitle')}>
+          <LogIn size={16} />
+          <span class="menu-item-flex">{$t('cloud.sinSesion')}</span>
+        </button>
+      {/if}
+      <div class="menu-datos-sep" role="presentation"></div>
       <button role="menuitem" onclick={exportarDatos} title={$t('sidebar.exportTitle')}>
         <Download size={16} /> {$t('sidebar.export')}
       </button>
@@ -1078,6 +1155,52 @@
 
   .menu-datos button[role="menuitemcheckbox"] {
     justify-content: flex-start;
+  }
+  /* Botones de nube en vuelo: se apagan para que un doble clic no dispare
+     dos pushes. opacity sola (sin display:none) para no romper el layout ni
+     sacar el elemento del árbol accesible a media animación. */
+  .menu-datos button[disabled] {
+    opacity: 0.55;
+    cursor: progress;
+  }
+  .girando {
+    animation: girar 0.9s linear infinite;
+  }
+  @keyframes girar {
+    to { transform: rotate(360deg); }
+  }
+  /* Cabecera de la sección nube dentro del menú: el estado va a la derecha
+     para que el ojo lea "acción" a la izquierda y "cómo está" a la derecha. */
+  .menu-datos-nube {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.8rem 0.35rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: rgba(92, 64, 51, 0.7);
+  }
+  .menu-nube-estado {
+    margin-left: auto;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--color-green-dark);
+    white-space: nowrap;
+  }
+  /* Contador de pendientes: no puede ser el ✓ verde (significa "modo
+     privacidad activo"); va ámbar para que se lea como aviso. */
+  .menu-nube-badge {
+    color: #8a5a00;
+    font-size: 0.68rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .girando { animation: none; }
   }
   .menu-item-flex {
     flex: 1;

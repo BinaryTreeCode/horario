@@ -76,7 +76,10 @@ async function descifrarOverride(o: any): Promise<DayOverride> {
 
 // ── Estado global de sincronización (para la UI) ─────────────────────────────
 
-type Listener = (status: SyncStatus, detail: { pending: number; error?: string; lastSyncAt?: number }) => void;
+type Listener = (
+  status: SyncStatus,
+  detail: { pending: number; error?: string; lastSyncAt?: number; sesion: boolean }
+) => void;
 
 let status: SyncStatus = 'local';
 let pendingCount = 0;
@@ -153,7 +156,7 @@ export async function resumePushAndSync(): Promise<void> {
 
 export function onSyncChange(fn: Listener): () => void {
   listeners.add(fn);
-  fn(status, { pending: pendingCount, error: lastError, lastSyncAt });
+  fn(status, { pending: pendingCount, error: lastError, lastSyncAt, sesion: sesionActiva });
   return () => listeners.delete(fn);
 }
 
@@ -162,7 +165,7 @@ function setStatus(next: SyncStatus, error?: string) {
   if (error !== undefined) lastError = error;
   if (next === 'synced' || next === 'local') lastError = error;
   persistState();
-  for (const fn of listeners) fn(status, { pending: pendingCount, error: lastError, lastSyncAt });
+  for (const fn of listeners) fn(status, { pending: pendingCount, error: lastError, lastSyncAt, sesion: sesionActiva });
 }
 
 async function persistState() {
@@ -221,20 +224,29 @@ export function seleccionables<T extends { updatedAt: number }>(rows: T[], curso
 }
 
 /**
- * Cursor del push tras un envío. NO puede ser el reloj del servidor: si va
- * adelantado a los updatedAt locales, todo lo creado entre ambos relojes queda
- * fuera del push siguiente y no vuelve a viajar nunca. Se queda con el mayor
- * updatedAt realmente enviado — reenviar un lote viejo es inofensivo (el LWW
- * del servidor solo acepta lo más nuevo), perderlo no.
+ * Cursor del push tras un envío. NO puede ser el reloj del servidor ni el mayor
+ * updatedAt enviado sin más: las filas locales se sellan con el reloj del
+ * DISPOSITIVO, así que cualquier cursor por delante de ese reloj empuja al
+ * futuro todo lo que el usuario cree en los próximos segundos y eso no vuelve
+ * a subirse nunca (sin error, sin aviso).
+ *
+ * El caso que lo destapó: al arrancar, el pull trae filas selladas por el reloj
+ * del servidor y el push de arranque las reenvía. Si el servidor va un minuto
+ * adelantado, "el mayor enviado" era ya un minuto futuro y el cursor congelaba
+ * los cambios locales durante esa ventana entera.
+ *
+ * Regla: cursor = min(ahora del dispositivo, max(mayor enviado, cursor previo)).
+ * Reenviar un lote viejo es inofensivo (el LWW del servidor solo acepta lo más
+ * nuevo), perderse uno no.
  */
 export function cursorPushTras(
-  serverTime: number,
   enviados: { updatedAt: number }[],
-  cursorPrevio: number
+  cursorPrevio: number,
+  ahora: number
 ): number {
   if (enviados.length === 0) return cursorPrevio; // nada enviado: no avanzar
   const mayor = enviados.reduce((m, r) => Math.max(m, r.updatedAt), 0);
-  return Math.min(serverTime, Math.max(mayor, cursorPrevio));
+  return Math.min(ahora, Math.max(mayor, cursorPrevio));
 }
 
 /**
@@ -352,7 +364,7 @@ export async function pushChanges(full = false): Promise<number> {
     await db.syncState.put({
       ...prev,
       id: '1',
-      lastPushAt: cursorPushTras(res.serverTime, enviados, cursor),
+      lastPushAt: cursorPushTras(enviados, cursor, Date.now()),
     });
     setStatus(pendingCount > 0 ? 'syncing' : 'synced');
     return res.pushed;
@@ -506,6 +518,68 @@ export async function arrancarSync(): Promise<void> {
 }
 
 /** ¿Hay sesión activa? (la cookie httpOnly responde por nosotros) */
+// ── Órdenes manuales: "subir" y "bajar" como botones, no como efecto colateral ─
+// El automático (hooks, arranque, visibility) es invisible y por eso mismo no
+// sirve para un "¿ya llegó lo del otro?" ni para un "no quiero esperar". Estas
+// dos son la orden explícita del usuario y dicen el resultado con números.
+
+/** Texto de error cuando no hay cookie: la UI lo muestra tal cual en el toast. */
+export const SIN_SESION = 'No hay sesión iniciada';
+
+export interface ResultadoSubida {
+  /** Filas que el servidor aceptó. 0 = no había nada nuevo. */
+  enviados: number;
+}
+
+export interface ResultadoBajada {
+  /** Filas de la nube que no teníamos (o eran más viejas). */
+  aplicados: number;
+}
+
+/**
+ * ¿Se puede operar contra la nube? Reusa la sesión ya resuelta en el arranque
+ * para no pagar un fetch en cada clic; solo pregunta si el motor todavía no
+ * habló con el servidor.
+ */
+async function haySesionOperativa(): Promise<boolean> {
+  if (sesionActiva) return true;
+  const ok = await isLoggedIn();
+  if (ok) sesionActiva = true;
+  return ok;
+}
+
+/**
+ * Sube este dispositivo a la nube ahora. Es un push COMPLETO, no incremental:
+ * el botón significa "que la nube tenga TODO lo mío", no "lo que se movió
+ * desde el último push". Reenviar filas viejas es inofensivo porque el LWW del
+ * servidor solo acepta lo más nuevo.
+ *
+ * Si el push seguía pausado tras una importación, esta orden lo reactiva: es
+ * la misma decisión que el botón de Ajustes, desde otro sitio.
+ */
+export async function subirAhora(): Promise<ResultadoSubida> {
+  if (!(await haySesionOperativa())) throw new Error(SIN_SESION);
+  if (pushPaused) {
+    pushPaused = false;
+    const prev = await db.syncState.get('1');
+    await db.syncState.put({ ...prev, id: '1', pendingPushPaused: false });
+  }
+  const enviados = await pushChanges(true);
+  await pullChanges().catch(() => { /* el push ya salió; el pull reintenta solo */ });
+  return { enviados };
+}
+
+/**
+ * Trae a este dispositivo lo que hay en la nube. Merge por LWW: nunca borra
+ * lo local (cada fila se aplica solo si la remota es más nueva) y reaplicar
+ * filas viejas no tiene efecto. NO es un "restaurar desde la nube": para que
+ * la nube mande sobre lo local por completo está el botón de borrar todo.
+ */
+export async function bajarAhora(): Promise<ResultadoBajada> {
+  if (!(await haySesionOperativa())) throw new Error(SIN_SESION);
+  return await pullChanges();
+}
+
 export async function isLoggedIn(): Promise<boolean> {
   try {
     const res = await fetch('/api/auth?op=me', { credentials: 'same-origin' });
@@ -577,5 +651,5 @@ export function resetSyncAfterLogout(): void {
   pendingCount = 0;
   lastError = undefined;
   persistState();
-  for (const fn of listeners) fn(status, { pending: 0 });
+  for (const fn of listeners) fn(status, { pending: 0, sesion: sesionActiva });
 }
