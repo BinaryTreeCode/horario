@@ -924,6 +924,55 @@ describe('resolverGanarDias — ganar varios días con la misma hora (el gesto d
       }
     }
   });
+
+  test('una actividad de por medio NO bloquea la tira: la cadena sigue en la semana del vecino', () => {
+    // El reporte: "si hay una actividad de por medio, no se puede extender".
+    // Estado real (la semilla de la app): la actividad a ganar vive en
+    // Lun–Vie 8:30-9; el Sábado ya tiene "Muro" 8-12; y "Trabajo" (Mar–Vie
+    // 9-13) está justo debajo.
+    //
+    // Antes: el veto "si correr a este vecino rompe otro de sus días, no lo
+    // corras" abortaba la cadena a mitad. "Muro" sí se corría (8-12 → 9-13),
+    // pero "Trabajo" se quedaba en 9-13 ENCIMA de él y el gesto entero moría
+    // con "No cabe: en Sábado Muro se pondría sobre Trabajo" — sin ganar nada.
+    //
+    // Ahora: el horario de un bloque es GLOBAL. Correr a "Trabajo" lo corre en
+    // TODA su semana y la cadena sigue debajo (Almuerzo, Tomar sol).
+    const acts = [
+      a('cinta', '08:30', '09:00', [0, 1, 2, 3, 4]),
+      a('muro', '08:00', '12:00', [5]),
+      a('almuerzo', '13:00', '14:00', [0, 1, 2, 3, 4, 5, 6]),
+      a('desayuno', '08:00', '08:30', [0, 1, 2, 3, 4, 5, 6]),
+      a('rutina', '07:00', '08:00', [0, 1, 2, 3, 4, 5, 6]),
+      a('sol', '17:30', '17:45', [0, 1, 2, 3, 4, 5, 6]),
+      a('trabajo', '09:00', '13:00', [1, 2, 3, 4, 5]),
+    ];
+    const res = resolverGanarDias(acts, 'cinta', [5, 6], codec, 23);
+    // Se muestra valido Y motivo juntos: el motivo era el síntoma en pantalla.
+    expect({ valido: res.valido, motivo: res.motivo }).toEqual({ valido: true, motivo: '' });
+
+    // El bloque entró en Sábado y en Domingo, con su misma hora.
+    expect(res.porDia.get(5)!.get('cinta')).toEqual(s('cinta', 8.5, 9));
+    expect(res.porDia.get(6)!.get('cinta')).toEqual(s('cinta', 8.5, 9));
+
+    // El vecino se corrió en TODOS sus días, no solo en el del gesto: ese era
+    // el veto que mataba la cadena.
+    expect(res.times.get('trabajo')).toEqual(s('trabajo', 13, 17));
+    for (const d of [1, 2, 3, 4, 5]) {
+      expect(res.porDia.get(d)!.get('trabajo')).toEqual(s('trabajo', 13, 17));
+    }
+
+    // Y la cadena siguióAbajo en cada día: ni un solape en ninguno.
+    for (const [d, m] of res.porDia) {
+      const arr = [...m.values()];
+      for (let i = 0; i < arr.length; i++) {
+        for (let j = i + 1; j < arr.length; j++) {
+          expect(arr[i].start < arr[j].end && arr[j].start < arr[i].end,
+            `solape en el día ${d}: ${arr[i].id} vs ${arr[j].id}`).toBe(false);
+        }
+      }
+    }
+  });
 });
 
 /** Fixture mínimo de actividad para la validación de choques. */

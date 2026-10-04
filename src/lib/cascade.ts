@@ -575,13 +575,11 @@ export function propagateWeekly(
   const slotsOn = (day: number) =>
     activities.filter(a => isOnDay(a, day)).map(a => times.get(a.id!)!);
 
-  /** ¿el nuevo horario de `id` pisa a alguien en otro de SUS días? */
-  const breaksElsewhere = (id: string, s: Slot, day: number) =>
-    byId.get(id)!.daysOfWeek.some(
-      d =>
-        d !== day &&
-        activities.some(o => o.id !== id && isOnDay(o, d) && overlaps(s, times.get(o.id!)!))
-    );
+  // (Se fue el predicado "si correr a este vecino rompe otro de sus días, no lo
+  // corras" — ex-C3. Ese veto era el que abortaba la cadena del estirar a
+  // mitad: el reporte "si hay una actividad de por medio, no se puede extender".
+  // El horario de un bloque es GLOBAL: correrlo en este día obliga a correrlo en
+  // todos los suyos, y la cadena sigue ahí (paredes transitivas, más abajo).)
 
   const daySet = new Set<number>(mineDays);
   const exacto = diaDestino ? new Map(diaDestino.slots.map(s => [s.id, s])) : null;
@@ -706,20 +704,32 @@ export function propagateWeekly(
     const encogeRedim =
       Math.round(duration * 60) <
       Math.round((codec.parse(act.endTime) - codec.parse(act.startTime)) * 60);
+    // Paredes TRANSITIVAS: no solo la actividad estirada, todo bloque que se
+    // corrió queda como pared en TODOS sus días. Antes cada movimiento se
+    // validaba solo ("si correrlo rompe otro de sus días, no lo corras" — ex-C3)
+    // y esa decisión abortaba la cadena a mitad: el vecino se quedaba donde
+    // estaba, encima del que ya se había corrido, y el gesto entero moría con
+    // "No cabe". Con la pared, correr al vecino obliga a correr en su semana y a
+    // empujar lo que quede debajo, en todos los días, hasta cerrar.
+    const paredes = new Set<string>([actId]);
     for (let pass = 0; pass < MAX_PASSES; pass++) {
       let changed = false;
       for (const day of [...daySet].sort((a, b) => a - b)) {
-        const pared = { inicio: toMin(pinnedStart), dur: Math.max(0, Math.round(duration * 60)) };
-        const res = ladoRedim === 'arriba'
-          ? resolveParedArriba(slotsOn(day).map(aM), actId, pared)
-          : resolvePared(slotsOn(day).map(aM), actId, pared);
-        for (const sM of res) {
-          const s = aHoras(sM);
-          if (sameSlot(times.get(s.id)!, s)) continue;
-          if (s.id !== actId && breaksElsewhere(s.id, s, day)) continue; // ex-C3: queda solape local
-          times.set(s.id, s);
-          changed = true;
-          byId.get(s.id)?.daysOfWeek.forEach(d => daySet.add(d));
+        for (const id of paredes) {
+          if (!isOnDay(byId.get(id)!, day)) continue; // la pared no vive en este día
+          const w = times.get(id)!;
+          const pared = { inicio: toMin(w.start), dur: Math.max(0, Math.round((w.end - w.start) * 60)) };
+          const res = ladoRedim === 'arriba'
+            ? resolveParedArriba(slotsOn(day).map(aM), id, pared)
+            : resolvePared(slotsOn(day).map(aM), id, pared);
+          for (const sM of res) {
+            const s = aHoras(sM);
+            if (sameSlot(times.get(s.id)!, s)) continue;
+            times.set(s.id, s);
+            changed = true;
+            paredes.add(s.id);
+            byId.get(s.id)?.daysOfWeek.forEach(d => daySet.add(d));
+          }
         }
       }
       if (!changed) break;

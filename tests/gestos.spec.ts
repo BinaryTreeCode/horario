@@ -849,3 +849,63 @@ test('Barrido del asa: un día menos solo y el clásico siguen igual', async ({ 
 
   await page.mouse.up();
 });
+
+/**
+ * El reporte: "si hay una actividad de por medio, no se puede extender". Con
+ * una actividad ocupando el día que se quiere ganar, el barrido anunciaba el
+ * día ("+ Sábado") pero lo pintaba como "no cabe" y al soltar no se escribía
+ * NADA: la tira entera moría con "⛔ No cabe: en Sábado Muro se pondría sobre
+ * Trabajo".
+ *
+ * La causa era el veto que abortaba la cadena de empuje a mitad: el vecino que
+ * había que correr vivía en más de un día, así que no se corría en ninguno y
+ * quedaba encima del que ya se había movido. El horario de un bloque es
+ * global: correrlo obliga a correrlo en toda su semana y la cadena sigue.
+ */
+test('Barrido del asa: una actividad de por medio no impide ganar el día', async ({ page }) => {
+  await crearActividad(page, 'Cinta', '08:30', '09:00', [0, 1, 2, 3, 4]);
+  // El Sábado ya está ocupado de 8 a 12: sin espacio a la hora de la Cinta.
+  await crearActividad(page, 'Muro', '08:00', '12:00', [5]);
+
+  const col = page.locator('.day-column').nth(4); // Viernes
+  const bloque = col.locator('.activity-item[title="Cinta"]');
+  await expect(bloque, 'no se creó la Cinta del Viernes').toBeVisible({ timeout: 30_000 });
+  await bloque.scrollIntoViewIfNeeded();
+
+  const asa = await bloque.locator('.resize-handle.hres-der').boundingBox();
+  expect(asa, 'el bloque del Viernes no tiene asa derecha: no hay de dónde estirar').not.toBeNull();
+  const colW = await col.evaluate(el => el.getBoundingClientRect().width);
+
+  const x = asa!.x + asa!.width / 2;
+  const y = asa!.y + asa!.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + colW * 1.4, y, { steps: 8 });
+
+  const banda = page.locator('.hres-ganar-banda');
+  await expect(banda.first(), 'no apareció la banda del barrido').toBeVisible({ timeout: 30_000 });
+
+  // El preview tiene que prometer que entra: si dice "no cabe" el gesto ya
+  // está muerto y el usuario ve un "+ Sábado" que nunca ocurre.
+  const noCabe = await banda.evaluateAll(
+    els => els.filter(el => el.classList.contains('no-cabe')).length
+  );
+  expect(
+    noCabe,
+    'el preview marcó el día ganado como "no cabe" habiendo una actividad de por medio'
+  ).toBe(0);
+
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+
+  const dias = await page.evaluate(() => {
+    const cols = [...document.querySelectorAll('.day-column')];
+    return cols
+      .map((c, i) => ([...c.querySelectorAll('.activity-item')].some(b => b.getAttribute('title') === 'Cinta') ? i : -1))
+      .filter(i => i >= 0);
+  });
+  expect(
+    dias,
+    `tras soltar, la Cinta quedó en las columnas ${JSON.stringify(dias)}: el Sábado no se ganó`
+  ).toContain(5);
+});

@@ -90,6 +90,7 @@ Asas angostas a **izquierda y derecha** de la tarjeta. Umbral: media columna.
 
 Reglas finas:
 - Si el vecino **ya tiene** la actividad, el asa no se limita a ese día: **la tira salta por encima y sigue** ganando días más allá. Con la Rutina en Lunes y Jueves, arrastrar el asa del Lunes pasando el Jueves sigue agregando Martes, Miércoles, Viernes, Sábado y Domingo: no se frena en el Jueves.
+- **Una actividad de por medio NO impide estirar**: si el día que ganás está ocupado, los que están ahí se corren **empujados en cadena**. Y como el horario de un bloque es único para toda su semana, correr un vecino también lo corre en **todos los días que tiene** (por eso el preview los marca a los dos: nada se mueve a tus espaldas). Antes el gesto se rechazaba entero con "⛔ No cabe" y no ganabas nada.
 - **Barrer todos los días de la actividad la ELIMINA** (igual que "Eliminar" del menú, y se puede deshacer). Antes de soltar, el rótulo dice "Borrar de todos sus días" y los bloques se ven en rojo más intenso: no se borra la actividad sin avisarte.
 - **Retirar el único día** de una actividad no se ofrece.
 - **Preview antes de soltar**: la columna afectada se tiñe (verde = gana, rojo = retira) y un rótulo junto al puntero anuncia "＋ Martes Baño" / "− Lunes Rutina".
