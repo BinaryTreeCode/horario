@@ -182,6 +182,17 @@
     preloadModals();
     loadDonutCharts(); // los donuts salen del chunk inicial (lazy como los modales)
     loadDailyView(); // la vista Día es excluyente con la Semana: precarga idle
+    // Vuelta de un rescate: el botón de reintentar recarga la página para limpiar
+    // el fallo cacheado del módulo, pero el usuario seguía intentando abrir el
+    // DÍA. Sin esto aterriza en la Semana y tiene que volver a hacer clic — el
+    // gesto se pierde justo en el rescate. La precarga de arriba ya deja el
+    // chunk en camino, así que solo hay que elegir la vista.
+    try {
+      if (sessionStorage.getItem('dia-pendiente') === '1') {
+        sessionStorage.removeItem('dia-pendiente');
+        currentView = 'day';
+      }
+    } catch { /* sin almacenamiento */ }
   });
 
   /** Carga el chunk de Día AHORA (click en la pestaña o día de la grilla):
@@ -189,7 +200,21 @@
    *  cargada y la pestaña quedaba en "Cargando vista del día…". */
   function irAVistaDia() {
     currentView = 'day';
-    loadDailyView();
+    void cargarVistaDia();
+  }
+  /** Botón "Reintentar" del aviso: RECARGA la página, que es lo único que
+   *  limpia de verdad el fallo cacheado del módulo. Una sola vez por sesión:
+   *  si la red sigue caída, el guardia evita el bucle de recargas y el aviso
+   *  vuelve a quedarse esperando a que vuelva. */
+  function reintentarVistaDia() {
+    try {
+      if (sessionStorage.getItem('dia-reintento') === '1') return;
+      sessionStorage.setItem('dia-reintento', '1');
+      // El usuario estaba intentando abrir el DÍA: al volver de la recarga tiene
+      // que caer ahí, no otra vez en la Semana obligándolo a un clic de más.
+      sessionStorage.setItem('dia-pendiente', '1');
+    } catch { /* sin almacenamiento: se recarga igual */ }
+    location.reload();
   }
   
   let showSettings = $state(false);
@@ -203,30 +228,42 @@
   let DailyViewComp: typeof import('./DailyView.svelte').default | null = $state(null);
 
   // Holders de las promesas de carga (compatibles con el helper cargarChunk).
-  const loadSettings = { v: null as Promise<void> | null };
-  const loadDonut = { v: null as Promise<void> | null };
-  const loadActivity = { v: null as Promise<void> | null };
-  const loadDaily = { v: null as Promise<void> | null };
+  // `n` = nº de intentos: cada uno pide una URL nueva (ver cargarChunk).
+  const loadSettings = { v: null as Promise<void> | null, n: 0 };
+  const loadDonut = { v: null as Promise<void> | null, n: 0 };
+  const loadActivity = { v: null as Promise<void> | null, n: 0 };
+  const loadDaily = { v: null as Promise<void> | null, n: 0 };
 
-  /** Carga de chunks lazy con REINTENTO: si la promesa se cachea rechazada
-   *  (red intermitente, deploy de Vercel a mitad de navegación), el usuario
-   *  quedaba clavado en el esqueleto para siempre: "el día no carga al
-   *  primer intento" y había que recargar la página. Al fallar, la promesa
-   *  cacheada se descarta (variable = null) y el próximo click (o la
-   *  precarga idle) vuelve a intentar. */
+  /** Carga de chunks lazy con REINTENTO y aviso de rescate.
+   *
+   *  Ojo con el reintento: el navegador memoriza el FALLO de un módulo en su
+   *  mapa para esa URL exacta, así que re-importar la MISMA puede rechazar sin
+   *  volver a pedir nada. Romperlo con una query variable
+   *  (import(`./X.svelte${n}`)) no sirve: Vite solo bundlea imports dinámicos
+   *  con especificador literal y revienta en runtime con "Unknown variable
+   *  dynamic import"; hacerlo con variantes literales funciona, pero duplica
+   *  el chunk en el build (~70 KB de más) y eso no lo paga un arreglo de
+   *  resiliencia.
+   *
+   *  Entonces la salida es RECARGAR, que sí limpia la caché de fallo y no pesa
+   *  un byte: el gesto avisa y el botón recarga una sola vez (el guardia de
+   *  sessionStorage evita el bucle). Antes no había ninguna de las dos cosas y el
+   *  reporte era "entro y no me carga, después de 3 intentos". */
   function cargarChunk(
-    holder: { v: Promise<void> | null },
+    holder: { v: Promise<void> | null; n: number },
     hacer: () => Promise<void>
   ): Promise<void> {
     if (holder.v) return holder.v;
+    const intento = ++holder.n;
     const p = hacer().catch((err) => {
-      console.error('[dashboard] carga lazy falló, se permite reintento', err);
+      console.error(`[dashboard] carga lazy falló (intento ${intento}), se permite reintento`, err);
       if (holder.v === p) holder.v = null; // descartar SOLO si sigue siendo la nuestra
       throw err; // propagar a {#await} si hay
     });
     holder.v = p;
     return p;
   }
+
   function loadSettingsPanel() {
     return cargarChunk(loadSettings, () => import('./SettingsPanel.svelte').then(m => { SettingsPanelComp = m.default; }));
   }
@@ -238,6 +275,35 @@
   }
   function loadDailyView() {
     return cargarChunk(loadDaily, () => import('./DailyView.svelte').then(m => { DailyViewComp = m.default; }));
+  }
+
+  /** Último fallo de la vista Día, para no dejar un esqueleto mudo. */
+  let dailyError = $state<string | null>(null);
+
+  /**
+   * Vista Día: cargar y, si falla, decirlo.
+   *
+   * El reporte: "a veces entro y no me carga, después de 3 intentos". Antes un
+   * fallo de red dejaba el esqueleto girando para siempre, sin texto ni botón.
+   *
+   * OJO con prometer un reintento automático: medido con el chunk caído, el
+   * navegador memoriza el fallo del módulo para esa URL exacta, así que volver
+   * a importar NO vuelve a pedir nada por red (4 intentos registrados, 1 sola
+   * petición). Un reintento invisible sería teatro: el usuario seguiría viendo
+   * el esqueleto. Lo único que limpia de verdad el fallo cacheado es RECARGAR,
+   * así que eso se le ofrece explicito y con un botón (una sola vez por sesión,
+   * con el guardia de abajo para que no entre en bucle).
+   */
+  async function cargarVistaDia() {
+    dailyError = null;
+    try {
+      await loadDailyView();
+      // La vista entró: el guardia de recarga se desarma para no bloquear un
+      // reintento legítimo más adelante.
+      try { sessionStorage.removeItem('dia-reintento'); } catch { /* sin almacenamiento */ }
+    } catch {
+      dailyError = tNow('day.loadError');
+    }
   }
   function openSettings() {
     showSettings = true;
@@ -711,6 +777,17 @@
               onEditActivity={(id, initialData) => openActivityModal(id, selectedDay, initialData)}
               onNavigateDay={(dir) => { selectedDay = Math.max(0, Math.min(6, selectedDay + dir)); }}
             />
+          {:else if dailyError}
+            <!-- Falló la carga del chunk tras los reintentos: un esqueleto
+                 girando para siempre era el reporte ("entro y no me carga").
+                 Acá se dice qué pasó y se da un botón — el usuario nunca queda
+                 clavado sin salida. -->
+            <div class="daily-skeleton daily-skeleton-error" role="status" aria-live="polite">
+              <p class="daily-error-msg">{dailyError}</p>
+              <button type="button" class="daily-retry-btn" onclick={reintentarVistaDia}>
+                {$t('day.retry')}
+              </button>
+            </div>
           {:else}
             <!-- Esqueleto EN el panel (no overlay fixed): mantiene el layout y
                  comunica progreso sin tapar el header ni la grilla. Mismo alto
@@ -1255,6 +1332,45 @@
     flex-direction: column;
     gap: 1rem;
     min-height: 60vh;
+  }
+
+  /* Falló la carga del chunk: el esqueleto mudo se reemplaza por un aviso
+     con salida. Sin animación de shimmer — acá no hay nada progressing. */
+  .daily-skeleton-error {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 1.25rem;
+  }
+
+  .daily-error-msg {
+    margin: 0;
+    max-width: 34rem;
+    color: var(--text-primary, #2d3748);
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  .daily-retry-btn {
+    min-height: 44px; /* target táctil ≥44px (regla dura #5) */
+    min-width: 44px;
+    padding: 0.65rem 1.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--color-green-dark, #2f855a);
+    background: var(--color-green-dark, #2f855a);
+    color: #ffffff;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s ease, transform 0.15s ease;
+  }
+
+  .daily-retry-btn:hover {
+    filter: brightness(1.08);
+  }
+
+  .daily-retry-btn:active {
+    transform: scale(0.97);
   }
   .skel-header {
     display: flex;

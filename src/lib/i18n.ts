@@ -79,6 +79,10 @@ const es: Catalogo = {
 
   // ── Vista Día ──
   'dayView.title': 'Horario del día',
+  // Fallo de red al bajar el chunk de la vista Día (el reporte: "entro y no
+  // me carga"). Aviso + botón: nunca un esqueleto girando sin salida.
+  'day.loadError': 'No se pudo cargar la vista del día. Revisá la conexión o intentá de nuevo.',
+  'day.retry': 'Reintentar',
   'dayView.empty': 'Día libre — tocá cualquier hueco del horario para crear una actividad',
 
   // ── Vista Semana ──
@@ -397,6 +401,8 @@ const en: Catalogo = {
   'donut.free': 'Free',
 
   'dayView.title': 'Day schedule',
+  'day.loadError': 'The day view could not load. Check your connection or try again.',
+  'day.retry': 'Retry',
   'dayView.empty': 'Free day — tap any slot in the schedule to create an activity',
 
   'weekView.empty': 'Free week — tap «{btn}» to start planning',

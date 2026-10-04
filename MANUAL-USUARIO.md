@@ -96,6 +96,16 @@ Reglas finas:
 - **Preview antes de soltar**: la columna afectada se tiñe (verde = gana, rojo = retira) y un rótulo junto al puntero anuncia "＋ Martes Baño" / "− Lunes Rutina".
 - Al soltar: "Ahora también el {día}" o "Ya no está el {día}".
 
+### Si la vista Día no carga
+
+Con red intermitente (o un deploy a mitad de navegación) el módulo de la vista Día puede no bajar. Antes eso dejaba un esqueleto girando para siempre, sin explicación: solo se arreglaba recargando la página a ciegas y repetirlo hasta tres veces.
+
+Ahora, en su lugar:
+
+- Aparece un **aviso** que dice qué pasó, con un botón **Reintentar**.
+- Ese botón recarga la página **una sola vez** (si la red sigue caída no entra en bucle) y te devuelve **directo a la vista Día**, sin obligarte a volver a buscarla.
+- Tus datos no se pierden: la recarga solo relee la base local.
+
 ---
 
 ## 6. Deshacer / Rehacer

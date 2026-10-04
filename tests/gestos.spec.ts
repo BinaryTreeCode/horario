@@ -986,4 +986,78 @@ test('Visor de imagen: la imagen ocupa al menos el 80% de la pantalla', async ({
 
   // Un 80% que se sale de la pantalla no sirve de nada: tiene que caber entera.
   expect(m.dentro, 'la imagen se sale de la pantalla al agrandarse').toBe(true);
+});/**
+ * El reporte: "mejora la carga del día, a veces voy a entrar y no me carga,
+ * luego de 3 intentos". Antes no había salida: el esqueleto giraba para
+ * siempre, sin texto ni botón, y lo único que funcionaba era recargar la
+ * página a ciegas y repetir hasta tres veces.
+ *
+ * Acá se comprueba el camino completo: la red está caída, la app avisa, y el
+ * botón del aviso RECARGA — que es lo único que limpia de verdad el fallo
+ * cacheado del módulo — y con la red de vuelta la vista entra sola.
+ */
+test('Vista Día: con la red caída avisa, y su botón rescata la carga', async ({ browser }) => {
+// CONTEXTO NUEVO: el Chromium comparte su caché de disco entre páginas, así que
+  // en el contexto del beforeEach la vista Día ya venía servida desde caché y
+  // el fallo de red nunca se provocaba (el guard pasaba sin probar nada).
+  const ctx = await browser.newContext();
+  let redCaida = true;
+  let pedidos = 0;
+  await ctx.route('**/*', (route) => {
+    if (route.request().url().includes('DailyView')) {
+      pedidos++;
+      if (redCaida) return route.abort('failed');
+      return route.continue();
+    }
+    return route.continue();
+  });
+  const p2 = await ctx.newPage();
+  await p2.goto('/');
+  await expect(p2.locator('h1')).toContainText(/Nature Planner/i, { timeout: 30_000 });
+  await expect(p2.locator('.day-column').first()).toBeVisible({ timeout: 30_000 });
+
+  await p2.locator('#tab-day').click();
+
+  const aviso = p2.locator('.daily-skeleton-error');
+  await expect(aviso, 'nunca se avisa que la vista no cargó: el esqueleto queda mudo')
+    .toBeVisible({ timeout: 30_000 });
+  expect(pedidos, 'el guard no probó nada: no hubo ningún fallo de red').toBeGreaterThan(0);
+
+  // Ahora vuelve la red y se pulsa el botón: la recarga es el rescate.
+  redCaida = false;
+  await aviso.locator('.daily-retry-btn').click();
+
+  await expect(p2.locator('.activities-track'), 'tras el rescate la vista Día sigue sin cargar')
+    .toBeVisible({ timeout: 30_000 });
+  await ctx.close();
+});/**
+ * El aviso tiene que ser un callejón con salida, no un adorno: texto que diga
+ * qué pasó y un botón real (target ≥44px por la regla dura #5). Acá la red NO
+ * vuelve, así que el botón no puede prometer nada: solo tiene que estar y ser
+ * pulsable.
+ */
+test('Vista Día: si la red no vuelve, el aviso ofrece un botón real', async ({ browser }) => {
+const ctx = await browser.newContext();
+  await ctx.route('**/*', (route) =>
+    route.request().url().includes('DailyView') ? route.abort('failed') : route.continue()
+  );
+  const p2 = await ctx.newPage();
+  await p2.goto('/');
+  await expect(p2.locator('h1')).toContainText(/Nature Planner/i, { timeout: 30_000 });
+  await expect(p2.locator('.day-column').first()).toBeVisible({ timeout: 30_000 });
+
+  await p2.locator('#tab-day').click();
+
+  const aviso = p2.locator('.daily-skeleton-error');
+  await expect(aviso, 'nunca se avisa que la vista no cargó: el esqueleto queda mudo')
+    .toBeVisible({ timeout: 30_000 });
+  await expect(aviso).toContainText(/no se pudo cargar|could not load/i);
+
+  const btn = aviso.locator('.daily-retry-btn');
+  await expect(btn, 'el aviso no ofrece botón de reintento').toBeVisible();
+
+  // Regla dura #5: todo control táctil ≥44px.
+  const alto = await btn.evaluate(el => el.getBoundingClientRect().height);
+  expect(alto, `el botón de reintentar mide ${Math.round(alto)}px: zona táctil menor a 44px`).toBeGreaterThanOrEqual(44);
+  await ctx.close();
 });
