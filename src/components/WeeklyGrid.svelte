@@ -874,17 +874,20 @@
    *  - Asa hacia AFUERA: BARRIDO de ganancia. El dedo dice HASTA dónde: cruzar
    *    columnas mete la actividad en toda esa tira de una vez ("estirar la
    *    Rutina a toda la semana"), no de día en día. Menos de una columna
-   *    cruzada = el gesto clásico de siempre: ganar SOLO el vecino.
+   *    cruzada = el gesto clásico de siempre: ganar SOLO el vecino. La tira
+   *    SALTA los días que el bloque ya tiene y sigue: con "Rutina" en Lunes y
+   *    Jueves, el asa del Lunes gana también lo que viene después del Jueves.
    *  - Asa hacia ADENTRO (hacia el bloque): BARRIDO de retiro. El dedo dice
    *    HASTA dónde: "de Domingo a Jueves" elimina los días CRUZADOS
-   *    (Sábado y Viernes) — el día bajo el dedo queda como nuevo borde y el
-   *    día del asa se conserva. Menos de una columna cruzada = el gesto
-   *    clásico de siempre: retirar SOLO el día del asa. Límites: solo se
-   *    retiran días que la actividad tiene, y jamás queda sin ningún día.
+   *    (Sábado y Viernes) — el día bajo el dedo queda como nuevo borde. El día
+   *    del asa TAMBIÉN entra al barrido (es "recortar la corrida desde acá").
+   *    Menos de una columna cruzada = el gesto clásico de siempre: retirar
+   *    SOLO el día del asa. Si el barrido cubre TODOS los días, la actividad se
+   *    ELIMINA (borrarActividad, con deshacer): no queda un bloque sin días.
    *  - Los dos barridos viven en cascade.ts: la vista solo mide la
    *    geometría (cuántas columnas COMPLETAS cruzó el dedo).
-   *  - El vecino exterior YA tiene la actividad: hacia afuera no hay gesto,
-   *    pero el asa sigue visible porque el barrido hacia adentro sí existe
+   *  - El vecino exterior YA tiene la actividad: la tira no frena por eso (ahí
+   *    no hay qué ganar) y el asa sigue visible para el barrido hacia adentro
    *    (asaLateralUtil). */
   /**
    * Horario final de los días que GANARÍA el bloque, con el empuje en cadena ya
@@ -974,6 +977,15 @@
       if (r.accion === 'retirar') {
         const quitados = r.dias;
         const newDays = act.daysOfWeek.filter(d => !quitados.includes(d));
+        // Barrer TODA la corrida es ELIMINAR la actividad. Antes barridoRetiro
+        // se salvaba el día del asa para no dejar el bloque sin días y por eso
+        // lunes sobrevivía a un barrido de lunes a domingo; daysOfWeek vacío no
+        // es un estado que la app sepa mostrar, así que aquí se borra de verdad
+        // (tombstone + ediciones temporales + deshacer, como el menú).
+        if (newDays.length === 0) {
+          await borrarActividad(act.id!);
+          return;
+        }
         // commitWeeklyTimes compara por contenido y omite filas no-op; el
         // cambio de días vía daysChange fuerza la escritura del único cambio.
         const times = new Map<string, { start: number; end: number }>();
@@ -1193,9 +1205,29 @@
     closeContextMenu();
   }
 
+  /**
+   * ¿El barrido de retiro cubre TODOS los días del bloque? Entonces el gesto no
+   * encoge la corrida: la elimina. Lo dicen el rótulo ("Borrar de todos sus
+   * días") y el pintón rojo reforzado, porque soltar sin querer borra.
+   */
+  function hresBorraTodo(): boolean {
+    if (hresPreview?.accion !== 'retirar' || !ghostActivity) return false;
+    return hresPreview.dias.length >= ghostActivity.daysOfWeek.length;
+  }
+
   async function deleteActivity() {
     const id = contextMenu.activityId;
     if (!id) return;
+    await borrarActividad(id);
+  }
+
+  /**
+   * Borrado REAL de una actividad, compartido por el menú contextual y por el
+   * barrido del asa que cubre la corrida entera. Los dos caminos tienen que ser
+   * el mismo borrado: mismo tombstone, mismas ediciones temporales limpiadas,
+   * mismo UN paso de deshacer y mismo toast.
+   */
+  async function borrarActividad(id: string) {
     try {
       // El diálogo promete "podés deshacerlo" y este flujo borra en dos sitios
       // (tombstone + ediciones temporales). Sin pushUndo el botón Deshacer
@@ -1330,6 +1362,7 @@
               class:drag-ghost={draggedActivityId === activity.id}
               class:drop-invalid={draggedActivityId === activity.id && dragInvalid}
               class:hres-afectado={hresPreview?.accion === 'retirar' && hresPreview.dias.includes(i) && activity.id === draggedActivityId}
+              class:hres-todo={activity.id === draggedActivityId && hresBorraTodo()}
               class:hres-se-mueve={hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i) && vecinosEmpujados(i).some(v => v.id === activity.id)}
               class:redim-pendiente={pendientesDelDia(i).has(activity.id)}
               onpointerdown={(e) => handleItemPointerDown(e, activity, i)}
@@ -1461,7 +1494,11 @@
     <div class="hres-float" use:portal class:hres-ganar={hresPreview.accion === 'ganar'} class:hres-retirar={hresPreview.accion === 'retirar'} aria-hidden="true"
       style="left: {hresPreview.x}px; top: {hresPreview.y}px">
       <span class="hf-senial" aria-hidden="true">{hresPreview.accion === 'ganar' ? '+' : '−'}</span>
-      {hresPreview.dias.map(d => days[d]).join(', ')}
+      {#if hresBorraTodo()}
+        {tNow('hres.elimina')}
+      {:else}
+        {hresPreview.dias.map(d => days[d]).join(', ')}
+      {/if}
       <span class="hf-act">{ghostActivity.name}</span>
     </div>
   {/if}
@@ -1833,6 +1870,13 @@
   .activity-item.redim-pendiente {
     outline: 2px dashed rgba(45, 90, 39, 0.9);
     outline-offset: -2px;
+    opacity: 0.92;
+  }
+  /* El barrido cubre TODOS los días: el gesto no encoge la corrida, la borra.
+     Rojo más profundo y halo blanco para que se lea antes de soltar. */
+  .activity-item.hres-afectado.hres-todo {
+    background: #b3271c !important;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.92);
     opacity: 0.92;
   }
   .hres-ganar-banda {

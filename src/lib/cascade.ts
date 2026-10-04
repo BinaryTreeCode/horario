@@ -825,8 +825,12 @@ export function capacidadResizeWeekly(
  *  - Gana el vecino INMEDIATO más cada columna COMPLETAMENTE cruzada: el día
  *    bajo el dedo entra (al revés que el retiro, donde el día bajo el dedo se
  *    salva). 0 columnas cruzadas = el gesto clásico de siempre, un solo día.
- *  - La tira es CONTIGUA y nunca salta huecos: si la actividad ya está en un
- *    día, el barrido se detiene ahí (no se gana el tramo que viene después).
+ *  - La tira es CONTIGUA y SALTA los días que la actividad ya tiene: barrer más
+ *    allá de una instancia que ya existe sigue ganando los días que faltan.
+ *    El reporte: "Rutina" en Lunes y Jueves, el asa del Lunes no pasaba del
+ *    Jueves y estirar la corrida al resto de la semana era imposible. El día
+ *    repetido no se devuelve (queda como está) y el recorrido continúa.
+ *  - Si TODA la tira ya la tiene, la lista sale vacía: no hay gesto.
  *  - Se detiene en el borde de la semana.
  *
  * @param days días actuales de la actividad
@@ -846,8 +850,8 @@ export function barridoGanar(
   const out: number[] = [];
   for (let k = 0; k <= n; k++) {
     const d = origen + (1 + k) * dirOut;
-    if (d < 0 || d > 6) break;   // borde de la semana
-    if (set.has(d)) break;       // ya lo tiene: la tira no salta el día
+    if (d < 0 || d > 6) break;        // borde de la semana
+    if (set.has(d)) continue;         // ya lo tiene: se SALTA y el dedo sigue
     out.push(d);
   }
   return out;
@@ -866,10 +870,12 @@ export function barridoGanar(
  *  - 0 columnas cruzadas (umbral de media columna) es el caso degenerado de esa
  *    misma regla: solo el día del asa.
  *  - Solo se retiran días que la actividad tiene (nunca salta huecos).
- *  - Jamás deja el bloque sin días: si el barrido lo vaciaría, el día del asa
- *    se salva y se retiran solo los cruzados.
- *  - Jamás deja el bloque sin ningún día (máximo days.length - 1 retiros;
- *    se conservan los PRIMEROS del barrido, los más cercanos al asa).
+ *  - El barrido PUEDE devolverlos todos: si el dedo cubre la corrida entera,
+ *    la lista sale completa y quien escribe decide qué significa eso. Esta
+ *    función se obligaba antes a salvar el día del asa ("jamás deja el bloque
+ *    sin días") y por eso barrer de Lunes a Domingo no borraba nunca la
+ *    actividad: el lunes sobrevivía siempre. Ahora la vista borra la actividad
+ *    cuando la lista vacía daysOfWeek (borrarActividad, con deshacer).
  *
  * @param days días actuales de la actividad
  * @param origen día donde está el asa
@@ -898,10 +904,7 @@ export function barridoRetiro(
     if (d < 0 || d > 6) break;
     if (set.has(d)) dias.push(d);
   }
-  // Jamás deja el bloque sin días: si el barrido lo vaciaría, el día del asa
-  // se salva (shift) y quedan solo los cruzados — el gesto clásico de siempre.
-  if (dias.length >= days.length) dias.shift();
-  return dias.slice(0, days.length - 1);
+  return dias;
 }
 
 /** Resultado de estirar desde el modal: qué queda, qué se movió y si topó. */

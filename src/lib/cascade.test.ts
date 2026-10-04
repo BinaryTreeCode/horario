@@ -563,9 +563,11 @@ describe('barridoRetiro — asa lateral: los días cruzados se eliminan', () => 
     expect(barridoRetiro(RUTINA, 6, -1, 1)).toEqual([6, 5]);
     // Y el gesto clásico (sin cruzar columnas) sigue siendo solo el asa.
     expect(barridoRetiro(RUTINA, 6, -1, 0)).toEqual([6]);
-    // Cruzando los 4 días restantes el barrido vaciaría el bloque: ahí el
-    // día del asa se salva y quedan solo los cruzados (nunca sin días).
-    expect(barridoRetiro(RUTINA, 6, -1, 4)).toEqual([5, 4, 3, 2]);
+    // Cruzando los 4 días restantes el barrido cubre la corrida ENTERA: la
+    // lista sale completa y la vista borra la actividad (no queda un bloque
+    // sin días). Antes el día del asa se salvaba y el Miércoles sobrevivía
+    // solo, huérfano.
+    expect(barridoRetiro(RUTINA, 6, -1, 4)).toEqual([6, 5, 4, 3, 2]);
     // Al revés (asa en el Miércoles, la punta izquierda de la corrida) el asa
     // también entra: 3 columnas cruzadas se llevan Miércoles, Jueves, Viernes
     // y Sábado, y queda solo el Domingo.
@@ -599,13 +601,19 @@ describe('barridoRetiro — asa lateral: los días cruzados se eliminan', () => 
     expect(barridoRetiro([0, 4], 0, 1, 2)).toEqual([0]);
   });
 
-  test('jamás deja el bloque sin días', () => {
-    // Dos días (Lun, Mar), asa del Lunes, barrido de 5 columnas: solo puede
-    // quitar 1 (Mar) — el bloque jamás queda vacío.
-    expect(barridoRetiro([0, 1], 0, 1, 5)).toEqual([1]);
-    // Barrido gigante sobre Lun–Vie (asa del Lunes): quita Mar, Mié, Jue, Vie
-    // (4 = length-1); los primeros del barrido (los más cercanos al asa).
-    expect(barridoRetiro(LUN_VIE, 0, 1, 99)).toEqual([1, 2, 3, 4]);
+  test('el barrido completo devuelve TODOS los días (la vista borra la actividad)', () => {
+    // El reporte: "elimino de lunes a domingo pero lunes no se borra". La
+    // función se obligaba a salvar el día del asa para no dejar el bloque sin
+    // días, así que esa fila sobrevivía siempre. Ahora devuelve la corrida
+    // entera y quien escribe (la vista) elimina la actividad.
+    expect(barridoRetiro([0, 1], 0, 1, 5)).toEqual([0, 1]);
+    expect(barridoRetiro(LUN_VIE, 0, 1, 99)).toEqual([0, 1, 2, 3, 4]);
+    const SEMANA = [0, 1, 2, 3, 4, 5, 6];
+    expect(barridoRetiro(SEMANA, 0, 1, 6)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    // Un barrido PARCIAL conserva el "no salta huecos": el dedo corto solo retira
+    // el día del asa; el largo retira también los días que la actividad tiene.
+    expect(barridoRetiro([0, 2, 4], 0, 1, 1)).toEqual([0]);
+    expect(barridoRetiro([0, 2, 4], 0, 1, 2)).toEqual([0, 2]);
   });
 
   test('actividad de un solo día: sin gesto (no se ofrece retirar)', () => {
@@ -664,15 +672,23 @@ describe('barridoGanar — asa lateral: la tira de días ganados (el caso report
     expect(barridoGanar([6], 6, -1, 5)).toEqual([5, 4, 3, 2, 1, 0]);
   });
 
-  test('la tira es contigua: se frena en el primer día que la actividad ya tiene', () => {
-    // Bloque en Lun(0), Mié(2) y Vie(4): asa del Lunes, el dedo cruza Martes(1)
-    // — libre, se gana — y Miércoles(2), que ya lo tiene: ahí corta, sin saltar
-    // al Jueves(3) ni al Viernes(4).
-    expect(barridoGanar([0, 2, 4], 0, 1, 4)).toEqual([1]);
-    // Corrida Lun–Mié con el asa en el Miércoles: gana hasta el Domingo.
+  test('la tira salta los días que ya tiene y sigue (el reporte)', () => {
+    // Bloque en Lun(0), Mié(2) y Vie(4): asa del Lunes, el dedo cruza Martes(1),
+    // Miércoles(2), Jueves(3) y Viernes(4). Los que ya tiene se SALTAN y el
+    // dedo sigue; antes el barrido se cortaba en el Miércoles y estirar la
+    // corrida al resto de la semana era imposible.
+    expect(barridoGanar([0, 2, 4], 0, 1, 3)).toEqual([1, 3]);
+    expect(barridoGanar([0, 2, 4], 0, 1, 4)).toEqual([1, 3, 5]);
+    // El caso reportado: "Rutina" en Lunes y Jueves, asa del Lunes hasta el
+    // borde del Domingo → gana todo menos el Jueves, que ya la tenía.
+    expect(barridoGanar([0, 4], 0, 1, 6)).toEqual([1, 2, 3, 5, 6]);
+    // Y al revés, desde el Jueves hacia la izquierda.
+    expect(barridoGanar([4, 0], 4, -1, 4)).toEqual([3, 2, 1]);
+    // Corrida Lun–Mié con el asa en el Miércoles: gana hasta el Domingo (igual
+    // que antes: en esa tira no hay ningún día repetido).
     expect(barridoGanar([0, 1, 2], 2, 1, 3)).toEqual([3, 4, 5, 6]);
-    // Vecino ya ocupado → no hay gesto hacia afuera (como antes del barrido).
-    expect(barridoGanar([0, 1, 2, 3, 4], 1, 1, 3)).toEqual([]);
+    // Si TODA la tira ya la tiene, no hay gesto (mismo contrato que antes).
+    expect(barridoGanar([1, 2, 3, 4], 1, 1, 2)).toEqual([]);
   });
 
   test('bordes de la semana y columnas negativas (defensivo)', () => {

@@ -81,15 +81,16 @@ Asas angostas a **izquierda y derecha** de la tarjeta. Umbral: media columna.
 
 | Gesto | Resultado |
 |---|---|
-| Asa derecha **hacia afuera** (→) | **GANA el día vecino** (mismas horas), validado con cascada. |
+| Asa derecha **hacia afuera** (→) | **GANA el día vecino** (mismas horas), validado con cascada. Cruzando varias columnas entra en **toda esa tira de una vez**. |
 | Asa izquierda **hacia afuera** (←) | Simétrico: gana el vecino de la izquierda. |
-| Asa derecha **hacia adentro** (←) | **RETIRA el día actual** (devolverse con el mismo largador). |
+| Asa derecha **hacia adentro** (←) | **RETIRA el día actual** (devolverse con el mismo largador). Cruzando varias columnas retira **toda esa tira**. |
 | Asa izquierda **hacia adentro** (→) | Igual: retira el día actual. |
 | Jiggle (< media columna) | Nada: el asa vuelve. |
 | Hacia afuera en Lunes/Domingo | Nada: no existe vecino (el asa solo aparece ahí si sirve para achicar). |
 
 Reglas finas:
-- Si el vecino **ya tiene** la actividad (el bloque continúa hacia allá), el asa apuntando allá es **no-op**: el límite para estirar es el borde del bloque, no una columna del medio.
+- Si el vecino **ya tiene** la actividad, el asa no se limita a ese día: **la tira salta por encima y sigue** ganando días más allá. Con la Rutina en Lunes y Jueves, arrastrar el asa del Lunes pasando el Jueves sigue agregando Martes, Miércoles, Viernes, Sábado y Domingo: no se frena en el Jueves.
+- **Barrer todos los días de la actividad la ELIMINA** (igual que "Eliminar" del menú, y se puede deshacer). Antes de soltar, el rótulo dice "Borrar de todos sus días" y los bloques se ven en rojo más intenso: no se borra la actividad sin avisarte.
 - **Retirar el único día** de una actividad no se ofrece.
 - **Preview antes de soltar**: la columna afectada se tiñe (verde = gana, rojo = retira) y un rótulo junto al puntero anuncia "＋ Martes Baño" / "− Lunes Rutina".
 - Al soltar: "Ahora también el {día}" o "Ya no está el {día}".

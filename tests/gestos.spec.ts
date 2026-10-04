@@ -721,6 +721,107 @@ test('Barrido del asa: el día del asa también se retira', async ({ page }) => 
   await page.mouse.up();
 });
 
+/**
+ * El reporte: con "Rutina" en Lunes y Jueves, al arrastrar el asa del Lunes
+ * hacia la derecha el barrido se CORTABA en el Jueves (el primer día que ya
+ * tenía el bloque) y estirar la corrida al resto de la semana era imposible.
+ *
+ * La regla vieja ("la tira nunca salta huecos") está en cascade.ts; este guard
+ * la barre desde la vista real: si volviera a frenarse, la corrida quedaría en
+ * Lunes..Jueves y la lista de columnas no sería la de toda la semana.
+ */
+test('Barrido de ganancia: el dedo salta un día que ya tiene el bloque y sigue', async ({ page }) => {
+  await crearActividad(page, 'Rutina', '14:30', '15:00', [0, 4]);
+
+  const col = page.locator('.day-column').nth(0);
+  const bloque = col.locator('.activity-item[title="Rutina"]');
+  await expect(bloque, 'no se creó la Rutina del Lunes').toBeVisible({ timeout: 30_000 });
+  await bloque.scrollIntoViewIfNeeded();
+
+  const asa = await bloque.locator('.resize-handle.hres-der').boundingBox();
+  expect(asa, 'el bloque del Lunes no tiene asa derecha: no hay de dónde estirar').not.toBeNull();
+  const colW = await col.evaluate(el => el.getBoundingClientRect().width);
+
+  const x = asa!.x + asa!.width / 2;
+  const y = asa!.y + asa!.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  // 6,5 columnas: el dedo queda DENTRO del Domingo, así que cruzó 6 columnas
+  // completas y la tira abarca Martes..Domingo.
+  await page.mouse.move(x + colW * 6.5, y, { steps: 10 });
+
+  await expect(page.locator('.hres-float'), 'el gesto no llegó al umbral de barrido')
+    .toBeVisible({ timeout: 30_000 });
+
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+
+  const dias = await page.evaluate(() => {
+    const cols = [...document.querySelectorAll('.day-column')];
+    return cols
+      .map((c, i) => ([...c.querySelectorAll('.activity-item')].some(b => b.getAttribute('title') === 'Rutina') ? i : -1))
+      .filter(i => i >= 0);
+  });
+  expect(
+    dias,
+    `la corrida quedó en las columnas ${JSON.stringify(dias)}: el barrido se frenó en el día que ya tenía el bloque`
+  ).toEqual([0, 1, 2, 3, 4, 5, 6]);
+});
+
+/**
+ * El otro reporte del mismo asa: "elimino de lunes a domingo pero lunes no se
+ * borra". barridoRetiro se obligaba a salvar el día del asa para no dejar el
+ * bloque sin días, así que esa columna sobrevivía siempre.
+ *
+ * Barrer la corrida ENTERA es eliminar la actividad, y tiene que decirlo antes
+ * de soltar (rótulo + los 7 bloques en rojo) y ser reversible, porque el
+ * diálogo de borrado promete "podés deshacerlo".
+ */
+test('Barrido del asa: barrer toda la corrida elimina la actividad y el Deshacer la devuelve', async ({ page }) => {
+  await crearActividad(page, 'Oración', '14:30', '15:00', [0, 1, 2, 3, 4, 5, 6]);
+
+  const col = page.locator('.day-column').nth(0);
+  const bloque = col.locator('.activity-item[title="Oración"]');
+  await expect(bloque, 'no se creó la Oración del Lunes').toBeVisible({ timeout: 30_000 });
+  await bloque.scrollIntoViewIfNeeded();
+
+  const asa = await bloque.locator('.resize-handle.hres-izq').boundingBox();
+  expect(asa, 'el bloque del Lunes no tiene asa izquierda').not.toBeNull();
+  const colW = await col.evaluate(el => el.getBoundingClientRect().width);
+
+  const x = asa!.x + asa!.width / 2;
+  const y = asa!.y + asa!.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  // Casi 7 columnas hacia adentro: la tira cubre los siete días.
+  await page.mouse.move(x + colW * 6.9, y, { steps: 12 });
+
+  const pista = page.locator('.hres-float');
+  await expect(pista).toBeVisible({ timeout: 30_000 });
+  const texto = (await pista.textContent()) ?? '';
+  expect(
+    texto,
+    `la pista "${texto}" no avisa que el gesto elimina la actividad`
+  ).toMatch(/Borrar de todos sus d[ií]as|Delete from all its days/);
+
+  // El aviso visual: los siete bloques tienen que verse en rojo antes de soltar.
+  const rojos = await page.locator('.activity-item.hres-afectado').count();
+  expect(rojos, 'no se marcaron los 7 días que se van').toBe(7);
+
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+
+  const vivos = await page.locator('.activity-item[title="Oración"]').count();
+  expect(vivos, 'barrer toda la corrida NO eliminó la actividad').toBe(0);
+
+  const deshacer = page.locator('#btn-undo');
+  await expect(deshacer, 'el botón Deshacer no habilitó tras el borrado').toBeEnabled();
+  await deshacer.click();
+  await page.waitForTimeout(800);
+  const resucitados = await page.locator('.activity-item[title="Oración"]').count();
+  expect(resucitados, 'el Deshacer no devolvió la actividad').toBe(7);
+});
+
 test('Barrido del asa: un día menos solo y el clásico siguen igual', async ({ page }) => {
   const asa = await asaDerecha(page);
 
