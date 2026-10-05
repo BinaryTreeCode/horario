@@ -175,9 +175,9 @@ async function fijarRango24h(page: import('@playwright/test').Page) {
   await page.reload();
 }
 
-// 390/480 = los dos anchos donde el chip se aplastaba (480 es donde la media
-// query de 480px empieza a aplicar). 768 = control: ahí el bloque de 480 no
-// manda y el chip siempre estuvo bien.
+// 320/390/480 = los anchos donde el chip se aplastaba (480 es donde la media
+// query de 480px empieza a aplicar; 320 es el celu más angosto que probamos).
+// 768 = control: ahí el bloque de 480 no manda y el chip siempre estuvo bien.
 // Piso de fuente: en móvil el chip se sube a 11px (0.7rem); a 768 manda la
 // regla base de 0.65rem y se le pide menos para que el control no se acuse.
 for (const [ancho, minFuentePx] of [[320, 11], [390, 11], [480, 11], [768, 9]] as const) {
