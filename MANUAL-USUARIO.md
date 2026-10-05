@@ -132,6 +132,7 @@ Ahora, en su lugar:
 - **Categorías**: renombrar, colorear, añadir, eliminar y **reordenar arrastrando** (la paleta de colores de la grilla sigue el orden).
 - **Idioma**: Español / English, aplicado al instante.
 - **Tema**: **Claro / Oscuro / Sistema**. Se aplica al instante y queda guardado (viaja con el respaldo). "Sistema" sigue al tema del celular o la computadora, así que si lo cambias ahí la app se entera sola.
+  Además, el botón de tema del encabezado (junto al de ajustes) alterna entre claro y oscuro de un clic: el icono te dice a cuál saltas. Con "Sistema" elegido pasa a un tema fijo; para volver a "Sistema" hay que venir a Ajustes.
 - Guardar solo aplica al pulsar **"Guardar Todo"**; Cancelar descarta.
 
 ---

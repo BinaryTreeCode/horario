@@ -1295,7 +1295,7 @@
     {/if}
     {#each days as day, i}
       {@const dayData = getDayActivitiesWithLayout(i, previewDelDia(i), draggedActivityId !== null && (dragSourceDay === i || dropPreview?.day === i || redimDiaOrigen === i) ? draggedActivityId : null)}
-      <div class="day-column" class:col-dragging={draggedActivityId !== null} class:col-hoy={i === hoyIdx}
+      <div class="day-column" class:col-dragging={draggedActivityId !== null}
         class:col-hres-ganar={hresPreview?.accion === 'ganar' && hresPreview.dias.includes(i)}>
         <!-- Nombre completo SIEMPRE accesible: en columna angosta el header muestra
              la abreviatura (Mié/Sáb) y el title lleva el nombre entero. Sin
@@ -1794,8 +1794,14 @@
 
   /* ── Señalización del día actual ──
      El header de hoy se tiñe de verde (color de la app) y lleva el badge
-     "Hoy"; la columna entera lleva un borde sutil para encontrarla de
-     reojo sin marear con colores fuertes el tablero completo. */
+     "Hoy". Con eso alcanza para encontrarlo de reojo sin marear el tablero.
+
+     La columna entera NO lleva filete en los costados: el guard de gestos
+     del barrido lateral (que sí es real) rechaza que nada dentro de
+     la columna la marque entera, porque el dedo se mueve en HORIZONTAL.
+     Ese filete existía desde antes del guard y solo se hacía
+     visible cuando el barrido caía sobre la columna de hoy, es decir
+     un día sí y un día no. */
   .day-header.header-hoy {
     background: rgb(var(--verde-lavado) / 0.1);
     color: rgb(var(--verde-texto));
@@ -1817,11 +1823,6 @@
     align-items: center;
     letter-spacing: 0.02em;
     flex-shrink: 0;
-  }
-  /* Columna de hoy: borde verde sutil en los costados (no tapa el grid:
-     outline no ocupa espacio de layout). */
-  .day-column.col-hoy .slots-grid {
-    box-shadow: inset 2px 0 0 rgb(var(--sombra) / 0.25), inset -2px 0 0 rgb(var(--sombra) / 0.25);
   }
 
   /* ── Preview del hResize (asas laterales) ──

@@ -335,6 +335,19 @@ test.describe('Contraste real (componiendo el fondo)', () => {
     await esperarAnimacion(page);
     const fallosSemana = await contrasteReal(page);
     expect(fallosSemana, 'Contraste < AA en modo oscuro (Semana): ' + fallosSemana.join(' | ')).toEqual([]);
+
+    /* El modal es el otro lugar donde el usuario pasa tiempo, y antes solo se
+       media en claro: un formulario con un campo apagado o un boton que se
+       pierde contra el fondo se descubre recien cuando ya se esta
+       escribiendo, que es el peor momento para descubrirlo. Se mide el MISMO
+       modal que el guard de claro (creacion, desde un tap en el track). */
+    await page.locator(TAB_DIA).click();
+    await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
+    await page.locator('.activities-track').first().click({ position: { x: 200, y: 300 } });
+    await expect(page.locator('.modal-content[role="dialog"]')).toBeVisible({ timeout: 30_000 });
+    await esperarAnimacion(page);
+    const fallosModal = await contrasteReal(page);
+    expect(fallosModal, 'Contraste < AA en modo oscuro (modal): ' + fallosModal.join(' | ')).toEqual([]);
   });
 
 /**

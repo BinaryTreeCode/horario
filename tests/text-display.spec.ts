@@ -344,6 +344,25 @@ async function guardarTema(page: import('@playwright/test').Page, valor: string 
 }
 
 /**
+ * Lee la preferencia guardada (null si no hay fila). Es lo que viajaría en el
+ * sync: un tema que solo vive en el store se pierde al recargar y en el otro
+ * dispositivo, así que el guard de persistencia tiene que mirar la BD.
+ */
+async function leerTemaGuardado(page: import('@playwright/test').Page): Promise<string | null> {
+  return page.evaluate(() => new Promise<string | null>((resolve, reject) => {
+    const req = indexedDB.open('ScheduleDB');
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('settings', 'readonly');
+      const get = tx.objectStore('settings').get('tema');
+      get.onsuccess = () => { db.close(); resolve(get.result ? get.result.value : null); };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+    req.onerror = () => reject(req.error);
+  }));
+}
+
+/**
  * Espera a que el ARRANQUE haya resuelto el tema desde la BD y lo haya
  * pintado. No alcanza con esperar que el atributo exista: el script
  * anti-destello del <head> lo pone de entrada (leyendo el espejo de
@@ -410,17 +429,7 @@ test('Ajustes: elegir "Oscuro" cambia la pantalla, guarda y sobrevive la recarga
     'elegir "Oscuro" no repintó la pantalla').toBe('oscuro');
 
   // Quedó en la BD (y por lo tanto viaja en el sync como los demás ajustes).
-  const guardado = await page.evaluate(() => new Promise<string | null>((resolve, reject) => {
-    const req = indexedDB.open('ScheduleDB');
-    req.onsuccess = () => {
-      const db = req.result;
-      const tx = db.transaction('settings', 'readonly');
-      const get = tx.objectStore('settings').get('tema');
-      get.onsuccess = () => { db.close(); resolve(get.result ? get.result.value : null); };
-      get.onerror = () => { db.close(); reject(get.error); };
-    };
-    req.onerror = () => reject(req.error);
-  }));
+  const guardado = await leerTemaGuardado(page);
   expect(guardado, 'el tema no se persistió en la tabla settings').toBe('oscuro');
 
   // Y sobrevive a la recarga (el splash del <head> no puede dejarlo en claro).
@@ -437,4 +446,95 @@ test('Modo sistema: sin preferencia guardada sigue al tema del dispositivo', asy
     expect(await temaPintado(page), `con el SO en ${colorScheme} el app quedó en el tema equivocado`)
       .toBe(esperado);
   }
+});
+
+/**
+ * El interruptor rápido del header.
+ *
+ * Existe por una razón concreta: Ajustes está a un clic, sí, pero solo en la
+ * Semana con pantalla ancha; en el celu hay que scrollear y en Día la vista
+ * ya está llena. Cambiar de tema es el ajuste más usado después del idioma y
+ * no debería costar un paseo por Ajustes.
+ *
+ * Lo que se verifica NO es "el botón existe" (eso lo da el render) sino las
+ * tres cosas que un interruptor puede tener rotas y seguir pareciendo bien:
+ * que la pantalla cambie de verdad, que el cambio quede en la BD (si no, se
+ * pierde al recregar y no viaja en el sync) y que siga disponible en la
+ * vista Día, que es donde el usuario consulta el horario.
+ */
+test('Interruptor del header: cambia la pantalla, la guarda y vuelve a cambiarla', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto('/');
+  await guardarTema(page, 'claro');
+  await page.reload();
+  expect(await temaPintado(page)).toBe('claro');
+
+  const btn = page.locator('#btn-tema');
+  await expect(btn, 'no aparece el interruptor de tema en el header').toBeVisible({ timeout: 30_000 });
+
+  // Zona táctil: es un botón icónico del header y comparte la regla de 44px con
+  // el resto (regla dura #5). Un icono de 20px dentro de una caja de 30 sería
+  // inalcanzable con el dedo.
+  const alto = await btn.evaluate(el => Math.round(el.getBoundingClientRect().height));
+  expect(alto, `el interruptor mide ${alto}px de alto`).toBeGreaterThanOrEqual(44);
+
+  // El aria-label describe la ACCIÓN (a qué tema salta), no el estado. Se
+  // comprueba que existe y que cambia al invertir el tema: al depender del
+  // idioma guardado, comparar el texto con una palabra fija haría el guard
+  // pasar en verde solo en español.
+  const etiquetaAntes = await btn.getAttribute('aria-label');
+  expect(etiquetaAntes, 'el interruptor no tiene aria-label').toBeTruthy();
+  expect(await btn.getAttribute('title'), 'el title no coincide con el aria-label')
+    .toBe(etiquetaAntes);
+
+  await btn.click();
+  expect(
+    await page.evaluate(() => document.documentElement.dataset.tema),
+    'una pulsación del interruptor no cambió la pantalla'
+  ).toBe('oscuro');
+  expect(
+    await btn.getAttribute('aria-label'),
+    'el aria-label sigue igual tras cambiar: ya no describe el destino'
+  ).not.toBe(etiquetaAntes);
+
+  expect(await leerTemaGuardado(page), 'el interruptor no persistió el tema').toBe('oscuro');
+
+  await page.reload();
+  expect(await temaPintado(page), 'al recargar se perdió el tema del interruptor').toBe('oscuro');
+
+  // Sigue disponible en Día: el header es lo único común a las dos vistas.
+  await page.locator('#tab-day').click();
+  await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
+  await expect(btn, 'el interruptor desaparece en la vista Día').toBeVisible();
+  await btn.click();
+  expect(
+    await page.evaluate(() => document.documentElement.dataset.tema),
+    'la segunda pulsación no volvió al tema claro'
+  ).toBe('claro');
+});
+
+/**
+ * El caso que separa un interruptor de una trampa: la preferencia "sistema" es
+ * el estado por defecto de una instalación nueva, así que es el primer
+ * interruptor que pulsa cualquiera.
+ *
+ * Si la decisión se tomara sobre la PREFERENCIA en vez de sobre lo que se ve,
+ * "sistema" saltaría a "sistema" y el botón no haría nada — con el agravante de
+ * que el atributo <html> ni siquiera cambiaría y el guard de este archivo
+ * pasaría en verde. De ahí que este caso sea propio y no un detalle del otro.
+ */
+test('Interruptor: con la preferencia en "sistema" igual cambia la pantalla', async ({ page }) => {
+  await page.goto('/');
+  await guardarTema(page, 'sistema');
+  // SO en oscuro: se ve oscuro y el interruptor tiene que llevar a claro.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.reload();
+  expect(await temaPintado(page)).toBe('oscuro');
+
+  await page.locator('#btn-tema').click();
+  expect(
+    await page.evaluate(() => document.documentElement.dataset.tema),
+    'con la preferencia en "sistema" el interruptor no hizo nada'
+  ).toBe('claro');
+  expect(await leerTemaGuardado(page), 'no fijó un tema concreto').toBe('claro');
 });

@@ -16,7 +16,7 @@
  * sin eso, una recarga en oscuro muestra un destello blanco.
  */
 
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { db, now } from './db';
 
 export type Tema = 'claro' | 'oscuro' | 'sistema';
@@ -133,4 +133,31 @@ export async function elegirTema(nuevo: Tema): Promise<void> {
   try {
     await db.settings.put({ id: CLAVE_TEMA, key: CLAVE_TEMA, value: nuevo, updatedAt: now() });
   } catch { /* sin BD: el tema queda solo en memoria esta sesión */ }
+}
+
+/**
+ * A dónde salta el interruptor rápido: SIEMPRE al contrario de lo que se ve.
+ *
+ * Se decide sobre el tema EFECTIVO y no sobre la preferencia, y esa es toda la
+ * diferencia entre un interruptor útil y uno que parece roto. Con la
+ * preferencia en "sistema", mirar la preferencia daría "sistema → sistema"
+ * (no cambiaría nada) o, peor, saltaría al ciclo y dejaría al usuario
+ * encerrado en un orden de tres estados que hay que conocer de memoria. Con
+ * el efectivo, cada pulsación cambia de verdad lo que está en pantalla.
+ *
+ * El precio consciente: desde "sistema" se sale a un tema fijo y el atajo no
+ * vuelve a "sistema". Es la decisión correcta porque volver a "sistema" es un
+ * acto deliberado ("quiero que siga al dispositivo"), y ese acto vive en
+ * Ajustes, donde las tres opciones están una al lado de la otra.
+ *
+ * Es pura a propósito —la decisión vive acá y el botón solo la aplica— para
+ * que el test la pueda verificar sin DOM ni IndexedDB.
+ */
+export function temaOpuesto(efectivo: TemaEfectivo): Tema {
+  return efectivo === 'oscuro' ? 'claro' : 'oscuro';
+}
+
+/** El interruptor del header: salta al contrario de lo que se ve y lo guarda. */
+export function alternarTema(): void {
+  void elegirTema(temaOpuesto(get(temaEfectivo)));
 }

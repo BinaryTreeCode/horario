@@ -19,7 +19,8 @@
   import { onSyncChange, syncNow, subirAhora, bajarAhora, SIN_SESION } from '../lib/sync';
   import { t, tNow, idioma } from '../lib/i18n';
   import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
-  import { Eye, EyeOff } from '@lucide/svelte';
+  import { temaEfectivo, alternarTema } from '../lib/tema';
+  import { Eye, EyeOff, Sun, Moon } from '@lucide/svelte';
   import type { SyncStatus } from '../lib/types';
 
   let currentView = $state('week'); // 'week' | 'day'
@@ -217,6 +218,12 @@
     location.reload();
   }
   
+  // Que dice el interruptor de tema del header. El icono y el texto apuntan al
+  // tema al que SALTA, no al que hay: es el criterio del Eye/EyeOff del menu
+  // Datos. Y no dice cual es el actual porque eso ya se ve en la pantalla, y
+  // cambiar de tema es reversible de un clic.
+  const temaTitulo = $derived($temaEfectivo === 'oscuro' ? $t('header.themeToLight') : $t('header.themeToDark'));
+
   let showSettings = $state(false);
   let showActivityModal = $state(false);
 
@@ -682,6 +689,24 @@
         </button>
         <!-- (Modo privacidad retirado del header: vive como ítem del menú
              Datos. Header mínimo: compactar ×2, nueva actividad, ajustes.) -->
+        <!-- Interruptor rapido de tema. El header es lo unico comun a las DOS
+             vistas, asi que un atajo a un clic no puede depender de entrar a
+             Ajustes (que en Dia es un paso extra y en movil cuesta un scroll).
+             Icono solo, como los demas btn-icon: con el texto la fila del
+             header no entra ni en ultrawide y las pestañas se descentran. -->
+        <button
+          id="btn-tema"
+          class="btn btn-secondary btn-icon"
+          onclick={alternarTema}
+          aria-label={temaTitulo}
+          title={temaTitulo}
+        >
+          {#if $temaEfectivo === 'oscuro'}
+            <Sun size={20} />
+          {:else}
+            <Moon size={20} />
+          {/if}
+        </button>
         <button class="btn btn-secondary btn-icon" onclick={openSettings} aria-label={$t('header.settings')}>
           <Settings size={20} />
         </button>

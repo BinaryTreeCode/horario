@@ -31,6 +31,11 @@ const es: Catalogo = {
   'header.adjustDownTitle': 'Empuja todas las actividades hacia el final del día, preservando los huecos entre ellas',
   'header.newActivity': 'Nueva Actividad',
   'header.settings': 'Abrir ajustes',
+  // Interruptor rápido del header: el icono y el aria-label describen el
+  // tema al que SALTA, no el que hay (mismo criterio que Eye/EyeOff del
+  // menú Datos). Por eso son dos claves y no una con el nombre del tema.
+  'header.themeToLight': 'Cambiar a tema claro',
+  'header.themeToDark': 'Cambiar a tema oscuro',
   'header.undo': 'Deshacer',
   'header.undoWith': 'Deshacer: {label}',
   'header.redo': 'Rehacer',
@@ -365,6 +370,8 @@ const en: Catalogo = {
   'header.adjustDownTitle': 'Push all activities toward the end of the day, preserving the gaps between them',
   'header.newActivity': 'New Activity',
   'header.settings': 'Open settings',
+  'header.themeToLight': 'Switch to light theme',
+  'header.themeToDark': 'Switch to dark theme',
   'header.undo': 'Undo',
   'header.undoWith': 'Undo: {label}',
   'header.redo': 'Redo',

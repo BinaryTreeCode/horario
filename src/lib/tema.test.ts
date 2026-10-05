@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { resolverTema, esTemaValido, type Tema } from './tema';
+import { resolverTema, esTemaValido, temaOpuesto, type Tema, type TemaEfectivo } from './tema';
 
 /**
  * El tema tiene tres preferencias pero solo dos se pintan. La resolucion
@@ -42,5 +42,37 @@ describe('esTemaValido', () => {
     for (const v of [undefined, null, '', 'dark', 'Dark', 'noche', 0, 1, true, {}, []]) {
       expect(esTemaValido(v)).toBe(false);
     }
+  });
+});
+
+/**
+ * El interruptor del header tiene una sola regla: cada pulsación cambia de
+ * verdad lo que se ve. Se decide sobre el tema EFECTIVO, no sobre la
+ * preferencia, asi que con la preferencia en "sistema" (el estado por defecto
+ * de una instalacion nueva) tambien cambia: si en vez de mirar la preferencia
+ * devolviera "sistema" para "sistema", el boton no haria nada y el usuario
+ * concluiria que esta roto.
+ */
+describe('temaOpuesto', () => {
+  test('siempre devuelve el contrario del tema que se ve', () => {
+    expect(temaOpuesto('claro')).toBe('oscuro');
+    expect(temaOpuesto('oscuro')).toBe('claro');
+  });
+
+  test('nunca devuelve "sistema": el atajo sale de el, no vuelve a el', () => {
+    // Dos pulsaciones seguidas vuelven al punto de partida, que es lo que hace
+    // util un interruptor binario.
+    for (const inicial of ['claro', 'oscuro'] as TemaEfectivo[]) {
+      const ida = temaOpuesto(inicial);
+      expect(ida, 'el atajo tiene que fijar un tema concreto').not.toBe('sistema');
+      expect(temaOpuesto(ida)).toBe(inicial);
+    }
+  });
+
+  test('con la preferencia en "sistema" el atajo respeta lo que se ve', () => {
+    // La combinacion que el usuario ve al primer uso: el SO manda y el boton
+    // propone lo contrario de la pantalla, no "sistema" ni el orden de un ciclo.
+    expect(temaOpuesto(resolverTema('sistema', false))).toBe('oscuro');
+    expect(temaOpuesto(resolverTema('sistema', true))).toBe('claro');
   });
 });
