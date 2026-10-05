@@ -1789,7 +1789,14 @@
 
   .time-bar-label {
     position: absolute;
-    right: 15px; /* Move to the left of the dot */
+    right: 10px; /* el chip termina donde empieza el punto */
+    /* MISMO ANCHO que la columna de horas (.time-track, 70px): el chip cubre
+       la columna entera, alineado con los rótulos de hora en texto (pedido:
+       antes era un chip de contenido que flotaba encima de las horas sin
+       cubrirlas). min-width — no width — para que un texto largo en español       ("7:16 p. m.") crezca hacia la izquierda sin recortarse: el ancla es
+       right, así que el excedente cae en el padding del panel, no afuera. */
+    min-width: 70px;
+    justify-content: center;
     /* La etiqueta vive DENTRO del .time-bar-dot y la línea es su hermano
        POSTERIOR: a igual nivel de apilado (ambos z-index auto dentro del
        .time-bar) gana el hermano del árbol, así que la línea se pintaba encima.
@@ -1812,14 +1819,11 @@
     align-items: center;
   }
 
-  .time-bar-label::after {
-    content: '';
-    position: absolute;
-    right: -4px;
-    border-top: 4px solid transparent;
-    border-bottom: 4px solid transparent;
-    border-left: 4px solid rgb(var(--rojo-texto));
-  }
+  /* (Flechita ::after retirada: apuntaba del chip al punto cuando había
+       hueco entre ambos; ahora el chip termina EN el punto y la flecha solo
+       solapaba — y además se salía 4px del borde derecho del chip, inflando
+       el scrollWidth y haciendo creer al guard de recorte que el texto no
+       cabía. Menos ornamento, misma lectura.) */
   .time-bar-line {
     flex: 1;
     height: 2px;
@@ -1924,19 +1928,13 @@
     .time-bar {
       left: -0.5rem;
     }
-    /* En móvil el chip de hora se salía por la izquierda (right:15px lo
-       ancla al dot sobre la columna de horas): anclarlo AL BORDE IZQUIERDO
-       del track, con la flecha mirando a la derecha. */
+    /* El chip cubre la columna de horas igual que en escritorio, pero a su
+       escala: 56px de .time-track en móvil. El ancla right del bloque base
+       (borde derecho del chip = borde izquierdo del punto) hace que el chip
+       quede SIEMPRE dentro de la columna — el viejo desborde por la izquierda
+       desapareció con el ancho fijo y la flecha vuelve a mirar al punto. */
     .time-bar-label {
-      right: auto;
-      left: 0.25rem;
-      border-radius: 4px 0 4px 4px;
-    }
-    .time-bar-label::after {
-      right: auto;
-      left: -4px;
-      border-left: none;
-      border-right: 4px solid rgb(var(--rojo-texto));
+      min-width: 56px;
     }
     /* Banner apilado pero con acciones a ancho completo y 44px táctiles */
     .override-banner {
@@ -2000,20 +1998,18 @@
       width: 8px;
       height: 8px;
     }
-    /* OJO: en móvil el chip se ancla a la IZQUIERDA (bloque de 768: left y
-       right:auto). Este bloque también aplica en ≤480 y va después en el
-       fuente, así que si repone `right` deja el chip fijado por AMBOS lados a
-       la vez y el navegador lo aplasta al ancho sobrante: medido, 11px de ancho
-       para un texto de 56 ("12:14 PM"), o sea invisible. Hay que dejar un solo
-       ancla. */
+    /* OJO: este bloque aplica en ≤480 y va después del de 768 en el fuente:
+       si repusiera `left` junto al `right` del bloque base, el chip quedaría
+       fijado por AMBOS lados y el navegador lo aplastaría al ancho sobrante
+       (medido una vez: 11px para un texto de 56). Una sola ancla: right. */
     .time-bar-label {
       /* 0.7rem = 11.2px: el 0.6rem anterior (9.6px) se leía con lupa en el
-         celu. Es el piso cómodo para texto chico en móvil y sigue entrando de
-         sobra en la cinta más angosta: medido a 320px, el chip mide 63x22
-         ("7:16 p. m.") dentro de una pista de 281px, sin recorte. */
+         celu. Es el piso cómodo para texto chico en móvil; el min-width del
+         bloque de 768 (56px) lo contiene y lo largo crece hacia la izquierda.
+         right: 8px = el ancho del punto aquí (8px): el chip le queda pegado
+         sin hueco, igual que en escritorio. */
       font-size: 0.7rem;
-      right: auto;
-      left: 0.25rem;
+      right: 8px;
     }
   }
 </style>
