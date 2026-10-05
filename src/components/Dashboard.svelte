@@ -677,6 +677,10 @@
       <!-- Acciones del header: visibles en móvil/tablet siempre, y en desktop
            solo en Semana (en Día viven en la barra lateral dentro del panel). -->
       <div class="header-actions">
+        <!-- Acciones de EDICIÓN envueltas: en Día-escritorio bajan a la tira
+             vertical junto al horario (y acá se ocultan). El tema NO va dentro:
+             configuración siempre en el header, en ambas vistas. -->
+        <div class="acciones-edicion" class:en-dia={currentView === 'day'}>
         <!-- Deshacer / Rehacer: mismos guards y misma ejecución que Ctrl+Z
              (ejecutarUndo). Deshabilitados cuando su pila está vacía. -->
         <button
@@ -708,6 +712,7 @@
         <button class="btn btn-plus" onclick={() => openActivityModal(null, currentView === 'day' ? selectedDay : null)} aria-label={$t('header.newActivity')}>
           <Plus size={20} /> <span class="hide-mobile">{$t('header.newActivity')}</span>
         </button>
+        </div>
         <!-- (Modo privacidad retirado del header: vive como ítem del menú
              Datos. Header mínimo: compactar ×2, nueva actividad, ajustes.) -->
         <!-- Interruptor rapido de tema. El header es lo unico comun a las DOS
@@ -819,8 +824,11 @@
           </div>
         </div>
       {:else}
-        <!-- Vista Día: mismas acciones que Semana (header único, sin sidebar
-             duplicada: escritorio edita, móvil ve). -->
+        <!-- Vista Día: en escritorio las acciones de edición viven en una tira
+             vertical a la derecha del horario (el panel se corre a la izquierda
+             y deja de sobrar espacio); en móvil siguen en el header. La
+             configuración (tema, ajustes, datos) SIEMPRE queda arriba. -->
+        <div class="dia-con-tira">
         <div class="day-layout glass-panel">
           {#if DailyViewComp}
             <DailyViewComp 
@@ -859,6 +867,30 @@
               </div>
             </div>
           {/if}
+        </div>
+
+        <!-- Tira vertical de acciones: los mismos handlers y guards que los
+             botones del header (que en Día-escritorio se ocultan). IDs nuevos
+             para no duplicar btn-undo/btn-redo del header (axe: ids únicos). -->
+        <div class="tira-dia" role="toolbar" aria-orientation="vertical" aria-label={$t('dayView.tiraAcciones')}>
+          <button class="btn btn-secondary btn-icon" onclick={() => ejecutarUndo(false)} disabled={stackCount === 0} aria-label={undoTitulo} title={undoTitulo}>
+            <Undo2 size={20} />
+          </button>
+          <button class="btn btn-secondary btn-icon" onclick={() => ejecutarUndo(true)} disabled={redoCount === 0} aria-label={redoTitulo} title={redoTitulo}>
+            <Redo2 size={20} />
+          </button>
+          <div class="tira-sep" role="presentation"></div>
+          <button class="btn btn-secondary btn-icon" onclick={coverGapsAbove} aria-label={$t('header.adjustUp')} title={$t('header.adjustUpTitle')}>
+            <ChevronsUp size={20} />
+          </button>
+          <button class="btn btn-secondary btn-icon" onclick={coverGapsBelow} aria-label={$t('header.adjustDown')} title={$t('header.adjustDownTitle')}>
+            <ChevronsDown size={20} />
+          </button>
+          <div class="tira-sep" role="presentation"></div>
+          <button class="btn btn-plus" onclick={() => openActivityModal(null, selectedDay)} aria-label={$t('header.newActivity')} title={$t('header.newActivity')}>
+            <Plus size={20} />
+          </button>
+        </div>
         </div>
       {/if}
     </div>
@@ -1619,8 +1651,52 @@
     min-height: 44px;
   }
 
-  /* (Barra lateral de acciones de Día retirada: el header es único en ambas
-     vistas — escritorio edita con el mismo header que móvil.) */
+  /* Vista Día en escritorio: horario + tira vertical de acciones a la
+     derecha. El panel se corre a la izquierda (deja de sobrar espacio en
+     pantallas anchas) y las acciones de edición quedan a un clic del track.
+     En móvil (<1024px) la tira no existe: las acciones siguen en el header. */
+  .dia-con-tira {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1rem;
+  }
+  .dia-con-tira > .day-layout {
+    flex: 1;
+    min-width: 0;
+  }
+  .tira-dia {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    position: sticky;
+    top: 1rem;
+    padding: 0.6rem 0.45rem;
+    border-radius: 14px;
+    border: 1px solid rgb(var(--linea) / 0.35);
+    background: rgb(var(--sup) / 0.6);
+    backdrop-filter: blur(8px);
+  }
+  /* Separador entre grupos (undo/redo · ajustar · nueva) */
+  .tira-sep {
+    width: 60%;
+    height: 1px;
+    margin: 0.1rem 0;
+    background: rgb(var(--linea) / 0.4);
+  }
+  /* Los botones de edición viven sueltos en la fila del header
+     (display:contents) pero se envuelven para poder ocultarlos
+     enteros cuando la tira vertical los reemplaza. */
+  .acciones-edicion { display: contents; }
+  @media (min-width: 1024px) {
+    .tira-dia { display: flex; }
+    .acciones-edicion.en-dia { display: none; }
+    .tira-dia .btn {
+      min-width: 44px;
+      min-height: 44px;
+    }
+  }
 
   .dashboard-main {
     flex: 1;
