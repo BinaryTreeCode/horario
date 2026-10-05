@@ -1066,7 +1066,7 @@
     flex-direction: column;
     gap: 0.75rem;
     padding: 1.5rem;
-    border-bottom: 1px solid rgba(0,0,0,0.05);
+    border-bottom: 1px solid rgb(var(--linea) / 0.05);
   }
 
   .header-top-row {
@@ -1090,28 +1090,28 @@
     width: 44px;
     height: 44px;
     border-radius: 12px;
-    border: 1px solid rgba(45, 90, 39, 0.25);
-    background: rgba(255, 255, 255, 0.55);
-    color: var(--color-green-dark);
+    border: 1px solid rgb(var(--verde-borde) / 0.25);
+    background: rgb(var(--sup) / 0.55);
+    color: rgb(var(--verde-texto));
     cursor: pointer;
     transition: background 0.15s, opacity 0.15s;
   }
   .btn-day-nav:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.85);
+    background: rgb(var(--sup) / 0.85);
   }
   .btn-day-nav:disabled {
     opacity: 0.35;
     cursor: default;
   }
   .btn-day-nav:focus-visible {
-    outline: 2px solid var(--color-green-dark);
+    outline: 2px solid rgb(var(--verde-texto));
     outline-offset: 2px;
   }
 
   .daily-header h2 {
     margin: 0;
     font-size: 1.5rem;
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
     display: flex;
     align-items: center;
     gap: 0.6rem;
@@ -1122,7 +1122,7 @@
   .hoy-chip {
     font-size: 0.68rem;
     font-weight: 700;
-    color: #ffffff;
+    color: rgb(var(--sobre-color));
     background: var(--color-green-dark);
     border-radius: 999px;
     padding: 3px 10px;
@@ -1138,16 +1138,16 @@
     gap: 0.5rem;
     font-size: 0.9rem;
     font-weight: 600;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
     padding: 0.5rem 1rem;
-    background: rgba(92, 64, 51, 0.05);
+    background: rgb(var(--tinta) / 0.05);
     border-radius: 20px;
   }
 
   /* ── Mode Toggle ── */
   .mode-pill-toggle {
     display: flex;
-    background: rgba(0,0,0,0.04);
+    background: rgb(var(--lavado) / 0.04);
     border-radius: 10px;
     padding: 3px;
     gap: 2px;
@@ -1165,20 +1165,20 @@
     background: transparent;
     font-size: 0.8rem;
     font-weight: 600;
-    color: #6b6b6b; /* AA (antes #888) */
+    color: rgb(var(--texto-2)); /* AA (antes #888) */
     cursor: pointer;
     transition: all 0.2s;
     white-space: nowrap;
   }
 
   .mode-btn.active {
-    background: white;
-    color: var(--color-green-dark);
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    background: rgb(var(--sup));
+    color: rgb(var(--verde-texto));
+    box-shadow: 0 1px 4px rgb(var(--sombra) / 0.08);
   }
 
   .mode-btn:hover:not(.active) {
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
   }
 
   /* ── Override Banner ── */
@@ -1187,8 +1187,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(245, 158, 11, 0.04));
-    border: 1px solid rgba(245, 158, 11, 0.25);
+    background: linear-gradient(135deg, rgb(var(--ambar-lavado) / 0.08), rgb(var(--ambar-lavado) / 0.04));
+    border: 1px solid rgb(var(--ambar-borde) / 0.25);
     border-radius: 10px;
     padding: 0.6rem 1rem;
     animation: fadeIn 0.2s ease-out;
@@ -1197,7 +1197,7 @@
   .banner-text {
     font-size: 0.82rem;
     font-weight: 600;
-    color: #b45309;
+    color: rgb(var(--ambar-texto));
   }
 
   .banner-actions {
@@ -1221,21 +1221,21 @@
   }
 
   .btn-restore {
-    background: rgba(239, 68, 68, 0.1);
-    color: #dc2626;
+    background: rgb(var(--rojo-lavado) / 0.1);
+    color: rgb(var(--rojo-texto));
   }
 
   .btn-restore:hover {
-    background: rgba(239, 68, 68, 0.2);
+    background: rgb(var(--rojo-lavado) / 0.2);
   }
 
   .btn-save {
-    background: rgba(45, 90, 39, 0.1);
-    color: var(--color-green-dark);
+    background: rgb(var(--verde-lavado) / 0.1);
+    color: rgb(var(--verde-texto));
   }
 
   .btn-save:hover {
-    background: rgba(45, 90, 39, 0.2);
+    background: rgb(var(--verde-lavado) / 0.2);
   }
 
   .daily-container {
@@ -1279,7 +1279,7 @@
   .time-track {
     width: 70px;
     position: relative;
-    border-right: 1px solid rgba(0,0,0,0.05);
+    border-right: 1px solid rgb(var(--linea) / 0.05);
   }
 
   .hour-marker {
@@ -1287,7 +1287,7 @@
     width: 100%;
     transform: translateY(-50%);
     font-size: 0.75rem;
-    color: #6b6b6b; /* AA (antes #888) */
+    color: rgb(var(--texto-2)); /* AA (antes #888) */
     display: flex;
     justify-content: flex-end;
     padding-right: 0.5rem;
@@ -1310,7 +1310,7 @@
     padding: 1.25rem 1rem;
     text-align: center;
     pointer-events: none; /* el tap pasa al track → abre el modal */
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
     opacity: 0.85;
   }
   .empty-state .empty-icon {
@@ -1324,7 +1324,7 @@
 
   .daily-activity-card {
     position: absolute;
-    background: white;
+    background: rgb(var(--sup));
     border-left: 5px solid;
     padding: 0.35rem 0.85rem;
     box-sizing: border-box;
@@ -1336,7 +1336,7 @@
     min-height: 0;
     z-index: 1;
     border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    box-shadow: 0 1px 3px rgb(var(--sombra) / 0.05);
     cursor: grab;
     touch-action: pan-y; /* scroll vertical nativo; el drag (long-press) lo desactiva */
     -webkit-user-select: none;
@@ -1344,7 +1344,7 @@
   }
 
   .daily-activity-card:focus-visible {
-    outline: 3px solid var(--color-green-dark, #2d5a3d);
+    outline: 3px solid rgb(var(--verde-texto));
     outline-offset: 2px;
     z-index: 3;
   }
@@ -1376,7 +1376,7 @@
     width: 28px;
     height: 4px;
     border-radius: 2px;
-    background: rgba(0, 0, 0, 0.18);
+    background: rgb(var(--lavado) / 0.18);
     opacity: 0;
     transition: opacity 0.15s;
   }
@@ -1422,7 +1422,7 @@
   .daily-activity-card.dragging:hover {
     transform: none;
     overflow: hidden;
-    background: white;
+    background: rgb(var(--sup));
   }
 
   /* Flicker en la colisión (fix): en pleno drag el hover de TODAS las tarjetas
@@ -1439,9 +1439,9 @@
   .track-dragging .daily-activity-card:focus-visible:not(.dragging) {
     transform: none;
     overflow: hidden;
-    background: white;
+    background: rgb(var(--sup));
     z-index: auto;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    box-shadow: 0 1px 3px rgb(var(--sombra) / 0.05);
   }
   .daily-activity-card.dragging,
   .daily-activity-card.dragging:hover,
@@ -1479,7 +1479,7 @@
     opacity: 1; /* opaca: semi-transparente dejaba ver el texto del vecino a través ("texto duplicado") */
     /* Sombra del bloque flotante de la demo: capa de contacto + caída suave
        y profunda — la tarjeta se ve "levantada" de la grilla. */
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15), 0 12px 28px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 10px rgb(var(--sombra) / 0.15), 0 12px 28px rgb(var(--sombra) / 0.3);
     z-index: 100;
     cursor: grabbing;
     will-change: transform;
@@ -1487,12 +1487,12 @@
 
   /* Drop inválido: no cabe / pisaría — rojo y al soltar vuelve a su sitio. */
   .daily-activity-card.drop-invalid {
-    background: #e0453a !important;
-    border-left-color: #8f2318 !important;
-    color: #fff;
+    background: rgb(var(--rojo-solido)) !important;
+    border-left-color: rgb(var(--rojo-borde)) !important;
+    color: rgb(var(--sobre-color));
   }
   .daily-activity-card.drop-invalid .activity-name {
-    color: #fff;
+    color: rgb(var(--sobre-color));
   }
 
   /* Accesibilidad: quien pide menos movimiento no recorre la cascada —
@@ -1511,10 +1511,10 @@
 
   .daily-activity-card:hover {
     transform: translateX(4px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 4px 12px rgb(var(--sombra) / 0.12);
     z-index: 10;
     overflow: visible;
-    background: #fdfdfd;
+    background: rgb(var(--sup));
   }
 
   .daily-activity-card.is-short {
@@ -1566,18 +1566,18 @@
   .activity-image-thumb {
     flex-shrink: 0;
     position: relative; /* ancla del ::before (zona táctil invisible) */
-    border: 2px solid rgba(255, 255, 255, 0.9);
+    border: 2px solid rgb(var(--borde-blanco) / 0.9);
     padding: 0;
     background: none;
     cursor: zoom-in;
     border-radius: 50%;
     width: 24px;
     height: 24px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 1px 3px rgb(var(--sombra) / 0.2);
     transition: transform 0.15s;
   }
   .activity-image-thumb:focus-visible {
-    outline: 2px solid var(--color-green-dark, #2f6b2f);
+    outline: 2px solid rgb(var(--verde-texto));
     outline-offset: 2px;
   }
 
@@ -1611,19 +1611,19 @@
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
-    background: rgba(45, 90, 39, 0.1);
-    color: var(--color-green-dark);
+    background: rgb(var(--verde-lavado) / 0.1);
+    color: rgb(var(--verde-texto));
     font-size: 0.7rem;
     font-weight: 700;
     padding: 0.15rem 0.4rem;
     border-radius: 6px;
     white-space: nowrap;
-    border: 1px solid rgba(45, 90, 39, 0.15);
+    border: 1px solid rgb(var(--verde-borde) / 0.15);
   }
 
   .activity-steps-badge.all-done {
-    background: rgba(45, 90, 39, 0.2);
-    color: var(--color-green-dark);
+    background: rgb(var(--verde-lavado) / 0.2);
+    color: rgb(var(--verde-texto));
   }
 
   .edit-btn {
@@ -1631,9 +1631,9 @@
     top: 50%;
     right: 0.75rem;
     transform: translateY(-50%);
-    background: white;
+    background: rgb(var(--sup));
     border: none;
-    color: #bbb;
+    color: rgb(var(--texto-3));
     cursor: pointer;
     /* Accesibilidad: target táctil >= 44px (regla dura #5) aunque el icono
        siga a 13px. En tarjetas de 15-30min la tarjeta mide menos de 44px de
@@ -1648,7 +1648,7 @@
     opacity: 0;
     transition: all 0.2s;
     border-radius: 6px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 5px rgb(var(--sombra) / 0.1);
   }
   /* Tarjetas más altas que 44px: el botón no necesita excederse.
      El centro queda anclado igual (margin-top fijo por transform). */
@@ -1661,7 +1661,7 @@
   }
 
   .edit-btn:hover {
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
   }
 
   .time-bar {
@@ -1678,9 +1678,9 @@
   .time-bar-dot {
     width: 10px;
     height: 10px;
-    background: #e53e3e;
+    background: rgb(var(--rojo-solido));
     border-radius: 50%;
-    box-shadow: 0 0 5px rgba(229, 62, 62, 0.5);
+    box-shadow: 0 0 5px rgb(var(--sombra) / 0.5);
     position: relative;
     display: flex;
     align-items: center;
@@ -1699,8 +1699,8 @@
        franja roja al 50%). Con z-index la etiqueta queda por encima y la línea
        arranca después de ella. */
     z-index: 1;
-    background: #c53030; /* AA con blanco 4.9:1 (antes #e53e3e = 3.7:1) */
-    color: white;
+    background: rgb(var(--rojo-solido)); /* AA con blanco 4.9:1 (antes #e53e3e = 3.7:1) */
+    color: rgb(var(--sobre-color));
     font-size: 0.65rem;
     font-weight: 700;
     padding: 0.15rem 0.35rem;
@@ -1717,12 +1717,12 @@
     right: -4px;
     border-top: 4px solid transparent;
     border-bottom: 4px solid transparent;
-    border-left: 4px solid #e53e3e;
+    border-left: 4px solid rgb(var(--rojo-texto));
   }
   .time-bar-line {
     flex: 1;
     height: 2px;
-    background: #e53e3e;
+    background: rgb(var(--rojo-solido));
     opacity: 0.5;
   }
 
@@ -1733,10 +1733,10 @@
     flex-direction: column;
     padding: 0.5rem;
     min-width: 200px;
-    background: white;
+    background: rgb(var(--sup));
     border-radius: 12px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-    border: 1px solid rgba(0,0,0,0.05);
+    box-shadow: 0 10px 25px rgb(var(--sombra) / 0.15);
+    border: 1px solid rgb(var(--linea) / 0.05);
     animation: fadeIn 0.1s ease-out;
   }
 
@@ -1755,27 +1755,27 @@
     cursor: pointer;
     font-size: 0.9rem;
     font-weight: 500;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
     border-radius: 8px;
     transition: all 0.2s;
     text-align: left;
   }
 
   .custom-context-menu button:hover {
-    background: rgba(92, 64, 51, 0.05);
-    color: var(--color-green-dark);
+    background: rgb(var(--tinta) / 0.05);
+    color: rgb(var(--verde-texto));
   }
 
   .custom-context-menu button.delete-btn {
-    color: #e53e3e;
-    border-top: 1px solid rgba(0,0,0,0.05);
+    color: rgb(var(--rojo-texto));
+    border-top: 1px solid rgb(var(--linea) / 0.05);
     margin-top: 0.25rem;
     padding-top: 0.75rem;
     border-radius: 0 0 8px 8px;
   }
 
   .custom-context-menu button.delete-btn:hover {
-    background: #fff5f5;
+    background: rgb(var(--rojo-lavado));
   }
 
   /* ── Cobertura móvil escalonada (misma escala que la grilla Semana) ──
@@ -1835,7 +1835,7 @@
       right: auto;
       left: -4px;
       border-left: none;
-      border-right: 4px solid #c53030;
+      border-right: 4px solid rgb(var(--rojo-texto));
     }
     /* Banner apilado pero con acciones a ancho completo y 44px táctiles */
     .override-banner {

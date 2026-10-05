@@ -1034,14 +1034,14 @@
   .logo {
     font-size: 1.25rem;
     font-weight: 700;
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
     /* h1: neutralizar el estilo de agente de usuario y mantener el aspecto previo */
     margin: 0;
   }
 
   .view-tabs {
     display: flex;
-    background: rgba(92, 64, 51, 0.05);
+    background: rgb(var(--tinta) / 0.05);
     padding: 0.25rem;
     border-radius: 10px;
     gap: 0.25rem;
@@ -1069,9 +1069,9 @@
   }
 
   .view-tabs button.active {
-    background: white;
-    color: var(--color-green-dark);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    background: rgb(var(--sup));
+    color: rgb(var(--verde-texto));
+    box-shadow: 0 2px 8px rgb(var(--sombra) / 0.05);
   }
 
   .header-right {
@@ -1126,7 +1126,7 @@
     border-radius: 12px;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    box-shadow: 0 8px 24px rgb(var(--sombra) / 0.18);
     /* El menú se ancla a la IZQUIERDA del botón (que está a la derecha del
        header), así que la escala tiene que crecer desde su esquina superior
        derecha: si el origen fuera top-left, el panel "crecería" hacia el
@@ -1183,7 +1183,7 @@
   }
   /* El ✓ del modo privacidad asienta con un rebote corto al aparecer. */
   .menu-check {
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
     font-weight: 700;
     animation: menuCheckIn 0.24s cubic-bezier(0.3, 1.7, 0.5, 1) both;
   }
@@ -1208,7 +1208,7 @@
     border: none;
     border-radius: 8px;
     background: transparent;
-    color: var(--color-brown-bark, #5c4033);
+    color: rgb(var(--tinta));
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
@@ -1217,7 +1217,7 @@
     transition: background 0.15s;
   }
   .menu-datos button:hover {
-    background: rgba(92, 64, 51, 0.08);
+    background: rgb(var(--tinta) / 0.08);
   }
   /* El icono acompaña al puntero: un desplazamiento de 2px da el gesto de
      "esto se abre" sin mover el texto (mover el texto saca el blanco del
@@ -1257,7 +1257,7 @@
     font-weight: 700;
     letter-spacing: 0.03em;
     text-transform: uppercase;
-    color: rgba(92, 64, 51, 0.7);
+    color: rgb(var(--tinta) / 0.7);
   }
   .menu-nube-estado {
     margin-left: auto;
@@ -1265,13 +1265,13 @@
     font-weight: 600;
     letter-spacing: 0;
     text-transform: none;
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
     white-space: nowrap;
   }
   /* Contador de pendientes: no puede ser el ✓ verde (significa "modo
      privacidad activo"); va ámbar para que se lea como aviso. */
   .menu-nube-badge {
-    color: #8a5a00;
+    color: rgb(var(--ambar-texto));
     font-size: 0.68rem;
     font-weight: 700;
     white-space: nowrap;
@@ -1284,23 +1284,23 @@
     text-align: left;
   }
   .menu-check {
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
     font-weight: 700;
   }
   .menu-datos-sep {
     height: 1px;
     margin: 0.35rem 0.5rem;
-    background: rgba(92, 64, 51, 0.14);
+    background: rgb(var(--tinta) / 0.14);
   }
 
   /* Pie informativo: fecha del último respaldo descargado (no interactivo) */
   .menu-datos-pie {
     padding: 0.45rem 0.8rem 0.3rem;
     margin-top: 0.15rem;
-    border-top: 1px solid rgba(92, 64, 51, 0.14);
+    border-top: 1px solid rgb(var(--tinta) / 0.14);
     font-size: 0.72rem;
     font-weight: 500;
-    color: rgba(92, 64, 51, 0.65);
+    color: rgb(var(--tinta) / 0.65);
     white-space: nowrap;
   }
 
@@ -1317,9 +1317,9 @@
     display: grid;
     place-items: center;
     z-index: 2000;
-    color: var(--color-green-dark, #2f6b3f);
+    color: rgb(var(--verde-texto));
     font-size: 0.95rem;
-    background: rgba(240, 246, 240, 0.6);
+    background: rgb(var(--sup-2) / 0.6);
     backdrop-filter: blur(2px);
   }
 
@@ -1346,7 +1346,7 @@
   .daily-error-msg {
     margin: 0;
     max-width: 34rem;
-    color: var(--text-primary, #2d3748);
+    color: var(--text-primary, rgb(var(--texto)));
     font-size: 1rem;
     line-height: 1.5;
   }
@@ -1356,9 +1356,9 @@
     min-width: 44px;
     padding: 0.65rem 1.5rem;
     border-radius: 999px;
-    border: 1px solid var(--color-green-dark, #2f855a);
-    background: var(--color-green-dark, #2f855a);
-    color: #ffffff;
+    border: 1px solid rgb(var(--verde-borde));
+    background: var(--color-green-dark, rgb(var(--verde-fuerte)));
+    color: rgb(var(--sobre-color));
     font-size: 0.95rem;
     font-weight: 600;
     cursor: pointer;
@@ -1381,7 +1381,7 @@
     width: 110px;
     height: 32px;
     border-radius: 16px;
-    background: rgba(92, 64, 51, 0.08);
+    background: rgb(var(--tinta) / 0.08);
     animation: skelPulso 1.2s ease-in-out infinite;
   }
   .skel-line {
@@ -1389,13 +1389,13 @@
     max-width: 320px;
     height: 14px;
     border-radius: 7px;
-    background: rgba(92, 64, 51, 0.06);
+    background: rgb(var(--tinta) / 0.06);
     animation: skelPulso 1.2s ease-in-out 150ms infinite;
   }
   .skel-track {
     position: relative;
     flex: 1;
-    border-left: 2px solid rgba(92, 64, 51, 0.08);
+    border-left: 2px solid rgb(var(--tinta) / 0.08);
     display: flex;
     flex-direction: column;
     gap: 0.9rem;
@@ -1404,8 +1404,8 @@
   .skel-block {
     height: 64px;
     border-radius: 10px;
-    border-left: 4px solid rgba(92, 64, 51, 0.12);
-    background: rgba(92, 64, 51, 0.05);
+    border-left: 4px solid rgb(var(--tinta) / 0.12);
+    background: rgb(var(--tinta) / 0.05);
     animation: skelPulso 1.2s ease-in-out infinite;
     /* anchos variados: parece contenido real, no una lista clonada */
   }
@@ -1428,16 +1428,16 @@
     gap: 0.6rem;
     padding: 0.6rem 1rem;
     border-radius: 12px;
-    border: 1px solid rgba(224, 170, 68, 0.4);
-    background: rgba(255, 244, 224, 0.92);
-    color: #6b4d16;
+    border: 1px solid rgb(var(--ambar-borde) / 0.4);
+    background: rgb(var(--sup-calido) / 0.92);
+    color: rgb(var(--ambar-texto));
     font-size: 0.88rem;
   }
   .sync-banner span { flex: 1; }
   .sync-retry {
     border: none;
-    background: #2f6b3f;
-    color: #f2f8f2;
+    background: rgb(var(--verde-fuerte));
+    color: rgb(var(--texto-calido));
     border-radius: 10px;
     padding: 0.45rem 0.9rem;
     min-height: 40px;
@@ -1455,8 +1455,8 @@
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    border: 1.5px solid #fff;
-    background: #8a8a8a;
+    border: 1.5px solid rgb(var(--borde-blanco));
+    background: rgb(var(--gris-medio));
   }
   .sync-dot.synced { background: #2e7d32; }
   .sync-dot.syncing { background: #f9a825; }
@@ -1469,8 +1469,8 @@
     align-items: center;
     justify-content: center;
     background: transparent;
-    border: 1px solid rgba(45, 90, 39, 0.25);
-    color: var(--color-green-dark);
+    border: 1px solid rgb(var(--verde-borde) / 0.25);
+    color: rgb(var(--verde-texto));
     border-radius: 50%;
     width: 44px;
     height: 44px;
@@ -1480,7 +1480,7 @@
   }
 
   .sync-badge:hover {
-    background: rgba(45, 90, 39, 0.08);
+    background: rgb(var(--verde-lavado) / 0.08);
   }
 
   .sync-badge.syncing {
@@ -1489,8 +1489,8 @@
   }
 
   .sync-badge.error {
-    color: #e53e3e;
-    border-color: rgba(229, 62, 62, 0.4);
+    color: rgb(var(--rojo-texto));
+    border-color: rgb(var(--rojo-borde) / 0.4);
   }
 
   @keyframes spin {
@@ -1552,9 +1552,9 @@
     margin-bottom: 0.75rem;
     padding: 0.25rem 0.25rem 0.25rem 0.7rem;
     border-radius: 10px;
-    background: rgba(45, 90, 39, 0.08);
-    border: 1px solid rgba(45, 90, 39, 0.16);
-    color: var(--color-green-dark, #2d5a27);
+    background: rgb(var(--verde-lavado) / 0.08);
+    border: 1px solid rgb(var(--verde-borde) / 0.16);
+    color: rgb(var(--verde-texto));
     font-size: 0.9rem;
   }
   .pista-texto {
@@ -1565,16 +1565,16 @@
     flex: none;
     min-height: 44px;
     padding: 0 0.9rem;
-    border: 1px solid rgba(45, 90, 39, 0.24);
+    border: 1px solid rgb(var(--verde-borde) / 0.24);
     border-radius: 8px;
-    background: #fff;
-    color: var(--color-green-dark, #2d5a27);
+    background: rgb(var(--sup));
+    color: rgb(var(--verde-texto));
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
   }
   .pista-ok:hover {
-    background: rgba(45, 90, 39, 0.08);
+    background: rgb(var(--verde-lavado) / 0.08);
   }
 
   .stats-section {

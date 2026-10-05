@@ -301,3 +301,140 @@ test('Día 390px: la línea roja no se pinta encima del número', async ({ page 
     `la línea roja se pintó encima de la etiqueta (corrida de ${peorCorrida}px dentro de un número de ${x1 - x0 + 1}px)`
   ).toBeLessThan(4);
 });
+
+/* ─────────────────────────── Modo oscuro ───────────────────────────────
+ *
+ * El tema no se comprueba mirando el atributo solamente: el atributo es lo
+ * que el CSS mira, pero el fallo que importa es "dice oscuro y se ve claro".
+ * Por eso el guard lee los colores COMPUTADOS del body y de un texto real de
+ * la app, y exige que en oscuro el fondo sea de verdad más oscuro que el
+ * texto (si alguien invierte un token, esta relación se rompe al instante).
+ *
+ * El atributo se lee de <html>, que es donde lo escribe lib/tema.ts; el
+ * selector de Ajustes se maneja por `data-tema-opcion` y no por su texto, para
+ * que el guard no dependa del idioma guardado en el dispositivo.
+ */
+
+/** Luminancia relativa 0-1 de un color `rgb(r, g, b)` de getComputedStyle. */
+function luminancia(color: string): number {
+  const m = color.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+  if (!m) throw new Error(`no se pudo leer el color: ${color}`);
+  const lin = [m[1], m[2], m[3]].map(v => {
+    const c = Number(v) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+
+/** Escribe (o borra con null) la fila de ajustes del tema. */
+async function guardarTema(page: import('@playwright/test').Page, valor: string | null) {
+  await page.evaluate((v: string | null) => new Promise<void>((resolve, reject) => {
+    const req = indexedDB.open('ScheduleDB');
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('settings', 'readwrite');
+      const store = tx.objectStore('settings');
+      if (v === null) store.delete('tema');
+      else store.put({ id: 'tema', key: 'tema', value: v, updatedAt: Date.now() });
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+    req.onerror = () => reject(req.error);
+  }), valor);
+}
+
+/**
+ * Espera a que el ARRANQUE haya resuelto el tema desde la BD y lo haya
+ * pintado. No alcanza con esperar que el atributo exista: el script
+ * anti-destello del <head> lo pone de entrada (leyendo el espejo de
+ * localStorage), asi que esperarlo sin mas daria un "claro" de carrera.
+ */
+async function temaPintado(page: import('@playwright/test').Page): Promise<string | undefined> {
+  await expect
+    .poll(async () => page.evaluate(() => document.documentElement.dataset.temaListo), { timeout: 30_000 })
+    .toBe('1');
+  return page.evaluate(() => document.documentElement.dataset.tema);
+}
+
+test('Modo oscuro: la preferencia guardada invierte fondo y texto', async ({ page }) => {
+  await page.goto('/');
+  await guardarTema(page, 'oscuro');
+  await page.reload();
+  expect(await temaPintado(page), 'la preferencia "oscuro" no llegó a <html>').toBe('oscuro');
+
+  // La superficie real y el texto real, no los tokens: esto falla si la paleta
+  // oscura no está aplicada aunque el atributo esté puesto. Se miden DOS
+  // superficies porque el fondo de página y el de las tarjetas son tokens
+  // distintos: con solo el primero, una paleta que se olvidara de las
+  // tarjetas pasaría el guard (verificado: así no mordía).
+  const colores = await page.evaluate(() => {
+    const superficie = document.querySelector(
+      '.daily-activity-card, .glass-panel, .stat-card, .week-block, .modal-content'
+    );
+    const texto = document.querySelector('h1, .day-title, .week-title');
+    return {
+      fondo: getComputedStyle(document.body).backgroundColor,
+      superficie: superficie ? getComputedStyle(superficie).backgroundColor : null,
+      que: superficie ? String(superficie.className).slice(0, 40) : null,
+      texto: texto ? getComputedStyle(texto).color : getComputedStyle(document.body).color
+    };
+  });
+  expect(colores.superficie, 'no se encontró ninguna superficie de la app para medir').not.toBeNull();
+  const lf = luminancia(colores.fondo);
+  const lc = luminancia(colores.superficie!);
+  const lt = luminancia(colores.texto);
+  expect(lf, `el fondo sigue siendo claro en modo oscuro (${colores.fondo})`).toBeLessThan(0.2);
+  expect(lc, `la tarjeta "${colores.que}" sigue clara en modo oscuro (${colores.superficie})`).toBeLessThan(0.25);
+  expect(lt, `el texto no subió en modo oscuro (${colores.texto})`).toBeGreaterThan(0.4);
+  expect(lt, 'el texto quedó más oscuro que el fondo: la paleta está invertida')
+    .toBeGreaterThan(lf * 3);
+});
+
+test('Ajustes: elegir "Oscuro" cambia la pantalla, guarda y sobrevive la recarga', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto('/');
+  await guardarTema(page, 'claro');
+  await page.reload();
+  await temaPintado(page);
+
+  const btnAjustes = page.locator('.header-actions button[aria-label="Open settings"], .header-actions button[aria-label="Abrir ajustes"]');
+  await expect(btnAjustes, 'no aparece el botón de ajustes en el header').toBeVisible({ timeout: 30_000 });
+  await btnAjustes.click();
+
+  const opcion = page.locator('[data-tema-opcion="oscuro"]');
+  await expect(opcion, 'Ajustes no pintó el selector de tema').toBeVisible({ timeout: 30_000 });
+  await opcion.click();
+
+  // El atributo cambia sin recargar: es lo que ve el usuario en el momento.
+  expect(await page.evaluate(() => document.documentElement.dataset.tema),
+    'elegir "Oscuro" no repintó la pantalla').toBe('oscuro');
+
+  // Quedó en la BD (y por lo tanto viaja en el sync como los demás ajustes).
+  const guardado = await page.evaluate(() => new Promise<string | null>((resolve, reject) => {
+    const req = indexedDB.open('ScheduleDB');
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('settings', 'readonly');
+      const get = tx.objectStore('settings').get('tema');
+      get.onsuccess = () => { db.close(); resolve(get.result ? get.result.value : null); };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+    req.onerror = () => reject(req.error);
+  }));
+  expect(guardado, 'el tema no se persistió en la tabla settings').toBe('oscuro');
+
+  // Y sobrevive a la recarga (el splash del <head> no puede dejarlo en claro).
+  await page.reload();
+  expect(await temaPintado(page), 'al recargar se perdió el tema oscuro').toBe('oscuro');
+});
+
+test('Modo sistema: sin preferencia guardada sigue al tema del dispositivo', async ({ page }) => {
+  await page.goto('/');
+  await guardarTema(page, 'sistema');
+  for (const [colorScheme, esperado] of [['dark', 'oscuro'], ['light', 'claro']] as const) {
+    await page.emulateMedia({ colorScheme });
+    await page.reload();
+    expect(await temaPintado(page), `con el SO en ${colorScheme} el app quedó en el tema equivocado`)
+      .toBe(esperado);
+  }
+});

@@ -152,7 +152,7 @@
     margin: 0;
     font-size: 1.1rem;
     font-weight: 600;
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
     align-self: flex-start;
   }
 
@@ -182,13 +182,13 @@
   .overlay-total {
     font-size: 1.25rem;
     font-weight: 700;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
     white-space: nowrap;
   }
 
   .overlay-sub {
     font-size: 0.65rem;
-    color: #6b6b6b; /* AA sobre panel blanco: 4.6:1 (antes #999 = 2.8:1) */
+    color: rgb(var(--texto-2)); /* AA sobre panel blanco: 4.6:1 (antes #999 = 2.8:1) */
     margin-top: 0.15rem;
     white-space: nowrap;
   }
@@ -199,7 +199,7 @@
     flex-direction: column;
     gap: 0.5rem;
     padding-top: 1rem;
-    border-top: 1px solid rgba(0,0,0,0.05);
+    border-top: 1px solid rgb(var(--linea) / 0.05);
     /* Reserva 2 filas: los datos llegan async y sin esto la 2da tarjeta salta (CLS) */
     min-height: 3.4rem;
   }
@@ -218,13 +218,13 @@
   }
 
   .dot-free {
-    background: #d8d5cd;
-    border: 1px dashed #b5b1a6;
+    background: rgb(var(--sup-2));
+    border: 1px dashed rgb(var(--linea));
   }
 
   .label {
     flex: 1;
-    color: #595959; /* AA holgado: 7:1 (antes #666 = 5.7:1, justo) */
+    color: rgb(var(--texto)); /* AA holgado: 7:1 (antes #666 = 5.7:1, justo) */
   }
 
   .val {
@@ -234,7 +234,7 @@
 
   .pct {
     font-weight: 400;
-    color: #6b6b6b; /* AA sobre panel blanco: 4.6:1 (antes #999 = 2.8:1) */
+    color: rgb(var(--texto-2)); /* AA sobre panel blanco: 4.6:1 (antes #999 = 2.8:1) */
     font-size: 0.72rem;
     margin-left: 0.3rem;
   }

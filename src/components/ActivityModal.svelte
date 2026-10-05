@@ -930,8 +930,8 @@
 <style>
   /* ── Imagen de la rutina ── */
   .image-box {
-    background: #f8faf9;
-    border: 1px solid rgba(45, 90, 39, 0.12);
+    background: rgb(var(--sup-2));
+    border: 1px solid rgb(var(--verde-borde) / 0.12);
     border-radius: 10px;
     padding: 0.85rem 1rem;
     display: flex;
@@ -952,7 +952,7 @@
     gap: 0.4rem;
     font-size: 0.8rem;
     font-weight: 700;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
@@ -966,29 +966,29 @@
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
-    background: white;
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgb(var(--sup));
+    border: 1px solid rgb(var(--linea) / 0.08);
     border-radius: 6px;
     padding: 0.25rem 0.55rem;
     font-size: 0.72rem;
     font-weight: 600;
-    color: var(--color-green-dark, #2d5a27);
+    color: rgb(var(--verde-texto));
     cursor: pointer;
     transition: all 0.2s;
   }
 
   .image-btn:hover {
-    background: rgba(45, 90, 39, 0.08);
+    background: rgb(var(--verde-lavado) / 0.08);
   }
 
   .image-btn-danger {
     /* 4,13:1 con #e53e3e sobre el blanco del botón (3,86:1 en hover):
        no llegaba a AA. #c81e1e da 5,74:1 y 5,36:1 en hover. */
-    color: #c81e1e;
+    color: rgb(var(--rojo-texto));
   }
 
   .image-btn-danger:hover {
-    background: #fff5f5;
+    background: rgb(var(--rojo-lavado));
   }
 
   .image-preview {
@@ -1008,7 +1008,7 @@
     max-height: 160px;
     border-radius: 8px;
     object-fit: cover;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgb(var(--sombra) / 0.1);
     transition: transform 0.2s;
   }
 
@@ -1026,13 +1026,13 @@
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    background: white;
-    border: 1px dashed rgba(45, 90, 39, 0.35);
+    background: rgb(var(--sup));
+    border: 1px dashed rgb(var(--verde-borde) / 0.35);
     border-radius: 8px;
     padding: 0.45rem 0.8rem;
     font-size: 0.8rem;
     font-weight: 600;
-    color: var(--color-green-dark, #2d5a27);
+    color: rgb(var(--verde-texto));
     cursor: pointer;
     transition: all 0.2s;
   }
@@ -1051,7 +1051,7 @@
   }
 
   .image-upload-btn:hover {
-    background: rgba(45, 90, 39, 0.06);
+    background: rgb(var(--verde-lavado) / 0.06);
     border-style: solid;
   }
 
@@ -1063,7 +1063,7 @@
   .image-url-row input {
     flex: 1;
     padding: 0.45rem 0.7rem;
-    border: 1px solid rgba(0, 0, 0, 0.12);
+    border: 1px solid rgb(var(--linea) / 0.12);
     border-radius: 8px;
     font-size: 0.85rem;
     min-width: 0;
@@ -1071,13 +1071,13 @@
 
   .image-url-row input:focus {
     outline: none;
-    border-color: rgba(45, 90, 39, 0.5);
+    border-color: rgb(var(--verde-borde) / 0.5);
   }
 
   /* ── Scope Selector ── */
   .scope-selector {
-    background: #f8faf9;
-    border: 1px solid rgba(45, 90, 39, 0.12);
+    background: rgb(var(--sup-2));
+    border: 1px solid rgb(var(--verde-borde) / 0.12);
     border-radius: 10px;
     padding: 0.85rem 1rem;
     display: flex;
@@ -1088,7 +1088,7 @@
   .scope-label {
     font-size: 0.8rem;
     font-weight: 700;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
@@ -1104,13 +1104,13 @@
     align-items: center;
     gap: 0.4rem;
     padding: 0.5rem 0.75rem;
-    border: 1px solid rgba(0,0,0,0.08);
+    border: 1px solid rgb(var(--linea) / 0.08);
     border-radius: 8px;
-    background: white;
+    background: rgb(var(--sup));
     cursor: pointer;
     font-size: 0.82rem;
     font-weight: 600;
-    color: #6b6b6b; /* AA (antes #888) */
+    color: rgb(var(--texto-2)); /* AA (antes #888) */
     transition: all 0.2s;
   }
 
@@ -1119,19 +1119,19 @@
   }
 
   .scope-option.selected {
-    border-color: var(--color-green-dark);
-    background: rgba(45, 90, 39, 0.06);
-    color: var(--color-green-dark);
+    border-color: rgb(var(--verde-texto));
+    background: rgb(var(--verde-lavado) / 0.06);
+    color: rgb(var(--verde-texto));
   }
 
   .scope-option:hover:not(.selected) {
-    border-color: rgba(0,0,0,0.15);
-    color: var(--color-brown-bark);
+    border-color: rgb(var(--linea) / 0.15);
+    color: rgb(var(--tinta));
   }
 
   .steps-box {
-    background: #f8faf9;
-    border: 1px solid rgba(45, 90, 39, 0.15);
+    background: rgb(var(--sup-2));
+    border: 1px solid rgb(var(--verde-borde) / 0.15);
     border-radius: 12px;
     padding: 1rem;
     display: flex;
@@ -1151,16 +1151,16 @@
     gap: 0.5rem;
     font-size: 0.9rem;
     font-weight: 700;
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
   }
 
   .preset-btn-sparkle {
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    background: rgba(45, 90, 39, 0.08);
-    border: 1px dashed var(--color-green-dark);
-    color: var(--color-green-dark);
+    background: rgb(var(--verde-lavado) / 0.08);
+    border: 1px dashed rgb(var(--verde-borde));
+    color: rgb(var(--verde-texto));
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.25rem 0.6rem;
@@ -1171,7 +1171,7 @@
 
   .preset-btn-sparkle:hover {
     background: var(--color-green-dark);
-    color: white;
+    color: rgb(var(--sobre-color));
   }
 
   .step-add-row {
@@ -1182,10 +1182,10 @@
   .step-input {
     flex: 1;
     padding: 0.5rem 0.75rem;
-    border: 1px solid rgba(0,0,0,0.12);
+    border: 1px solid rgb(var(--linea) / 0.12);
     border-radius: 8px;
     font-size: 0.9rem;
-    background: white;
+    background: rgb(var(--sup));
   }
 
   .btn-add-step {
@@ -1193,7 +1193,7 @@
     align-items: center;
     gap: 0.25rem;
     background: var(--color-green-dark);
-    color: white;
+    color: rgb(var(--sobre-color));
     border: none;
     border-radius: 8px;
     padding: 0.5rem 0.75rem;
@@ -1220,16 +1220,16 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    background: white;
+    background: rgb(var(--sup));
     padding: 0.4rem 0.6rem;
     border-radius: 8px;
-    border: 1px solid rgba(0,0,0,0.06);
+    border: 1px solid rgb(var(--linea) / 0.06);
     transition: background 0.2s, border-color 0.2s;
   }
 
   .step-item.completed {
-    background: rgba(45, 90, 39, 0.05);
-    border-color: rgba(45, 90, 39, 0.2);
+    background: rgb(var(--verde-lavado) / 0.05);
+    border-color: rgb(var(--verde-borde) / 0.2);
   }
 
   .step-check-btn {
@@ -1239,19 +1239,19 @@
     cursor: pointer;
     display: flex;
     align-items: center;
-    color: #6b6b6b; /* AA (antes #999) */
+    color: rgb(var(--texto-2)); /* AA (antes #999) */
     transition: color 0.2s;
   }
 
   .step-check-btn:hover {
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
   }
 
   /* :global porque .check-icon lo recibe un icono de lucide (componente hijo)
      y Svelte no le anade el hash de ambito: la regla nunca aplicaba y un paso
      completado se quedaba del mismo gris que uno pendiente. */
   :global(.check-icon.done) {
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
   }
 
   .step-text-input {
@@ -1265,13 +1265,13 @@
 
   .step-text-input:focus {
     outline: none;
-    background: rgba(0,0,0,0.02);
+    background: rgb(var(--lavado) / 0.02);
     border-radius: 4px;
   }
 
   .step-text-input.done-text {
     text-decoration: line-through;
-    color: #6b6b6b; /* AA (antes #888) */
+    color: rgb(var(--texto-2)); /* AA (antes #888) */
   }
 
   .step-delete-btn {
@@ -1279,7 +1279,7 @@
     border: none;
     padding: 0.25rem;
     cursor: pointer;
-    color: #cc8888;
+    color: rgb(var(--rojo-texto));
     border-radius: 4px;
     display: flex;
     align-items: center;
@@ -1287,8 +1287,8 @@
   }
 
   .step-delete-btn:hover {
-    color: #dc2626;
-    background: #fee2e2;
+    color: rgb(var(--rojo-texto));
+    background: rgb(var(--rojo-lavado));
   }
 
   .modal-overlay {
@@ -1297,7 +1297,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: rgb(var(--velo) / 0.6);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -1316,9 +1316,9 @@
     max-height: 92dvh;
     padding: 0;
     overflow-y: auto;
-    background: white;
+    background: rgb(var(--sup));
     border-radius: 16px;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    box-shadow: 0 20px 25px -5px rgb(var(--sombra) / 0.1), 0 10px 10px -5px rgb(var(--sombra) / 0.04);
     animation: slideUp 0.3s ease-out;
     display: flex;
     flex-direction: column;
@@ -1367,17 +1367,17 @@
     font-size: 1.1rem;
     padding: 0.8rem;
     font-weight: 600;
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
     box-sizing: border-box;
     /* regla dura #5: a 16px de fuente + padding 0.8rem da ~41px en móvil */
     min-height: 44px;
   }
 
   .time-controls-box {
-    background: #f8f9fa;
+    background: rgb(var(--sup-2));
     padding: 1.25rem;
     border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.05);
+    border: 1px solid rgb(var(--linea) / 0.05);
   }
 
   .time-row-modern {
@@ -1404,15 +1404,15 @@
     font-size: 1rem;
     padding: 0.5rem;
     font-weight: 600;
-    color: var(--color-green-dark);
-    border: 1px solid rgba(0,0,0,0.1);
-    background: white;
+    color: rgb(var(--verde-texto));
+    border: 1px solid rgb(var(--linea) / 0.1);
+    background: rgb(var(--sup));
     box-sizing: border-box;
   }
 
   .to-separator {
     font-size: 1rem;
-    color: #6b6b6b; /* AA (antes #999) */
+    color: rgb(var(--texto-2)); /* AA (antes #999) */
     padding-top: 1.25rem;
   }
 
@@ -1423,13 +1423,13 @@
     gap: 0.75rem;
     margin-bottom: 1rem;
     padding: 0.75rem;
-    background: white;
+    background: rgb(var(--sup));
     border-radius: 8px;
   }
 
   .hint-text {
     font-size: 0.75rem;
-    color: #6b6b6b; /* AA (antes #999) */
+    color: rgb(var(--texto-2)); /* AA (antes #999) */
     font-weight: 600;
     text-transform: uppercase;
   }
@@ -1442,44 +1442,44 @@
   }
 
   .chip {
-    background: rgba(92, 64, 51, 0.05);
-    border: 1px solid rgba(92, 64, 51, 0.1);
+    background: rgb(var(--tinta) / 0.05);
+    border: 1px solid rgb(var(--tinta) / 0.1);
     padding: 0.4rem 0.75rem;
     border-radius: 20px;
     font-size: 0.85rem;
     font-weight: 600;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
     cursor: pointer;
     transition: all 0.2s;
   }
 
   .chip:hover {
     background: var(--color-green-dark);
-    color: white;
-    border-color: var(--color-green-dark);
+    color: rgb(var(--sobre-color));
+    border-color: rgb(var(--verde-texto));
   }
 
   .duration-hint {
     margin-top: 1rem;
     text-align: center;
     font-size: 0.85rem;
-    color: #6b6b6b; /* AA (antes #888) */
+    color: rgb(var(--texto-2)); /* AA (antes #888) */
   }
 
   .duration-hint strong {
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
   }
 
   .modal-header h2 {
     margin: 0;
     font-size: 1.5rem;
-    color: var(--color-green-dark);
+    color: rgb(var(--verde-texto));
   }
 
   .close-btn {
     background: transparent;
     border: none;
-    color: #6b6b6b; /* AA sobre blanco (antes #999) */
+    color: rgb(var(--texto-2)); /* AA sobre blanco (antes #999) */
     cursor: pointer;
     /* Target táctil >= 44px (regla dura #5); ya lo era en móvil, ahora también en desktop */
     min-width: 44px;
@@ -1508,27 +1508,27 @@
     padding: 0;
     font-size: 0.85rem;
     font-weight: 600;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
   }
 
   label {
     font-size: 0.85rem;
     font-weight: 600;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
   }
 
   input, select {
     padding: 0.75rem;
-    border: 1px solid rgba(0,0,0,0.1);
+    border: 1px solid rgb(var(--linea) / 0.1);
     border-radius: 8px;
     font-size: 1rem;
-    background: rgba(255,255,255,0.8);
+    background: rgb(var(--sup) / 0.8);
   }
 
   input:focus, select:focus {
     outline: none;
-    border-color: var(--color-green-dark);
-    box-shadow: 0 0 0 2px rgba(45, 90, 39, 0.1);
+    border-color: rgb(var(--verde-texto));
+    box-shadow: 0 0 0 2px rgb(var(--sombra) / 0.1);
   }
 
   .days-selector {
@@ -1541,8 +1541,8 @@
     flex: 1;
     height: 44px;
     border-radius: 8px;
-    border: 1px solid rgba(0,0,0,0.1);
-    background: white;
+    border: 1px solid rgb(var(--linea) / 0.1);
+    background: rgb(var(--sup));
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
@@ -1550,8 +1550,8 @@
 
   .day-toggle.selected {
     background: var(--color-green-dark);
-    color: white;
-    border-color: var(--color-green-dark);
+    color: rgb(var(--sobre-color));
+    border-color: rgb(var(--verde-texto));
   }
 
   .presets {
@@ -1564,11 +1564,11 @@
   .preset-btn {
     font-size: 0.75rem;
     padding: 0.35rem 0.6rem;
-    background: rgba(92, 64, 51, 0.05);
-    border: 1px solid rgba(92, 64, 51, 0.1);
+    background: rgb(var(--tinta) / 0.05);
+    border: 1px solid rgb(var(--tinta) / 0.1);
     border-radius: 4px;
     cursor: pointer;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
     /* regla dura #5: target táctil completo (medía ~27px) */
     min-height: 44px;
   }
@@ -1577,8 +1577,8 @@
     display: flex;
     justify-content: space-between;
     padding: 1.5rem 2rem;
-    border-top: 1px solid rgba(0,0,0,0.05);
-    background: #fcfcfc;
+    border-top: 1px solid rgb(var(--linea) / 0.05);
+    background: rgb(var(--sup));
     flex-shrink: 0;
     /* Pegajoso, sin breakpoint. Cancelar/Guardar son la acción principal del
        modal y no pueden depender de que el usuario adivine que hay que
@@ -1596,8 +1596,8 @@
     position: sticky;
     bottom: 0;
     z-index: 10;
-    box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.08);
-    background: #ffffff;
+    box-shadow: 0 -6px 18px rgb(var(--sombra) / 0.08);
+    background: rgb(var(--sup));
   }
 
   .footer-right {
@@ -1618,14 +1618,14 @@
   }
 
   .btn-danger {
-    background: #fee2e2;
+    background: rgb(var(--rojo-lavado));
     /* 3,95:1 con #dc2626 — y en hover el fondo se oscurece (#fecaca) y
        baja a 3,34:1. #a71a1a da 6,13:1 y mantiene 5,17:1 en hover. */
-    color: #a71a1a;
+    color: rgb(var(--rojo-texto));
   }
 
   .btn-danger:hover {
-    background: #fecaca;
+    background: rgb(var(--rojo-lavado));
   }
 
   .btn-primary {

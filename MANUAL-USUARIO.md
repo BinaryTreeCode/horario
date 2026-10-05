@@ -131,6 +131,7 @@ Ahora, en su lugar:
 - **Rango de horas del día**: la **barra verde es arrastrable** — dos asas que fijan inicio y fin, con burbuja de hora mientras arrastras. Las asas se empujan entre sí (mínimo 1h de rango). Los selects de horas sincronizan (cada 30 min). Paso fino de 15 min con el teclado.
 - **Categorías**: renombrar, colorear, añadir, eliminar y **reordenar arrastrando** (la paleta de colores de la grilla sigue el orden).
 - **Idioma**: Español / English, aplicado al instante.
+- **Tema**: **Claro / Oscuro / Sistema**. Se aplica al instante y queda guardado (viaja con el respaldo). "Sistema" sigue al tema del celular o la computadora, así que si lo cambias ahí la app se entera sola.
 - Guardar solo aplica al pulsar **"Guardar Todo"**; Cancelar descarta.
 
 ---

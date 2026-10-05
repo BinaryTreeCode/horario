@@ -92,9 +92,9 @@
     border-radius: 14px;
     font-size: 0.92rem;
     line-height: 1.35;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 8px 28px rgb(var(--sombra) / 0.25);
     animation: toast-in 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid rgb(var(--borde-blanco) / 0.14);
   }
   .toast-success { background: rgba(46, 84, 52, 0.92); color: #eafbee; }
   .toast-error   { background: rgba(96, 34, 34, 0.94); color: #fdeaea; }
@@ -115,7 +115,7 @@
     height: 30px;
     border: none;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.12);
+    background: rgb(var(--sobre-color) / 0.12);
     color: inherit;
     cursor: pointer;
   }

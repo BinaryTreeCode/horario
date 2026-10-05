@@ -1590,7 +1590,7 @@
     grid-template-rows: 40px repeat(var(--total-slots), var(--slot-height));
     width: 68px;
     padding-right: 0.5rem;
-    border-right: 1px solid rgba(0,0,0,0.08);
+    border-right: 1px solid rgb(var(--linea) / 0.08);
     user-select: none;
     flex-shrink: 0;
     /* Solo texto decorativo (etiquetas de hora): sin eventos,
@@ -1605,7 +1605,7 @@
     position: sticky;
     left: 0;
     z-index: 20;
-    background: rgba(255, 255, 255, 0.82);
+    background: rgb(var(--sup) / 0.82);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
   }
@@ -1629,7 +1629,7 @@
   .hour-label {
     font-size: 0.72rem;
     font-weight: 700;
-    color: #4a5568;
+    color: rgb(var(--texto-2));
     display: flex;
     align-items: baseline;
     justify-content: flex-end;
@@ -1640,7 +1640,7 @@
   }
 
   .hour-text {
-    color: #2d3748;
+    color: rgb(var(--texto));
   }
 
   .hour-ampm {
@@ -1650,7 +1650,7 @@
        panel y 6,60:1 en el peor caso (glifo encima de un punto del
        patrón de fondo). Jerarquía conservada: sigue siendo más claro que
        .hour-text (#2d3748). */
-    color: #4a5568;
+    color: rgb(var(--texto-2));
   }
 
   .half-hour-label {
@@ -1659,7 +1659,7 @@
     /* 2,26:1 con #a0aec0: la mitad de lo que exige AA. #5c6778 da 5,73:1
        sobre el panel y 5,03:1 en el peor caso. Sigue siendo la etiqueta
        más discreta de las dos (peso 500 frente al 600 de AM/PM). */
-    color: #5c6778;
+    color: rgb(var(--texto-2));
     display: flex;
     align-items: center;
     justify-content: flex-end;
@@ -1694,7 +1694,7 @@
     grid-template-columns: repeat(7, clamp(88px, calc(14.2857% - 1px), 420px));
     justify-content: center;
     gap: 1px;
-    background: rgba(0,0,0,0.06);
+    background: rgb(var(--lavado) / 0.06);
   }
   @container weekly-grid (width < 768px) {
     .days-columns {
@@ -1718,7 +1718,7 @@
     padding: 1.25rem 1rem;
     text-align: center;
     pointer-events: none;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
     opacity: 0.85;
     max-width: min(90%, 22rem);
   }
@@ -1741,7 +1741,7 @@
   .day-column {
     display: flex;
     flex-direction: column;
-    background: white;
+    background: rgb(var(--sup));
     min-width: 0;
     overflow: hidden;
   }
@@ -1753,9 +1753,9 @@
     justify-content: center;
     font-size: 0.85rem;
     font-weight: 700;
-    color: var(--color-brown-bark, #4a3728);
-    border-bottom: 1px solid rgba(0,0,0,0.08);
-    background: white;
+    color: rgb(var(--tinta));
+    border-bottom: 1px solid rgb(var(--linea) / 0.08);
+    background: rgb(var(--sup));
     border: none;
     cursor: pointer;
     transition: background 0.2s;
@@ -1789,7 +1789,7 @@
   }
 
   .day-header:hover {
-    background: rgba(92, 64, 51, 0.05);
+    background: rgb(var(--tinta) / 0.05);
   }
 
   /* ── Señalización del día actual ──
@@ -1797,19 +1797,19 @@
      "Hoy"; la columna entera lleva un borde sutil para encontrarla de
      reojo sin marear con colores fuertes el tablero completo. */
   .day-header.header-hoy {
-    background: rgba(74, 124, 68, 0.10);
-    color: var(--color-green-dark, #2f6b2f);
-    box-shadow: inset 0 -2px 0 var(--color-green-dark, #2f6b2f);
+    background: rgb(var(--verde-lavado) / 0.1);
+    color: rgb(var(--verde-texto));
+    box-shadow: inset 0 -2px 0 var(--color-green-dark, rgb(var(--sombra)));
   }
   .day-header.header-hoy:hover {
-    background: rgba(74, 124, 68, 0.16);
+    background: rgb(var(--verde-lavado) / 0.16);
   }
   .hoy-badge {
     font-size: 0.62rem;
     font-weight: 700;
     margin-left: 0.3rem;
-    color: #ffffff;
-    background: var(--color-green-dark, #2f6b2f);
+    color: rgb(var(--sobre-color));
+    background: var(--color-green-dark, rgb(var(--verde-fuerte)));
     border-radius: 999px;
     padding: 1px 7px;
     line-height: 1.4;
@@ -1821,7 +1821,7 @@
   /* Columna de hoy: borde verde sutil en los costados (no tapa el grid:
      outline no ocupa espacio de layout). */
   .day-column.col-hoy .slots-grid {
-    box-shadow: inset 2px 0 0 rgba(74, 124, 68, 0.25), inset -2px 0 0 rgba(74, 124, 68, 0.25);
+    box-shadow: inset 2px 0 0 rgb(var(--sombra) / 0.25), inset -2px 0 0 rgb(var(--sombra) / 0.25);
   }
 
   /* ── Preview del hResize (asas laterales) ──
@@ -1841,13 +1841,13 @@
      entera. Para saber QUÉ día es alcanza con pintar el encabezado, que
      mide 44px y no deja línea vertical. */
   .day-column.col-hres-ganar .day-header {
-    background: rgba(74, 124, 68, 0.9);
-    color: #fff;
+    background: rgb(var(--verde-fuerte) / 0.9);
+    color: rgb(var(--sobre-color));
   }
   /* El día no cabe: la banda y los fantasmas se ponen rojos. */
   .hres-ganar-banda.no-cabe {
-    background: rgba(224, 69, 58, 0.25);
-    border-color: rgba(224, 69, 58, 0.9);
+    background: rgb(var(--rojo-lavado) / 0.25);
+    border-color: rgb(var(--rojo-borde) / 0.9);
   }
   /* Fantasma del empuje en cadena: dónde CAERÁ este vecino al soltar. */
   .hres-empuje-fantasma {
@@ -1855,8 +1855,8 @@
     left: 0;
     width: 100%;
     border-radius: 8px;
-    border: 2px dashed rgba(74, 124, 68, 0.8);
-    background: rgba(74, 124, 68, 0.14);
+    border: 2px dashed rgb(var(--verde-borde) / 0.8);
+    background: rgb(var(--verde-lavado) / 0.14);
     pointer-events: none;
     z-index: 2;
   }
@@ -1868,15 +1868,15 @@
      se ve en todos los días de la actividad, no solo en el del asa. Antes el
      estirar desde el lunes solo creía el lunes y el resto aparecía al soltar. */
   .activity-item.redim-pendiente {
-    outline: 2px dashed rgba(45, 90, 39, 0.9);
+    outline: 2px dashed rgb(var(--verde-borde) / 0.9);
     outline-offset: -2px;
     opacity: 0.92;
   }
   /* El barrido cubre TODOS los días: el gesto no encoge la corrida, la borra.
      Rojo más profundo y halo blanco para que se lea antes de soltar. */
   .activity-item.hres-afectado.hres-todo {
-    background: #b3271c !important;
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.92);
+    background: rgb(var(--rojo-solido)) !important;
+    box-shadow: 0 0 0 3px rgb(var(--sombra) / 0.92);
     opacity: 0.92;
   }
   .hres-ganar-banda {
@@ -1884,23 +1884,23 @@
     left: 0;
     width: 100%;
     border-radius: 8px;
-    background: rgba(74, 124, 68, 0.28);
-    border: 2px dashed rgba(74, 124, 68, 0.85);
+    background: rgb(var(--verde-lavado) / 0.28);
+    border: 2px dashed rgb(var(--verde-borde) / 0.85);
     pointer-events: none;
     z-index: 1;
   }
   /* Fantasmas del retiro: los bloques de la actividad que dejarían de
      existir en esos días se ponen rojos. */
   .activity-item.hres-afectado {
-    background: #e0453a !important;
-    color: #fff !important;
+    background: rgb(var(--rojo-solido)) !important;
+    color: rgb(var(--sobre-color)) !important;
   }
 
   /* Variante del rótulo para el resize VERTICAL: sin signo, solo el texto
      del límite; anclado junto al puntero. */
   .vres-float {
     transform: translate(14px, -50%);
-    background: var(--color-brown-bark, #4a3728);
+    background: var(--color-brown-bark, rgb(var(--tinta-solida)));
   }
 
   /* Rótulo flotante del hResize: acción + día + actividad, anclado al puntero.
@@ -1916,9 +1916,9 @@
     border-radius: 8px;
     font-size: 0.78rem;
     font-weight: 700;
-    color: #fff;
-    background: var(--color-green-dark, #2f6b2f);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18), 0 12px 28px rgba(0, 0, 0, 0.32);
+    color: rgb(var(--sobre-color));
+    background: var(--color-green-dark, rgb(var(--verde-fuerte)));
+    box-shadow: 0 4px 10px rgb(var(--sombra) / 0.18), 0 12px 28px rgb(var(--sombra) / 0.32);
     transform: translate(14px, -50%);
     will-change: transform, left, top;
     white-space: nowrap;
@@ -1942,7 +1942,7 @@
     opacity: 0.55;
   }
   .hres-float.hres-retirar {
-    background: #e0453a;
+    background: rgb(var(--rojo-solido));
   }
 
   /* Badge ⚡ de edición temporal: PUNTO en la esquina del header (position
@@ -1954,9 +1954,9 @@
     top: 3px;
     right: 3px;
     font-size: 0.58rem;
-    color: #b45309;
-    background: #fef3c7;
-    border: 1px solid #fde68a;
+    color: rgb(var(--ambar-texto));
+    background: rgb(var(--ambar-lavado));
+    border: 1px solid rgb(var(--ambar-borde));
     border-radius: 999px;
     padding: 0 3px;
     line-height: 1.2;
@@ -1981,23 +1981,23 @@
     background-size: 100% calc(var(--slot-height) * 4);
     background-image: linear-gradient(
       to bottom,
-      rgba(0, 0, 0, 0.09) 0px,
-      rgba(0, 0, 0, 0.09) 1px,
+      rgb(var(--lavado) / 0.09) 0px,
+      rgb(var(--lavado) / 0.09) 1px,
       transparent 1px,
       transparent calc(var(--slot-height) - 1px),
-      rgba(0, 0, 0, 0.02) calc(var(--slot-height) - 1px),
-      rgba(0, 0, 0, 0.02) var(--slot-height),
+      rgb(var(--lavado) / 0.02) calc(var(--slot-height) - 1px),
+      rgb(var(--lavado) / 0.02) var(--slot-height),
       transparent var(--slot-height),
       transparent calc(var(--slot-height) * 2 - 1px),
-      rgba(0, 0, 0, 0.05) calc(var(--slot-height) * 2 - 1px),
-      rgba(0, 0, 0, 0.05) calc(var(--slot-height) * 2),
+      rgb(var(--lavado) / 0.05) calc(var(--slot-height) * 2 - 1px),
+      rgb(var(--lavado) / 0.05) calc(var(--slot-height) * 2),
       transparent calc(var(--slot-height) * 2),
       transparent calc(var(--slot-height) * 3 - 1px),
-      rgba(0, 0, 0, 0.02) calc(var(--slot-height) * 3 - 1px),
-      rgba(0, 0, 0, 0.02) calc(var(--slot-height) * 3),
+      rgb(var(--lavado) / 0.02) calc(var(--slot-height) * 3 - 1px),
+      rgb(var(--lavado) / 0.02) calc(var(--slot-height) * 3),
       transparent calc(var(--slot-height) * 3)
     );
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    border-bottom: 1px solid rgb(var(--linea) / 0.08);
   }
 
   .slots-grid::before {
@@ -2011,7 +2011,7 @@
     background: var(--bg-color);
     /* Texto adaptativo por luminancia (WCAG 1.4.3): el blanco fijo
        fallaba en categorías claras — 2.26:1 «oración», 3.51:1 «Cocinar». */
-    color: var(--fg-color, white);
+    color: var(--fg-color, rgb(var(--sobre-color)));
     margin: 1px;
     border-radius: 4px;
     /* Padding fino: en columnas de piso (56-66px) cada px horizontal decide
@@ -2020,7 +2020,7 @@
     text-align: left;
     border: none;
     cursor: grab;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    box-shadow: 0 1px 3px rgb(var(--sombra) / 0.12);
     overflow: hidden;
     opacity: 0.93;
     /* Cascada animada (igual que la vista Día): top/height transicionan. */
@@ -2060,13 +2060,13 @@
     transform: none;
     outline: none;
     z-index: auto;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    box-shadow: 0 1px 3px rgb(var(--sombra) / 0.12);
   }
 
   /* Drop inválido: no cabe — rojo y al soltar el bloque vuelve. */
   .activity-item.drop-invalid {
-    background: #e0453a !important;
-    color: #fff !important;
+    background: rgb(var(--rojo-solido)) !important;
+    color: rgb(var(--sobre-color)) !important;
   }
 
   /* Accesibilidad: sin deslizamientos para quien pide menos movimiento. */
@@ -2102,15 +2102,15 @@
     gap: 2px;
     padding: 4px 8px;
     border-radius: 6px;
-    background: var(--bg-color, #2d3748);
-    color: #fff;
+    background: var(--bg-color, rgb(var(--gris-solido)));
+    color: rgb(var(--sobre-color));
     overflow: hidden;
     box-sizing: border-box;
     /* Sombra del bloque flotante de la demo: capa de contacto + caída suave
        y profunda, con la rotación característica del arrastre. will-change
        promueve el clon a su propia capa: el scroll no re-rasteriza la sombra
        (se "perdía" al scrollear con el bloque agarrado). */
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18), 0 12px 28px rgba(0, 0, 0, 0.32);
+    box-shadow: 0 4px 10px rgb(var(--sombra) / 0.18), 0 12px 28px rgb(var(--sombra) / 0.32);
     transform: rotate(-1.5deg);
     will-change: transform, box-shadow;
     transition: background 0.15s, box-shadow 0.15s;
@@ -2120,8 +2120,8 @@
      pegarla a .invalido (re-aplicada en cada pointermove cerca del límite)
      reinicia la animación en cada movimiento = zumbido frenético. */
   .drag-float.invalido {
-    background: #e0453a !important;
-    box-shadow: 0 0 0 3px rgba(224, 69, 58, 0.4), 0 12px 28px rgba(0, 0, 0, 0.35);
+    background: rgb(var(--rojo-solido)) !important;
+    box-shadow: 0 0 0 3px rgb(var(--sombra) / 0.4), 0 12px 28px rgb(var(--sombra) / 0.35);
   }
   .drag-float.shake {
     animation: shake 0.3s ease;
@@ -2164,8 +2164,8 @@
   .activity-item:focus-visible {
     opacity: 1;
     z-index: 5;
-    box-shadow: 0 3px 10px rgba(0,0,0,0.25);
-    outline: 3px solid var(--color-green-dark, #2d5a3d);
+    box-shadow: 0 3px 10px rgb(var(--sombra) / 0.25);
+    outline: 3px solid rgb(var(--verde-texto));
     outline-offset: 2px;
   }
 
@@ -2195,7 +2195,7 @@
     bottom: 2px;
     height: 3px;
     border-radius: 2px;
-    background: rgba(255, 255, 255, 0.5);
+    background: rgb(var(--sobre-color) / 0.5);
     opacity: 0;
     transition: opacity 0.15s;
   }
@@ -2243,8 +2243,8 @@
     width: 4px;
     height: auto;
     border-radius: 3px;
-    background: rgba(255, 255, 255, 0.8);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22), 0 1px 2px rgba(0, 0, 0, 0.3);
+    background: rgb(var(--sup) / 0.8);
+    box-shadow: 0 0 0 1px rgb(var(--sombra) / 0.22), 0 1px 2px rgb(var(--sombra) / 0.3);
   }
   .resize-handle.hres-izq::after {
     left: 4px;
@@ -2258,11 +2258,11 @@
     opacity: 1;
     z-index: 30;
     transform: scale(1.02);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.22);
+    box-shadow: 0 4px 12px rgb(var(--sombra) / 0.22);
   }
 
   .slots-grid:hover {
-    background-color: rgba(0,0,0,0.01);
+    background-color: rgb(var(--lavado) / 0.01);
   }
 
   /* Título de la tarjeta: BLOCK con miniatura FLOAT a la derecha (antes era
@@ -2377,7 +2377,7 @@
     .scroll-hint {
       display: block;
       font-size: 0.75rem;
-      color: #6b7a6e;
+      color: rgb(var(--texto-2));
       padding: 2px 4px 6px;
       text-align: center;
       animation: hint-fade 5s ease forwards;
@@ -2391,7 +2391,7 @@
   .grid-steps-icon {
     display: inline-flex;
     align-items: center;
-    background: rgba(255, 255, 255, 0.3);
+    background: rgb(var(--sobre-color) / 0.3);
     padding: 1px 3px;
     border-radius: 4px;
     font-size: 0.65rem;
@@ -2422,8 +2422,8 @@
     height: var(--thumb);
     border-radius: 50%;
     padding: 0;
-    border: 2px solid rgba(255, 255, 255, 0.9);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    border: 2px solid rgb(var(--borde-blanco) / 0.9);
+    box-shadow: 0 1px 3px rgb(var(--sombra) / 0.3);
     cursor: zoom-in;
     background: none;
     transition: transform 0.15s;
@@ -2432,7 +2432,7 @@
     transform: scale(1.2);
   }
   .grid-image-thumb:focus-visible {
-    outline: 2px solid #fff;
+    outline: 2px solid rgb(var(--borde-blanco));
     outline-offset: 2px;
   }
   .grid-image-thumb img {
@@ -2543,8 +2543,8 @@
     gap: 4px;
     padding: 6px;
     border-radius: 10px;
-    background: white;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.12);
+    background: rgb(var(--sup));
+    box-shadow: 0 6px 18px rgb(var(--sombra) / 0.22), 0 2px 6px rgb(var(--sombra) / 0.12);
     pointer-events: none;
     animation: img-pop-in 0.15s ease;
   }
@@ -2563,7 +2563,7 @@
     max-width: 124px;
     font-size: 0.72rem;
     font-weight: 700;
-    color: var(--color-brown-bark, #4a3728);
+    color: rgb(var(--tinta));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2576,10 +2576,10 @@
     flex-direction: column;
     padding: 0.5rem;
     min-width: 200px;
-    background: white;
+    background: rgb(var(--sup));
     border-radius: 12px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-    border: 1px solid rgba(0,0,0,0.05);
+    box-shadow: 0 10px 25px rgb(var(--sombra) / 0.15);
+    border: 1px solid rgb(var(--linea) / 0.05);
   }
 
   .custom-context-menu button {
@@ -2593,27 +2593,27 @@
     cursor: pointer;
     font-size: 0.9rem;
     font-weight: 500;
-    color: var(--color-brown-bark);
+    color: rgb(var(--tinta));
     border-radius: 8px;
     transition: all 0.2s;
     text-align: left;
   }
 
   .custom-context-menu button:hover {
-    background: rgba(92, 64, 51, 0.05);
-    color: var(--color-green-dark);
+    background: rgb(var(--tinta) / 0.05);
+    color: rgb(var(--verde-texto));
   }
 
   .custom-context-menu button.delete-btn {
-    color: #e53e3e;
-    border-top: 1px solid rgba(0,0,0,0.05);
+    color: rgb(var(--rojo-texto));
+    border-top: 1px solid rgb(var(--linea) / 0.05);
     margin-top: 0.25rem;
     padding-top: 0.75rem;
     border-radius: 0 0 8px 8px;
   }
 
   .custom-context-menu button.delete-btn:hover {
-    background: #fff5f5;
+    background: rgb(var(--rojo-lavado));
   }
 
   /* Desktop grande / ultrawide (≥1536px): la cabecera de día gana aire y la

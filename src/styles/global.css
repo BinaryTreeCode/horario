@@ -38,7 +38,7 @@ body {
   font-family: var(--font-body);
   background-color: var(--page-bg);
   background-image: 
-    radial-gradient(circle at 2px 2px, rgba(92, 64, 51, 0.05) 1px, transparent 0);
+    radial-gradient(circle at 2px 2px, rgb(var(--tinta) / 0.05) 1px, transparent 0);
   background-size: 24px 24px;
   color: var(--text-main);
   line-height: 1.5;
@@ -50,11 +50,11 @@ h1, h2, h3, h4 {
 }
 
 .glass-panel {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgb(var(--sup) / 0.92);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-color);
   border-radius: 16px;
-  box-shadow: 0 10px 30px rgba(92, 64, 51, 0.12);
+  box-shadow: 0 10px 30px rgb(var(--sombra) / 0.12);
 }
 
 .btn {
@@ -138,4 +138,119 @@ h1, h2, h3, h4 {
 
 .btn-secondary:hover {
   background: var(--color-brown-soil);
+}
+
+/* ── Modo oscuro ─────────────────────────────────────────────────────────
+   Cada color de la app pasa por un token en tripleta RGB: los componentes
+   escriben rgb(var(--token) / alfa), asi un solo token cubre a la vez el
+   color opaco y todos sus alfas (bordes, lavados, hovers). Para pasar a
+   oscuro alcanza con pisar la tripleta de cada familia.
+
+   El criterio no es "invertir": en claro la app es tinta calida (marron
+   #5c4033) y verde de marca sobre superficies blancas; en oscuro las
+   superficies bajan a un verde-carbono, los textos suben y los tintes de
+   tinta y borde pasan a gris claro para que el borde se vea contra el
+   fondo. Lo que NO cambia: el texto sobre bloques de color
+   (--sobre-color), los velos de los overlays y las sombras. */
+
+:root {
+  /* Superficies */
+  --sup: 255 255 255;
+  --sup-2: 248 250 249;
+  --sup-calido: 255 244 224;
+
+  /* Texto */
+  --texto: 45 52 54;
+  --texto-2: 107 107 107;
+  --texto-3: 187 187 187;
+  --texto-calido: 255 255 255;
+  --sobre-color: 255 255 255;
+
+  /* Tinta calida: bordes y lavados que en claro son marrones translucidos */
+  --tinta: 92 64 51;
+  --tinta-solida: 74 55 40;
+
+  /* Neutros de apoyo */
+  --gris-solido: 45 55 72;
+  --gris-medio: 138 138 138;
+  --linea: 0 0 0;          /* bordes y rayas casi negros -> blancos en oscuro */
+  --lavado: 0 0 0;         /* fondos casi transparentes -> claros en oscuro */
+  --sombra: 0 0 0;
+  --velo: 0 0 0;
+  --borde-blanco: 255 255 255;
+
+  /* Verde de marca */
+  --verde-lavado: 45 90 39;
+  --verde-borde: 45 90 39;
+  --verde-texto: 45 90 39;
+  --verde-fuerte: 74 124 68;
+
+  /* Rojo de error y validacion */
+  --rojo-lavado: 255 245 245;
+  --rojo-borde: 229 62 62;
+  --rojo-texto: 197 48 48;
+  --rojo-solido: 197 48 48;
+
+  /* Ambar de avisos */
+  --ambar-lavado: 245 158 11;
+  --ambar-borde: 245 158 11;
+  --ambar-texto: 180 83 9;
+  --ambar-solido: 249 168 37;
+
+  color-scheme: light;
+}
+
+/* El atributo lo escribe lib/tema.ts con el tema ya resuelto: la preferencia
+   "sistema" se traduce a oscuro o claro antes de pintar, asi el CSS no
+   necesita dos copias de la paleta ni depender del media query. */
+:root[data-tema="oscuro"] {
+  color-scheme: dark;
+
+  --sup: 30 35 33;
+  --sup-2: 39 45 42;
+  --sup-calido: 45 42 34;
+
+  --texto: 229 235 231;
+  --texto-2: 173 183 177;
+  --texto-3: 138 148 142;
+
+  --tinta: 216 224 218;
+  --tinta-solida: 62 54 46;
+
+  --gris-solido: 34 42 56;
+  --gris-medio: 122 132 126;
+  --linea: 255 255 255;
+  --lavado: 255 255 255;
+
+  --verde-lavado: 132 190 134;
+  --verde-borde: 126 180 128;
+  --verde-texto: 143 203 145;
+  --verde-fuerte: 74 126 70;
+
+  --rojo-lavado: 58 27 26;
+  --rojo-borde: 216 98 90;
+  --rojo-texto: 255 140 130;
+  --rojo-solido: 176 58 47;
+
+  --ambar-lavado: 92 66 20;
+  --ambar-borde: 219 160 62;
+  --ambar-texto: 240 183 100;
+  --ambar-solido: 219 160 62;
+
+  --page-bg: #14181a;
+  --panel-bg: rgba(30, 35, 33, 0.72);
+  --border-color: rgba(255, 255, 255, 0.14);
+  --text-main: #e5ebe7;
+}
+
+/* El foco de teclado necesita contraste propio: el verde de marca sobre
+   fondo oscuro no alcanza para el anillo de 2px. */
+:root[data-tema="oscuro"] :focus-visible {
+  outline-color: rgb(var(--verde-texto));
+}
+/* Los controles nativos (checkbox y radio de Ajustes) se rellenan con el verde
+   de marca: sobre fondo oscuro ese verde se apaga contra el fondo. */
+:root[data-tema="oscuro"] input[type="checkbox"],
+:root[data-tema="oscuro"] input[type="radio"] {
+  accent-color: rgb(var(--verde-fuerte));
 }

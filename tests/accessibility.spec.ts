@@ -301,6 +301,42 @@ test.describe('Contraste real (componiendo el fondo)', () => {
   });
 });
 
+  /* El modo oscuro duplica la paleta: un color puede cumplir AA en claro y no
+     en oscuro. El rojo solido con texto blanco es el caso que casi lo
+     cumplia (4,25:1 con el valor inicial), asi que el chequeo tiene que
+     correr en ambos temas o solo miraria la mitad de la app. */
+  test('Modo oscuro: el mismo contraste se cumple en oscuro', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open('ScheduleDB');
+      req.onsuccess = () => {
+        const bd = req.result;
+        const tx = bd.transaction('settings', 'readwrite');
+        tx.objectStore('settings').put({ id: 'tema', key: 'tema', value: 'oscuro', updatedAt: Date.now() });
+        tx.oncomplete = () => { bd.close(); resolve(); };
+        tx.onerror = () => { bd.close(); reject(tx.error); };
+      };
+      req.onerror = () => reject(req.error);
+    }));
+    await page.reload();
+    await expect
+      .poll(async () => page.evaluate(() => document.documentElement.dataset.temaListo), { timeout: 30_000 })
+      .toBe('1');
+    expect(await page.evaluate(() => document.documentElement.dataset.tema)).toBe('oscuro');
+
+    await page.locator(TAB_DIA).click();
+    await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
+    await esperarAnimacion(page);
+    const fallosDia = await contrasteReal(page);
+    expect(fallosDia, 'Contraste < AA en modo oscuro (Dia): ' + fallosDia.join(' | ')).toEqual([]);
+
+    await page.locator('#tab-week').click();
+    await expect(page.locator('.stat-card h2').first()).toBeVisible({ timeout: 30_000 });
+    await esperarAnimacion(page);
+    const fallosSemana = await contrasteReal(page);
+    expect(fallosSemana, 'Contraste < AA en modo oscuro (Semana): ' + fallosSemana.join(' | ')).toEqual([]);
+  });
+
 /**
  * La cabecera no puede comerse el alto de la pantalla.
  *
