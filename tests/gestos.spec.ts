@@ -18,19 +18,72 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.day-column').first()).toBeVisible({ timeout: 30_000 });
 });
 
+/**
+ * Clic sobre un elemento cuyo layout todavía puede moverse.
+ *
+ * `click({ force: true })` salta la verificación de ESTABILIDAD de Playwright,
+ * así que el clic se puede despachar sobre coordenadas que al instante siguiente
+ * ya no corresponden al elemento: el gesto se pierde y el guard falla sin que
+ * haya ningún bug. A 1280 la grilla se asienta antes del clic; a 390 el grid
+ * acaba de resolver sus container queries (columnas de 60px) y la miniatura se
+ * mueve. Medido antes de arreglar: 1 de 8 corridas fallaba a 390 y 0 de 6 a
+ * 1280.
+ *
+ * Acá se espera el mismo criterio que usa Playwright por su cuenta —la caja
+ * quieta— pero explícito y con un tope de ~2s, así que el clic nunca se pierde
+ * y el test tampoco se cuelga. No cambia qué se verifica: después del clic el
+ * guard sigue exigiendo que el visor abra y que la imagen ocupe el 80%.
+ */
+async function clicEstable(locator: import('@playwright/test').Locator) {
+  await locator.evaluate(
+    (el) =>
+      new Promise<void>((resolve) => {
+        let prev = el.getBoundingClientRect();
+        let quiet = 0;
+        let vueltas = 0;
+        const tick = () => {
+          const r = el.getBoundingClientRect();
+          if (r.x === prev.x && r.y === prev.y && r.width === prev.width && r.height === prev.height) {
+            if (++quiet >= 3) return resolve(); // 3 frames igual: quieta de verdad
+          } else {
+            quiet = 0;
+            prev = r;
+          }
+          if (++vueltas > 120) return resolve(); // tope ~2s: no colgarse
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      })
+  );
+  await locator.click({ force: true });
+}
+
 /** Rectángulo del asa lateral derecha de un bloque, en coordenadas de viewport. */
 async function asaDerecha(page: import('@playwright/test').Page) {
   const info = await page.evaluate(() => {
     const cols = [...document.querySelectorAll('.day-column')];
     const manejas = [...document.querySelectorAll('.resize-handle.hres-der')] as HTMLElement[];
+    const cont = document.querySelector('.weekly-grid-container') as HTMLElement | null;
+    // Desliza la grilla hasta que el asa entre (móvil). El signo lo decide de
+    // dónde sale: si quedó a la izquierda hay que empujarla a la izquierda.
+    const entrarEnPantalla = (h: HTMLElement) => {
+      if (!cont) return;
+      const c = cont.getBoundingClientRect();
+      const r = h.getBoundingClientRect();
+      if (r.left >= c.left && r.right <= c.right) return;
+      cont.scrollLeft += r.left < c.left ? r.left - c.left : r.right - c.right;
+    };
     for (const h of manejas) {
       const col = h.closest('.day-column');
       if (!col) continue;
       const r = h.getBoundingClientRect();
-      if (r.y < 0 || r.y > window.innerHeight || r.x < 0 || r.x > window.innerWidth) continue;
+      if (r.y < 0 || r.y > window.innerHeight) continue;
+      entrarEnPantalla(h);
+      const v = h.getBoundingClientRect();
+      if (v.x < 0 || v.x > window.innerWidth) continue;
       return {
-        x: r.x + r.width / 2,
-        y: r.y + r.height / 2,
+        x: v.x + v.width / 2,
+        y: v.y + v.height / 2,
         colW: col.getBoundingClientRect().width,
         dia: cols.indexOf(col),
         nombre: (h.closest('.activity-item') as HTMLElement | null)?.getAttribute('title') ?? '',
@@ -47,11 +100,22 @@ async function asaIzquierda(page: import('@playwright/test').Page) {
   const info = await page.evaluate(() => {
     const cols = [...document.querySelectorAll('.day-column')];
     const manejas = [...document.querySelectorAll('.resize-handle.hres-izq')] as HTMLElement[];
+    const cont = document.querySelector('.weekly-grid-container') as HTMLElement | null;
+    const entrarEnPantalla = (h: HTMLElement) => {
+      if (!cont) return;
+      const c = cont.getBoundingClientRect();
+      const r = h.getBoundingClientRect();
+      if (r.left >= c.left && r.right <= c.right) return;
+      cont.scrollLeft += r.left < c.left ? r.left - c.left : r.right - c.right;
+    };
     for (const h of manejas) {
       const col = h.closest('.day-column');
       if (!col) continue;
       const r = h.getBoundingClientRect();
-      if (r.y < 0 || r.y > window.innerHeight || r.x < 0 || r.x > window.innerWidth) continue;
+      if (r.y < 0 || r.y > window.innerHeight) continue;
+      entrarEnPantalla(h);
+      const v = h.getBoundingClientRect();
+      if (v.x < 0 || v.x > window.innerWidth) continue;
       const dia = cols.indexOf(col);
       if (dia === 0) continue; // sin día previo no hay qué ganar
       const item = h.closest('.activity-item') as HTMLElement | null;
@@ -63,8 +127,8 @@ async function asaIzquierda(page: import('@playwright/test').Page) {
       );
       if (yaEsta) continue;
       return {
-        x: r.x + r.width / 2,
-        y: r.y + r.height / 2,
+        x: v.x + v.width / 2,
+        y: v.y + v.height / 2,
         colW: col.getBoundingClientRect().width,
         dia,
         titulo,
@@ -156,6 +220,17 @@ test('Modal: aumentar usa el espacio disponible y empuja al vecino como el asa',
   expect(antes.trabajo.length, 'el guard necesita un vecino al que empujar').toBeGreaterThan(0);
 
   const modal = await abrirModalDe(page, 'Desayuno', 0);
+  // El modal precarga la fila con una lectura async (db.activities.get). Si se
+  // toca un campo antes de que llegue, la carga PISA lo reci\u00e9n elegido y el
+  // guardado sale sin cambios: se ve\u00eda como "Desayuno no creci\u00f3" con el modal
+  // mostrando los defaults de creaci\u00f3n (08:00-09:00 en vez de 08:30) y un
+  // toast gen\u00e9rico "Activity saved". Medido 1 de cada 8 corridas, y es una
+  // carrera real de la app, no del test: una persona que empieza a tocar el
+  // modal apenas abre pierde lo que escribi\u00f3.
+  // Ac\u00e1 la forma correcta de esperarla es por la CONDIC\u00d3N \u2014 que el valor
+  // que trae la fila real ya est\u00e9 en pantalla \u2014 no por un reloj. Si el modal
+  // mostrara los defaults para siempre, el guard falla con este mismo mensaje.
+  await expect(modal.locator('#act-end'), 'el modal nunca trajo el horario real de la actividad').toHaveValue('08:30', { timeout: 10_000 });
   await modal.locator('#act-end').selectOption('11:30');
   await modal.locator('button[type="submit"]').click();
   await expect(modal).toBeHidden({ timeout: 30_000 });
@@ -432,6 +507,14 @@ test('Barrido: el fantasma del empuje coincide con lo que hace el commit', async
 async function asaDerechaConEspacio(page: import('@playwright/test').Page, nombre: string, libres: number) {
   const info = await page.evaluate(({ nombre, libres }) => {
     const cols = [...document.querySelectorAll('.day-column')];
+    const cont = document.querySelector('.weekly-grid-container') as HTMLElement | null;
+    const entrarEnPantalla = (h: HTMLElement) => {
+      if (!cont) return;
+      const c = cont.getBoundingClientRect();
+      const r = h.getBoundingClientRect();
+      if (r.left >= c.left && r.right <= c.right) return;
+      cont.scrollLeft += r.left < c.left ? r.left - c.left : r.right - c.right;
+    };
     for (const h of document.querySelectorAll('.resize-handle.hres-der') as NodeListOf<HTMLElement>) {
       const col = h.closest('.day-column');
       if (!col) continue;
@@ -445,8 +528,11 @@ async function asaDerechaConEspacio(page: import('@playwright/test').Page, nombr
       );
       if (hay) continue;
       const r = h.getBoundingClientRect();
-      if (r.y < 0 || r.y > window.innerHeight || r.x < 0 || r.x > window.innerWidth) continue;
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2, colW: col.getBoundingClientRect().width, dia };
+      if (r.y < 0 || r.y > window.innerHeight) continue;
+      entrarEnPantalla(h);
+      const v = h.getBoundingClientRect();
+      if (v.x < 0 || v.x > window.innerWidth) continue;
+      return { x: v.x + v.width / 2, y: v.y + v.height / 2, colW: col.getBoundingClientRect().width, dia };
     }
     return null;
   }, { nombre, libres });
@@ -695,7 +781,10 @@ test('Barrido del asa: el día del asa también se retira', async ({ page }) => 
   expect(nombres, 'la pista no nombra la actividad').toBeTruthy();
 
   const columnas = Math.floor(3.4);
-  const esperados: string[] = [];
+  // Índices de día (números), no nombres: se usan para leer el title del
+  // encabezado de cada columna. Declarado como string[] dejaba 4 errores de
+  // tipos en el archivo (push de number + headers[d] con d string).
+  const esperados: number[] = [];
   for (let k = 0; k <= columnas; k++) {
     const d = asa.dia - k;
     if (d < 0) break;
@@ -833,7 +922,10 @@ test('Barrido del asa: un día menos solo y el clásico siguen igual', async ({ 
   const pista = page.locator('.hres-float');
   await expect(pista).toBeVisible({ timeout: 30_000 });
   const texto = (await pista.textContent()) ?? '';
-  const esperados: string[] = [];
+  // Índices de día (números), no nombres: se usan para leer el title del
+  // encabezado de cada columna. Declarado como string[] dejaba 4 errores de
+  // tipos en el archivo (push de number + headers[d] con d string).
+  const esperados: number[] = [];
   for (let k = 0; k <= 1; k++) {
     const d = asa.dia - k;
     if (d >= 0) esperados.push(d);
@@ -953,7 +1045,7 @@ test('Visor de imagen: la imagen ocupa al menos el 80% de la pantalla', async ({
   const miniatura = page.locator('.grid-image-thumb[aria-label*="Poster"]').first();
   await expect(miniatura, 'la actividad con imagen no muestra su miniatura')
     .toBeVisible({ timeout: 30_000 });
-  await miniatura.click({ force: true });
+  await clicEstable(miniatura);
 
   const img = page.locator('.lightbox-img');
   await expect(img, 'el click en la miniatura no abrió el visor').toBeVisible({ timeout: 30_000 });
