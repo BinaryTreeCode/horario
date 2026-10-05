@@ -13,7 +13,7 @@ Guía práctica de todo lo que puedes hacer con la app: cada gesto, sus reglas y
 | Cómo entrar | Pestaña "Semana" del header | Pestaña "Día", o **click en el nombre de un día** en la Semana |
 
 - En la vista Día, el conmutador **"Solo este día" / "Plantilla semanal"** decide dónde se guardan tus cambios. Un badge **⚡** en el header del día indica que tiene cambios temporales; el botón **Restaurar** los descarta.
-- La **línea roja con la hora actual** (solo en el día de hoy) marca el momento en que estás.
+- La **línea roja con la hora actual** marca el momento en que estás. Vive en la **vista Día** (la Semana no la tiene) y se pinta siempre que la hora actual caiga dentro del rango del día que tenés en **Ajustes** (por defecto 7:00–23:00): a las 6 de la mañana no aparece porque todavía no empezó tu día. En el móvil el chip queda pegado al borde izquierdo de la cinta, con la flecha mirando a la derecha.
 
 ---
 

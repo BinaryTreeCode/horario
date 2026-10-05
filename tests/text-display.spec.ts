@@ -143,3 +143,78 @@ test('Semana: bloques ≤30 min truncan a 1 línea con tooltip completo', async 
   });
   expect(alturaSpan).toBeLessThan(20);
 });
+
+/**
+ * El chip de la hora actual (`.time-bar-label`) se APLASTABA en móvil: la línea
+ * roja se veía, pero la etiqueta con la hora quedaba metida en una caja de 11px
+ * de ancho para un texto de ~56px ("12:14 PM") — invisible. La causa no era el
+ * ancho de pantalla sino un conflicto de cascada: en ≤480px aplican las media
+ * queries de 768 y de 480, y la de 480 (que va después en el fuente) reponía
+ * `right` sobre el `left` de la de 768. Con los dos lados puestos, el navegador
+ * reparte el ancho sobrante y aplasta la etiqueta.
+ *
+ * El rango del día se fija a 0→24 para que la línea exista a CUALQUIER hora en
+ * que corra el test (si no, de madrugada el `{#if isNowInRange}` no la pinta y
+ * el guard no probaría nada).
+ */
+async function fijarRango24h(page: import('@playwright/test').Page) {
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const req = indexedDB.open('ScheduleDB');
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('settings', 'readwrite');
+      const store = tx.objectStore('settings');
+      const stamp = Date.now();
+      store.put({ id: 'startHour', key: 'startHour', value: 0, updatedAt: stamp });
+      store.put({ id: 'endHour', key: 'endHour', value: 24, updatedAt: stamp });
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+    req.onerror = () => reject(req.error);
+  }));
+  await page.reload();
+}
+
+// 390/480 = los dos anchos donde el chip se aplastaba (480 es donde la media
+// query de 480px empieza a aplicar). 768 = control: ahí el bloque de 480 no
+// manda y el chip siempre estuvo bien.
+for (const ancho of [390, 480, 768]) {
+  test(`Día ${ancho}px: la hora actual se lee en el chip rojo`, async ({ page }) => {
+    await page.setViewportSize({ width: ancho, height: 800 });
+    await fijarRango24h(page);
+    await page.locator('#tab-day').click();
+
+    const chip = page.locator('.time-bar-label');
+    await expect(chip, 'la vista Día no pintó la línea de la hora actual')
+      .toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(300);
+
+    const medido = await chip.evaluate((el: HTMLElement) => {
+      const r = el.getBoundingClientRect();
+      const linea = document.querySelector('.time-bar-line');
+      return {
+        ancho: Math.round(r.width),
+        alto: Math.round(r.height),
+        texto: (el.textContent ?? '').trim(),
+        // nowrap: si la caja se aplasta, el texto se sale (scrollWidth > clientWidth)
+        recortado: el.scrollWidth > el.clientWidth + 1,
+        largoDeLaLinea: Math.round(linea?.getBoundingClientRect().width ?? 0)
+      };
+    });
+
+    expect(medido.texto, `el chip no dice la hora: ${JSON.stringify(medido)}`)
+      .toMatch(/^\d{1,2}:\d{2}\s?(AM|PM)$/);
+    expect(
+      medido.ancho,
+      `el chip de la hora quedó aplastado a ${medido.ancho}x${medido.alto}: ${JSON.stringify(medido)}`
+    ).toBeGreaterThanOrEqual(40);
+    expect(
+      medido.recortado,
+      `la hora se corta dentro del chip: ${JSON.stringify(medido)}`
+    ).toBe(false);
+    expect(
+      medido.largoDeLaLinea,
+      `la línea roja no tiene largo: ${JSON.stringify(medido)}`
+    ).toBeGreaterThan(60);
+  });
+}

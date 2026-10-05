@@ -1889,9 +1889,16 @@
       width: 8px;
       height: 8px;
     }
+    /* OJO: en móvil el chip se ancla a la IZQUIERDA (bloque de 768: left y
+       right:auto). Este bloque también aplica en ≤480 y va después en el
+       fuente, así que si repone `right` deja el chip fijado por AMBOS lados a
+       la vez y el navegador lo aplasta al ancho sobrante: medido, 11px de ancho
+       para un texto de 56 ("12:14 PM"), o sea invisible. Hay que dejar un solo
+       ancla. */
     .time-bar-label {
       font-size: 0.6rem;
-      right: 12px;
+      right: auto;
+      left: 0.25rem;
     }
   }
 </style>
