@@ -277,3 +277,17 @@ describe('reestampar: la salida del callejon del rechazo', () => {
     expect(seleccionables([{ id: 'rechazada', updatedAt: resellada }], cursor).length).toBe(1);
   });
 });
+
+// Bug de producción: el endpoint /api/sync construía su verificación de
+// escrituras con `tabla.id`, y day_overrides NO tiene columna id (su clave
+// es (user_id, day)). En cuanto el push traía un override, drizzle lanzaba
+// "Cannot convert undefined or null to object" y todo el push caía con 500.
+describe('invariantes del push contra el esquema del servidor', () => {
+  it('day_overrides tiene la columna que repartoDeEscrituras usa como clave', async () => {
+    const { dayOverrides } = await import('../server/schema');
+    // La columna de clave del override es `day`: si alguien la renombra o
+    // quita, este test falla antes de que el push vuelva a reventar en producción.
+    expect(dayOverrides.day).toBeDefined();
+    expect(dayOverrides.day.name).toBe('day');
+  });
+});

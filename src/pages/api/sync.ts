@@ -210,6 +210,8 @@ function acotarActsOverride(acts: any[]): any[] {
  */
 async function repartoDeEscrituras<T>(
   tabla: any,
+  /** Columna clave del lote (id, o `day` en overrides — dayOverrides NO tiene columna id). */
+  columnaClave: any,
   userId: string,
   lote: T[],
   claveDe: (fila: T) => string | number,
@@ -220,9 +222,9 @@ async function repartoDeEscrituras<T>(
   const claves = lote.map(claveDe);
   if (claves.length === 0) return 0;
   const guardadas = await db
-    .select({ id: tabla.id, updatedAt: tabla.updatedAt })
+    .select({ id: columnaClave, updatedAt: tabla.updatedAt })
     .from(tabla)
-    .where(and(eq(tabla.userId, userId), inArray(tabla.id, claves)));
+    .where(and(eq(tabla.userId, userId), inArray(columnaClave, claves)));
   const porClave = new Map<string, number>(guardadas.map(f => [String(f.id), f.updatedAt]));
 
   let escritas = 0;
@@ -292,7 +294,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
           where: sql`${categories.updatedAt} < ${c.updatedAt}`
         });
     }
-    pushed += await repartoDeEscrituras(categories, user.id, cats, c => c.id, c => c.updatedAt, 'c', rechazos);
+    pushed += await repartoDeEscrituras(categories, categories.id, user.id, cats, c => c.id, c => c.updatedAt, 'c', rechazos);
 
     // Actividades
     truncado += descartadas(body.activities, MAX_FILAS.activities);
@@ -312,7 +314,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
           where: sql`${activities.updatedAt} < ${a.updatedAt}`
         });
     }
-    pushed += await repartoDeEscrituras(activities, user.id, acts, a => a.id, a => a.updatedAt, 'a', rechazos);
+    pushed += await repartoDeEscrituras(activities, activities.id, user.id, acts, a => a.id, a => a.updatedAt, 'a', rechazos);
 
     // Settings
     truncado += descartadas(body.settings, MAX_FILAS.settings);
@@ -328,7 +330,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
           where: sql`${userSettings.updatedAt} < ${x.updatedAt}`
         });
     }
-    pushed += await repartoDeEscrituras(userSettings, user.id, sets, x => x.id, x => x.updatedAt, 's', rechazos);
+    pushed += await repartoDeEscrituras(userSettings, userSettings.id, user.id, sets, x => x.id, x => x.updatedAt, 's', rechazos);
 
     // DayOverrides
     truncado += descartadas(body.dayOverrides, MAX_FILAS.overrides);
@@ -348,7 +350,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
           where: sql`${dayOverrides.updatedAt} < ${o.updatedAt}`
         });
     }
-    pushed += await repartoDeEscrituras(dayOverrides, user.id, ovrs, o => o.day, o => o.updatedAt, 'o', rechazos);
+    pushed += await repartoDeEscrituras(dayOverrides, dayOverrides.day, user.id, ovrs, o => o.day, o => o.updatedAt, 'o', rechazos);
 
     // 'pushed' son filas ESCRITAS y 'rechazados' las que el guard LWW no dejó
     // pasar. El cliente necesita las dos: solo con 'pushed' avanzaba su cursor
