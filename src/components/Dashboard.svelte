@@ -102,7 +102,14 @@
   async function reintentarSync() {
     if (reintentando) return;
     reintentando = true;
-    try { await syncNow(true); } catch { /* el estado ya queda en error/offline */ } finally { reintentando = false; }
+    try {
+      await syncNow(true);
+    } catch {
+      // El fracaso ya vuelve como syncStatus 'error': el banner
+      // sigue ahí con su mensaje; no hace falta otro aviso.
+    } finally {
+      reintentando = false;
+    }
   }
 
   // ── Nube: subir y bajar a mano ──
@@ -758,7 +765,9 @@
     </div>
   </header>
 
-  {#if syncStatus === 'error' || syncStatus === 'offline'}
+  {#if syncStatus === 'error' || syncStatus === 'offline' || reintentando}
+    <!-- role="alert" para el error; al reintentar, el texto
+         cambia a "Reintentando…" y se vuelve a anunciar. -->
     <div class="sync-banner glass-panel" role="alert">
       {#if reintentando}
         <RefreshCw size={16} class="spin" aria-hidden="true" />
@@ -1468,8 +1477,8 @@
   .sync-banner {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.6rem 1rem;
+    gap: 0.75rem;
+    padding: 0.75rem 1.1rem;
     border-radius: 12px;
     border: 1px solid rgb(var(--ambar-borde) / 0.4);
     background: rgb(var(--sup-calido) / 0.92);
@@ -1492,10 +1501,15 @@
   }
   .sync-retry:hover:not(:disabled) { filter: brightness(1.1); }
   .sync-retry:disabled { cursor: progress; }
-  /* El spinner del reintento no gira: el texto "Reintentando…"
-     ya dice lo que pasa (y menos movimiento = menos ruido). */
-  .sync-banner .spin { animation: none; }
+  /* Spinner del reintento: el mismo giro que el badge de
+     estado; reduced-motion lo apaga más abajo. */
+  .sync-banner .spin { animation: spin 1.2s linear infinite; }
 
+    /* El spinner del reintento no gira: el texto "Reintentando…"
+       ya dice lo que pasa. */
+    .sync-banner .spin {
+      animation: none;
+    }
   /* Punto de estado del sync (hallazgo amarillo de la auditoría: el icono
      de nube no decía NADA del estado). Colores semánticos con tokens. */
   .sync-dot {
@@ -1519,8 +1533,13 @@
   .sync-badge {
     display: flex;
     align-items: center;
+    /* Regla dura #5: target táctil real de 44px — antes el
+       min-height de 40px no lo cubría ni con el padding. */
     justify-content: center;
+    min-width: 44px;
     background: transparent;
+    font-size: 0.88rem;
+    white-space: nowrap;
     border: 1px solid rgb(var(--verde-borde) / 0.25);
     color: rgb(var(--verde-texto));
     border-radius: 50%;
