@@ -447,7 +447,7 @@
       ? estimarRespaldo('compact')
       : exportData('full').then(texto => ({
           bytes: texto.length,
-          imagenesRecomprimidas: 0,
+          imagenesBinarias: 0,
           imagenesIntactas: 0,
           bytesSinTratar: texto.length
         }))
@@ -826,8 +826,8 @@
               <span class="export-estimacion" aria-live="polite">{$t('settings.estimating')}</span>
             {:else if estimacion}
               <span class="export-estimacion" aria-live="polite">
-                {$t('settings.estimateSize', { size: fmtTam(estimacion.bytes) })}{#if exportMode === 'binario' && estimacion.imagenesRecomprimidas > 0}
-                  · {$t('settings.estimateImages', { n: estimacion.imagenesRecomprimidas })}
+                {$t('settings.estimateSize', { size: fmtTam(estimacion.bytes) })}{#if exportMode === 'binario' && estimacion.imagenesBinarias > 0}
+                  · {$t('settings.estimateImages', { n: estimacion.imagenesBinarias })}
                 {/if}
               </span>
             {/if}

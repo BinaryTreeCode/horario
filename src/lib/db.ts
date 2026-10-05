@@ -550,10 +550,13 @@ export async function exportData(mode: ExportMode = 'compact'): Promise<string> 
  * movidas a entradas binarias del ZIP (fflate). Ahorra la inflación base64
  * (+33%), el overhead de escape JSON y comprime el JSON con DEFLATE.
  *
- * Recomprime primero cada data-URL de imagen a 256px/WebP (~15–30 KB) para
- * que el respaldo sirva de resguardo, no de archivo pesado. Las imágenes en
- * la nube (URL http) o las que fallen al recomprimir viajan como texto
- * dentro del JSON, intactas.
+ * Las data-URLs viajan como bytes BINARIOS sin tocar: son las que ya se
+ * comprimieron al guardarse. Recomprimirlas a 256px no ahorraba nada (el
+ * ahorro de verdad ya lo da el formato: fuera el +33% del base64 y el
+ * DEFLATE del ZIP) y perdía resolución para siempre: exportar → importar
+ * dejaba las imágenes en la mitad de su tamaño, y el lightbox de escritorio
+ * se quedaba con un sello. Las imágenes de la nube (URL http) viajan como
+ * texto dentro del JSON, intactas.
  *
  * El .npz se importa con el MISMO pipeline de siempre (validateImport →
  * confirmación → importValidatedData): el validador acepta el ZIP si trae
@@ -563,7 +566,7 @@ export interface StatsRespaldo {
   /** Tamaño final del archivo (bytes reales del ZIP, o del texto en .json). */
   bytes: number;
   /** Data-URLs de imagen recompresidas a binario dentro del archivo. */
-  imagenesRecomprimidas: number;
+  imagenesBinarias: number;
   /** Imágenes que ya viajaban livianas (URL http/blob) y no se tocaron. */
   imagenesIntactas: number;
   /** Bytes del JSON SIN tratar imágenes (referencia para el % ahorrado). */
@@ -575,8 +578,7 @@ export interface StatsRespaldo {
 async function buildRespaldoBinario(mode: ExportMode): Promise<{ zipped: Uint8Array; stats: StatsRespaldo }> {
   if (typeof window === 'undefined') throw new Error('Solo navegador');
   const { zipSync, strToU8 } = await import('fflate');
-  const { recomprimirParaRespaldo, esDataUrlImagen, UMBRAL_BINARIO } =
-    await import('./routineImages');
+  const { esDataUrlImagen, bytesDeDataUrl } = await import('./routineImages');
   const payload = await exportData(mode); // JSON con data-URLs inline
   const bytesSinTratar = payload.length;
   const parsed = JSON.parse(payload);
@@ -602,39 +604,37 @@ async function buildRespaldoBinario(mode: ExportMode): Promise<{ zipped: Uint8Ar
   // Recolectar TODAS las data-URLs únicas (actividades y overrides comparten
   // imágenes → una sola entrada por imagen distinta).
   const urls = new Set<string>();
-  const colectar = (a: any) => { if (esDataUrlImagen(imgDe(a))) urls.add(imgDe(a)); };
+  // Ademas de las data-URLs (que van al ZIP), se cuentan las que ya viajan
+  // como URL http/blob: esas no se tocan y son parte del reporte.
+  let yaLivianas = 0;
+  const colectar = (a: any) => {
+    const im = imgDe(a);
+    if (esDataUrlImagen(im)) urls.add(im);
+    else if (typeof im === 'string' && im) yaLivianas++;
+  };
   for (const a of actsDe(parsed)) colectar(a);
   for (const a of ovActsDe(parsed)) colectar(a);
 
-  // Recomprimir en paralelo: { original → versión liviana } solo si compensa
-  // (una data-URL en texto pesa length*1.03 bytes aprox. — pct-encoding).
-  const pares = (
-    await Promise.all(
-      [...urls].map(async url => {
-        const r = await recomprimirParaRespaldo(url);
-        return r && r.bytes < url.length * 1.03 && r.bytes < UMBRAL_BINARIO
-          ? ([url, r.url] as const)
-          : null;
-      })
-    )
-  ).filter(Boolean) as ReadonlyArray<readonly [string, string]>;
+  // Cada data-URL se desarma a sus bytes y va al ZIP como entrada binaria. No
+  // hay decisión que tomar: el binario SIEMPRE le gana al texto (base64 son
+  // 4/3 del binario, y el JSON lo escapa una vez más), así que el único
+  // criterio posible ——bajo N KB— solo podía dejar imágenes fuera del ZIP.
+  // Antes además se re-codificaban a 256px, lo que convertía al respaldo en
+  // un degradador de imágenes en lugar de una copia.
+  const binarios = [...urls].map(url => bytesDeDataUrl(url));
 
   // d = payload JSON (con placeholders {"i":idx,"f":mime}), imgs = binarios puros.
-  const urlAIndice = new Map(pares.map(([url], i) => [url, i] as const));
-  const placeholderABytes = new Map<number, Uint8Array>();
-  for (let i = 0; i < pares.length; i++) {
-    const blob = await (await fetch(pares[i][1])).blob();
-    placeholderABytes.set(i, new Uint8Array(await blob.arrayBuffer()));
-  }
+  const urlAIndice = new Map([...urls].map((url, i) => [url, i] as const));
+  const placeholderABytes = new Map<number, Uint8Array>(
+    binarios.map((b, i) => [i, b.bytes] as const)
+  );
   const asignar = (a: any) => {
     const idx = urlAIndice.get(imgDe(a));
     if (idx !== undefined) {
       // Placeholder estructural {"i":<índice>,"f":<mime>}: sobrevive a
       // JSON.stringify y no colisiona con URLs http reales. El import lo
       // reconstruye a data-URL (backupFile.ts).
-      const url = pares[idx][1];
-      const mime = url.slice(5, url.indexOf(';')) || 'image/webp';
-      setImg(a, { i: idx, f: mime });
+      setImg(a, { i: idx, f: binarios[idx].mime });
     }
   };
   for (const a of actsDe(parsed)) asignar(a);
@@ -652,8 +652,8 @@ async function buildRespaldoBinario(mode: ExportMode): Promise<{ zipped: Uint8Ar
     zipped,
     stats: {
       bytes: zipped.length,
-      imagenesRecomprimidas: pares.length,
-      imagenesIntactas: urls.size - pares.length,
+      imagenesBinarias: binarios.length,
+      imagenesIntactas: yaLivianas,
       bytesSinTratar
     }
   };
@@ -661,7 +661,7 @@ async function buildRespaldoBinario(mode: ExportMode): Promise<{ zipped: Uint8Ar
 
 /**
  * Estima el respaldo .npz SIN descargar nada: ejecuta el mismo pipeline
- * (export → recomprimir imágenes → zip) y devuelve tamaño + imágenes
+ * (export → pasar imágenes a binario → zip) y devuelve tamaño + imágenes
  * tratadas. La estimación es EXACTA, no aproximada: es el archivo que se
  * descargaría. Para la UI: cachear por modo (los datos no cambian debajo).
  */
@@ -734,12 +734,13 @@ export async function importValidatedData(result: ValidationResult): Promise<voi
   const patch = <T extends { updatedAt?: number }>(rows: T[]): T[] =>
     rows.map(r => ({ ...r, updatedAt: stamp }));
 
-  // Un respaldo se recomprime a 256px para que el archivo sea ligero (ver
-  // buildRespaldoBinario). Importar ese archivo NO puede dejar que esa version
-  // pobre pise a la que ya esta guardada: sin este guard, exportar → importar
-  // degrada las imagenes de forma irreversible. Medido en los datos reales:
-  // cuatro imagenes de 288x512 quedaron en 144x256 tras un round-trip, y en
-  // el lightbox de escritorio son un sello de 138px en una pantalla de 2560.
+  // Los respaldos YA NO recomprimen (ver buildRespaldoBinario), asi que un
+  // round-trip exportar → importar es una copia fiel. Este guard queda solo
+  // para los archivos descargados por versiones anteriores, que si venían
+  // recortados a 256px: importarlos no puede dejar que esa version pobre
+  // pise a la que ya esta guardada. Medido en los datos reales: cuatro
+  // imagenes de 288x512 quedaron en 144x256 tras uno de esos round-trips, y
+  // en el lightbox de escritorio eran un sello de 138px en una pantalla de 2560.
   //
   // Solo se conserva la imagen previa cuando AMBAS son data-URL y la guardada
   // pesa mas (mismo codec, mas bytes = mas detalle). Si cualquiera de las dos

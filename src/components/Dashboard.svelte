@@ -327,8 +327,8 @@
         ? `${(stats.bytes / 1024 / 1024).toFixed(1)} MB`
         : `${Math.max(1, Math.round(stats.bytes / 1024))} KB`;
       toastOk(
-        stats.imagenesRecomprimidas > 0
-          ? `${tNow('sidebar.exported')} ${kb} · ${tNow('sidebar.exportImages', { n: stats.imagenesRecomprimidas })}`
+        stats.imagenesBinarias > 0
+          ? `${tNow('sidebar.exported')} ${kb} · ${tNow('sidebar.exportImages', { n: stats.imagenesBinarias })}`
           : `${tNow('sidebar.exported')} ${kb}`
       );
     } catch (err: any) {

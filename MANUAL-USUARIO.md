@@ -119,6 +119,8 @@ Ahora, en su lugar:
 ## 7. Imágenes de las rutinas
 
 - Se agregan desde el modal de actividad (archivo o URL; se recomprimen a WebP máx. 256px).
+- La imagen de la rutina se **comprime en tu dispositivo** antes de guardarla: con cuenta conectada va a la nube y en la actividad queda solo una dirección liviana; sin cuenta queda una copia chica dentro de la app. Puedes subir cualquier foto de tu celular (el tope es de 25 MB y es solo para que no elijas un video por error).
+- El respaldo guarda las imagenes **tal cual están**, sin recortarlas: un exportar → importar no degrada la calidad.
 - En las tarjetas, la **miniatura circular con anillo blanco** indica que hay imagen:
   - **Semana**: pasar el mouse muestra la foto ampliada (120px + nombre) sin click; click abre el visor grande. En táctil: tap directo al visor.
   - **Día**: miniatura junto al nombre; click abre el visor.

@@ -21,6 +21,7 @@ bunx drizzle-kit push  # migraciones → DATABASE_URL (requiere .env.local)
 | `src/lib/types.ts` | Tipos (IDs UUID string desde v4 del esquema) |
 | `src/lib/db.ts` | Dexie, migraciones v2→v4, `exportData`/`validateImport`/`importValidatedData`, `initDB` |
 | `src/lib/importValidation.ts` | Validador puro de JSON importado (whitelist, sin tocar BD) |
+| `src/lib/routineImages.ts` | Compresion de imagenes en cliente (`comprimirImagen`) y bytes para el respaldo (`bytesDeDataUrl`) |
 | `src/lib/sync.ts` | Push/pull LWW contra `/api/sync`, triggers, `syncState` |
 | `src/server/` | Drizzle + Neon (`db.ts`, `schema.ts`, `auth.ts`) |
 | `src/components/` | Svelte 5 runes; `Dashboard` (shell), `DailyView` (Día) + `WeeklyGrid` (Semana, drag con motor compartido), `ActivityModal`, `SettingsPanel` (lazy) |

@@ -8,7 +8,7 @@
   import { t, tNow } from '../lib/i18n';
   import { fueConsumido } from '../lib/dialogStack';
   import { sembrarSinPisar } from '../lib/activitySeed';
-  import { comprimirImagen, subirABlob, DIM_LOCAL, DIM_BLOB } from '../lib/routineImages';
+  import { comprimirImagen, subirABlob, DIM_LOCAL, DIM_BLOB, MAX_BYTES_ENTRADA } from '../lib/routineImages';
   import { isLoggedIn } from '../lib/sync';
 
   interface Props {
@@ -169,7 +169,10 @@
       toastErr(tNow('modal.notImage'));
       return;
     }
-    if (file.size > 2 * 1024 * 1024) {
+    // Techo alto, NO el de 2 MB: ese limite es del endpoint y aplica a los
+    // bytes ya comprimidos. Aplicado al original rechazaba casi todas las
+    // fotos del celular (3-6 MB) antes de que el compresor llegara a correr.
+    if (file.size > MAX_BYTES_ENTRADA) {
       toastErr(tNow('modal.imageTooBig'));
       return;
     }
