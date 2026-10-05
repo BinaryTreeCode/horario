@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'bun:test';
-import { esSemilla, seleccionables, cursorPushTras, cursorPull, acotarFechaRemota } from './sync';
+import {
+  esSemilla, seleccionables, cursorPushTras, cursorPull,
+  acotarFechaRemota, sesgoDe, sellarParaServidor, reestampar,
+} from './sync';
 
 // La sincronización entre dispositivos se decide en tres cálculos puros: qué
 // filas viajan, hasta dónde avanza el cursor del push y dónde queda el del
@@ -115,9 +118,20 @@ describe('acotarFechaRemota', () => {
     expect(acotarFechaRemota({ id: 'x', updatedAt: 1_060_000 }, 1_000_000)).toEqual({ id: 'x', updatedAt: 1_000_000 });
   });
 
-  it('deja intacta una fila que no está en el futuro', () => {
-    const fila = { id: 'x', updatedAt: 900_000 };
-    expect(acotarFechaRemota(fila, 1_000_000)).toBe(fila);
+  it('sube un milisegimo la fila que la nube ya tiene (el empate perpetuo)', () => {
+    // El +1 es lo que hace que el push siguiente la acepte: si la copia local
+    // queda con EXACTAMENTE la fecha que hay en la nube, el guard estricto del
+    // servidor (updatedAt < incoming) la rechaza otra vez, y otra, y otra.
+    expect(acotarFechaRemota({ id: 'x', updatedAt: 900_000 }, 1_000_000)).toEqual({ id: 'x', updatedAt: 900_001 });
+  });
+
+  it('traduce al reloj local la fecha de un servidor adelantado', () => {
+    // 10 min de desfase: la fila llega sellada 600 s por delante de nuestro reloj.
+    // Sin traducción, la copia local nace en el futuro; con ella, nace donde el
+    // otro dispositivo creó el cambio (más un ms, para ganarle al guard).
+    const sesgo = sesgoDe(1_600_000, 1_000_000);
+    expect(sesgo).toBe(600_000);
+    expect(acotarFechaRemota({ id: 'x', updatedAt: 1_600_500 }, 1_100_000, sesgo)).toEqual({ id: 'x', updatedAt: 1_000_501 });
   });
 
   it('no muta la fila original (el resto de la fila viene intacta)', () => {
@@ -149,5 +163,90 @@ describe('acotarFechaRemota', () => {
     const cursor = cursorPushTras([filaRemota], 0, respuestaDelPush);
 
     expect(seleccionables([cambioLocal], cursor).length, 'el cambio local quedo invisible para siempre').toBe(1);
+  });
+});
+
+describe('el desfase con el reloj del servidor', () => {
+  it('lo que va adelantado su reloj, en milisegundos', () => {
+    expect(sesgoDe(1_060_000, 1_000_000)).toBe(60_000);
+    expect(sesgoDe(1_000_000, 1_000_000)).toBe(0);
+    expect(sesgoDe(940_000, 1_000_000)).toBe(-60_000); // el servidor, atrasado
+  });
+
+  it('con desfase, un cambio del dispositivo CONGELADO gana en el push', () => {
+    // Este es el agujero que auditamos: con el reloj del dispositivo 10 min
+    // atrasado, cada cambio nacia con una fecha que el guard estricto del
+    // servidor rechazaba. Sin traducir el sello al reloj del servidor, el
+    // push se agotaba en silencio y el pull devolvia la version vieja.
+    const ahora = 1_000_000;
+    const serverTime = ahora + 600_000;
+    const sesgo = sesgoDe(serverTime, ahora);
+
+    // Lo que hay en la nube: un cambio de hace un minuto, en el reloj del servidor.
+    const enNube = serverTime - 60_000;
+    const cambioLocal = { id: 'editada-ahora', updatedAt: ahora + 1_000 };
+    const enviado = sellarParaServidor(cambioLocal, sesgo);
+
+    expect(enviado.updatedAt, 'el guard < del servidor lo rechazaria').toBeGreaterThan(enNube);
+    // Y el sello local NO se toca: solo cambia lo que sale por la red.
+    expect(cambioLocal.updatedAt).toBe(ahora + 1_000);
+  });
+
+  it('no muta la fila que sella', () => {
+    const fila = { id: 'x', name: 'Ruta', updatedAt: 100 };
+    expect(sellarParaServidor(fila, 60_000)).toEqual({ id: 'x', name: 'Ruta', updatedAt: 60_100 });
+    expect(fila.updatedAt).toBe(100);
+  });
+
+  it('sin desfase (la primera push, todavia sin respuestas) el sello es el de siempre', () => {
+    expect(sellarParaServidor({ updatedAt: 100 }, 0)).toEqual({ updatedAt: 100 });
+  });
+});
+
+describe('reestampar: la salida del callejon del rechazo', () => {
+  it('pone la fila un ms por encima de lo que hay en la nube', () => {
+    expect(reestampar(1_000_000, 5_000_000)).toBe(5_000_001);
+  });
+
+  it('traduce con el desfase: lo que sale tiene que GANARLE al servidor', () => {
+    const local = 1_000_000;
+    const remoto = local + 60_000;
+    const sesgo = 60_000;
+    const nuevo = reestampar(local, remoto, sesgo);
+    expect(nuevo + sesgo).toBeGreaterThan(remoto);
+  });
+
+  it('nunca baja una fila que ya es mas nueva que la nube', () => {
+    expect(reestampar(9_000_000, 5_000_000)).toBe(9_000_000);
+  });
+
+  it('LA CADENA DEL RECHAZO: lo rechazado vuelve a subir y no se pierde', () => {
+    // El bug critico de la auditoria, reproducido con las funciones reales:
+    //   1) el servidor rechaza una fila por su guard LWW pero contabilizaba
+    //      igual el envio (pushed++ estaba fuera del where),
+    //   2) el cliente avanzaba lastPushAt por encima de ella,
+    //   3) seleccionables filtra por > cursor, asi que la fila ya no volvia a
+    //      entrar en ningun push y el pull la sobrescribia con la vieja.
+    const cursorPrevio = 1_000;
+    const lote = [
+      { id: 'aceptada', updatedAt: 2_000 },
+      { id: 'rechazada', updatedAt: 3_000 }, // en la nube hay una de 5.000
+    ];
+    const rechazados = [{ t: 'a', k: 'rechazada', u: 5_000 }];
+
+    // El cursor se calculatesolo con lo que el servidor CONFIRMO.
+    const rechazadas = new Set(rechazados.map(r => `${r.t}:${r.k}`));
+    const aceptadas = lote.filter(f => !rechazadas.has(`a:${f.id}`));
+    const cursor = cursorPushTras(aceptadas, cursorPrevio, 3_001);
+    expect(cursor).toBe(2_000);
+
+    // La fila rechazada sigue estando por encima del cursor: el siguiente push
+    // la elige otra vez, con la fecha que le devuelve el servidor por encima.
+    const siguiente = seleccionables(lote, cursor).map(f => f.id);
+    expect(siguiente, 'la fila rechazada se perdio para siempre').toEqual(['rechazada']);
+
+    const resellada = reestampar(lote[1].updatedAt, rechazados[0].u, 0);
+    expect(resellada, 'tiene que ganarle a lo que hay en la nube').toBe(5_001);
+    expect(seleccionables([{ id: 'rechazada', updatedAt: resellada }], cursor).length).toBe(1);
   });
 });

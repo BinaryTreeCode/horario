@@ -50,6 +50,10 @@ export interface SyncState {
   lastPushAt?: number;  // último push exitoso al servidor
   lastPullAt?: number;  // último pull exitoso
   lastServerPullAt?: number; // updatedAt del servidor en el último pull
+  /** Desfase (ms) entre el reloj del servidor y el del dispositivo, aprendido
+   *  de cada respuesta. Se suma al updatedAt de lo que sale para que el LWW del
+   *  servidor compare dos fechas del mismo reloj. */
+  sesgoServidor?: number;
   pendingChanges?: number;
   lastError?: string;
   lastErrorAt?: number;

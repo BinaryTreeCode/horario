@@ -27,6 +27,10 @@ interface NubeFalsa {
   pulls: number;
   /** Cambia lo que hay en la nube en caliente (para probar un pull manual). */
   setRemotas: (filas: any[]) => void;
+  /** Lo que el servidor tiene DE VERDAD de una fila (guard LWW incluido). */
+  enNube: (id: string) => any;
+  /** Peticiones que han llegado a /api/sync, push y pull juntos. */
+  peticiones: number;
 }
 
 /* Los textos del menú son i18n y el navegador de los tests puede arrancar en
@@ -54,39 +58,72 @@ async function abrirMenuDatos(page: import('@playwright/test').Page) {
 }
 
 /**
- * Nube en memoria. `remotas` son las filas que "el otro dispositivo" tiene;
- * el GET devuelve las que aún no se han pedido (since=0 → todas, como un
+ * Nube en memoria. `remotas` son las filas que "el otro dispositivo" tiene; el
+ * GET devuelve las que aún no se han pedido (since=0 → todas, como un
  * dispositivo recién estrenado).
+ *
+ * `almacen` es lo que el servidor tiene DE VERDAD, y el POST lo reproduce con
+ * el mismo guard LWW que /api/sync: solo se escribe lo que llega con un
+ * `updatedAt` más nuevo que lo guardado, y lo que se rechaza vuelve con su
+ * fecha. Antes este mock respondía `pushed: <filas recibidas>` sin mirar nada,
+ * o sea que daba la razón al cliente por cualquier cosa: los guards medían
+ * "el cliente mandó la fila", no "la fila llegó a la nube".
  *
  * SKEW_MS simula el reloj del servidor adelantado al del dispositivo, que es
  * lo que pasa de verdad (Neon contra un portátil con la hora sin ajustar). No
- * es decorativo: es lo que hace que el cursor del push importe.
+ * es decorativo: es lo que hace que el guard LWW del servidor rechace, que el
+ * cursor del push importe y que la traducción de sellos sea necesaria.
  */
 const SKEW_MS = 60_000;
 
 async function conNube(page: import('@playwright/test').Page, iniciales: any[] = []): Promise<NubeFalsa> {
   const remotas = [...iniciales];
+  const almacen = new Map<string, any>();
+  const claveDe = (tipo: string, fila: any) => (tipo === 'o' ? `o:${fila.day}` : `${tipo}:${fila.id}`);
+  for (const f of iniciales) almacen.set(`a:${f.id}`, f);
+
   const estado: NubeFalsa = {
     pushes: [],
     pulls: 0,
+    peticiones: 0,
     setRemotas: filas => { remotas.length = 0; remotas.push(...filas); },
+    enNube: id => almacen.get(`a:${id}`),
   };
   const serverTime = () => Date.now() + SKEW_MS;
   await page.route('**/api/sync*', async route => {
     const req = route.request();
+    estado.peticiones++;
     if (req.method() === 'POST') {
       const cuerpo = JSON.parse(req.postData() || '{}');
       estado.pushes.push(cuerpo);
-      const filas = [
-        ...(cuerpo.activities ?? []),
-        ...(cuerpo.categories ?? []),
-        ...(cuerpo.settings ?? []),
-        ...(cuerpo.dayOverrides ?? []),
-      ].length;
+      let pushed = 0;
+      const rechazados: any[] = [];
+      const lotes: [string, any[]][] = [
+        ['c', cuerpo.categories ?? []],
+        ['a', cuerpo.activities ?? []],
+        ['s', cuerpo.settings ?? []],
+        ['o', cuerpo.dayOverrides ?? []],
+      ];
+      for (const [tipo, lote] of lotes) {
+        for (const fila of lote) {
+          const clave = claveDe(tipo, fila);
+          const guardada = almacen.get(clave);
+          if (guardada && guardada.updatedAt >= fila.updatedAt) {
+            rechazados.push({
+              t: tipo,
+              k: tipo === 'o' ? String(fila.day) : fila.id,
+              u: guardada.updatedAt,
+            });
+          } else {
+            almacen.set(clave, fila);
+            pushed++;
+          }
+        }
+      }
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, pushed: filas, serverTime: serverTime() }),
+        body: JSON.stringify({ ok: true, pushed, rechazados, serverTime: serverTime() }),
       });
     }
     estado.pulls++;
@@ -188,6 +225,105 @@ test.describe('Sincronización entre dispositivos', () => {
     await expect
       .poll(() => nube.pushes.flatMap(p => p.activities ?? []).map(a => a.name), { timeout: 20_000 })
       .toContain('Despues del arranque');
+  });
+
+  test('un cambio llega a la nube, no solo a la request', async ({ page }) => {
+    // La diferencia entre mandar la fila y que la nube la tenga: con el reloj
+    // del servidor 60s adelantado, una fila ya presente en la nube y editada
+    // aquí nace con una fecha que el guard LWW del servidor rechaza. El cliente
+    // no se enteraba de eso, y el pull siguiente devolvía la versión vieja.
+    const nube = await conNube(page, [remota('Ya estaba en la nube')]);
+    await conSesion(page);
+    await page.goto('/');
+    await esperarSemana(page);
+    await expect.poll(() => nube.pulls, { timeout: 20_000 }).toBeGreaterThan(0);
+
+    await page.evaluate(async () => {
+      const db = (globalThis as any).__npDb;
+      const fila = await db.activities.get('remota-Ya-estaba-en-la-nube');
+      await db.activities.put({ ...fila, name: 'Editada en este dispositivo', updatedAt: Date.now() });
+    });
+
+    await expect
+      .poll(() => nube.enNube('remota-Ya-estaba-en-la-nube')?.name, {
+        timeout: 20_000,
+        message: 'la edicion se quedo en el dispositivo: la nube no la guardo',
+      })
+      .toBe('Editada en este dispositivo');
+  });
+
+  test('el boton de bajar cuenta los registros que trajo', async ({ page }) => {
+    // El bug: bajarAhora declaraba { aplicados } y devolvia { applied }, así que
+    // la UI recibía undefined y el toast decía SIEMPRE "ya tenías todo lo que hay
+    // en la nube" incluso bajando de verdad.
+    const nube = await conNube(page, [remota('La de antes')]);
+    await conSesion(page);
+    await page.goto('/');
+    await esperarSemana(page);
+    await expect.poll(() => nube.pulls, { timeout: 20_000 }).toBeGreaterThan(0);
+    // El pull compara contra el reloj del servidor y este va 60s adelantado, así
+    // que la nube devuelve las dos filas: el toast tiene que decir 2, no 0.
+    nube.setRemotas([remota('La de antes'), remota('La que acaba de llegar')]);
+
+    await abrirMenuDatos(page);
+    await page.locator('.menu-datos button', { hasText: TEXTO_BAJAR }).click();
+
+    await expect(
+      page.locator('.toast-success .toast-msg'),
+      'el toast de bajada no contó lo que realmente trajo'
+    ).toHaveText(/Bajado ✓ · 2 registro|Downloaded ✓ · 2 new record/, { timeout: 10_000 });
+    await esperarSemana(page);
+    await expect(page.locator('.activity-item[title="La que acaba de llegar"]').first()).toBeVisible();
+  });
+
+  test('una sesion caducada deja de reintentar y ofrece volver a entrar', async ({ page }) => {
+    // Con la cookie muerta el 401 caía en el error genérico: el motor seguía
+    // creyendo que había sesión, así que cada cambio local reintentaba el push
+    // para siempre (y la UI solo ofrecía un error de red, nunca entrar).
+    await page.unroute('**/api/sync*');
+    await conSesion(page);
+    let peticiones = 0;
+    await page.route('**/api/sync*', route => {
+      peticiones++;
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'No autenticado' }),
+      });
+    });
+    await page.reload();
+    await esperarSemana(page);
+
+    // El arranque sí lo intenta (de ahí el 401) y, en cuanto lo procesa, el
+    // motor se da por muerto: el menú vuelve a ofrecer entrar.
+    await abrirMenuDatos(page);
+    await expect(page.locator('.menu-datos button', { hasText: TEXTO_NUBE })).toHaveCount(1, { timeout: 20_000 });
+    await page.keyboard.press('Escape');
+    const trasArranque = peticiones;
+    expect(trasArranque, 'no llegó a hablar con la nube ni una vez').toBeGreaterThan(0);
+
+    // Tres cambios locales, con el debounce de 3s entre ellos: a un servidor que
+    // ya le ha dicho que no, no hay que volver a preguntarle nada.
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(async (n) => {
+        const db = (globalThis as any).__npDb;
+        await db.activities.put({
+          id: 'con-sesion-muerta-' + n,
+          categoryId: 'rutina',
+          name: 'Cambio ' + n,
+          startTime: '13:00',
+          endTime: '14:00',
+          daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+          updatedAt: Date.now(),
+        });
+      }, i);
+      await page.waitForTimeout(3_500);
+    }
+
+    expect(peticiones, 'sigue insistiendo con la cookie muerta').toBe(trasArranque);
+    await abrirMenuDatos(page);
+    await expect(page.locator('.menu-datos button', { hasText: TEXTO_SUBIR })).toHaveCount(0);
+    await expect(page.locator('.menu-datos button', { hasText: TEXTO_NUBE })).toHaveCount(1);
   });
 
   test('un cambio del usuario sí llega a la nube sin pulsar nada', async ({ page }) => {

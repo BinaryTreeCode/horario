@@ -182,6 +182,10 @@ async function persistState() {
       lastPullAt: lastSyncAt,
       lastPushAt: prev?.lastPushAt,
       lastServerPullAt: prev?.lastServerPullAt,
+      // Desfase con el reloj del servidor: es lo que permite comparar fechas de
+      // dos relojes distintos (ver sellarParaServidor). También es un cursor que
+      // ningún setStatus puede tirar.
+      sesgoServidor: prev?.sesgoServidor,
       // Pausa de push persistente: sobrevive recargas y reinicios de la app.
       pendingPushPaused: prev?.pendingPushPaused ?? false,
     };
@@ -198,6 +202,15 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    // La cookie caducó o el servidor dejó de aceptarla. Con la sesión todavía
+    // marcada como viva, el 401 caía en el error genérico: los triggers de Dexie
+    // lo reintentaban cada 3 s PARA SIEMPRE y la UI nunca ofrecía volver a
+    // entrar, porque el aviso era un estado de red. Apagarla devuelve la app al
+    // modo local honesto: el motor se calla y el menú vuelve a enseñar "entrar".
+    sesionActiva = false;
+    throw Object.assign(new Error(SIN_SESION), { sinSesion: true });
+  }
   if (!res.ok) {
     throw new Error((data as any)?.error ?? `HTTP ${res.status}`);
   }
@@ -261,30 +274,61 @@ export function cursorPull(serverTime: number, solapeMs = 5000): number {
 }
 
 /**
- * Fecha de una fila que viene de la nube, acotada al reloj local.
+ * Desfase entre el reloj del servidor y el del dispositivo, en milisegundos.
  *
- * El agujero: el pull guarda la fila con el `updatedAt` que le dio el servidor.
- * Si ese reloj va adelantado (60s en el guard que lo cubre), la fila queda
- * localmente EN EL FUTURO. En el push siguiente sube al lote y cursorPushTras la
- * recorta al reloj local (`Math.min(ahora, ...)`), o sea que el cursor queda en
- * el instante en que llegó la respuesta: >= que el `updatedAt` de cualquier
- * cambio que la persona haya hecho mientras el push volaba. seleccionables filtra
- * por `> cursor`, así que ese cambio queda por debajo y ya no vuelve a subirse
- * nunca. Sin error y sin aviso, que es lo peor.
- *
- * La salida es no dejar que un reloj ajeno se instale como reloj propio: la fila
- * se guarda con `min(updatedAt remoto, ahora local)`. La COMPARACIÓN de LWW se
- * sigue haciendo contra la fecha cruda del servidor (es su reloj el que decide
- * qué es más nuevo), así que la decisión no cambia; lo que cambia es que la
- * línea de tiempo local nunca queda anticipada.
- *
- * Renuncia consciente: si los dos equipos tienen relojes muy distintos, el LWW
- * local puede decidir distinto que el servidor. A favor: el servidor nunca
- * rechaza una fila por ser más vieja (eso ya lo hacía con la fila original) y se
- * pierde el caso invisible de un cambio que no vuelve a subirse nunca.
+ * El LWW compara fechas y solo funciona si las dos partes comparan con el MISMO
+ * reloj. Las filas se sellan en el dispositivo con `Date.now()` y el servidor
+ * sella con el suyo, así que un móvil con la hora sin ajustar (o un portátil
+ * varios minutos atrás) nacía con cada cambio ya rechazado por el guard `<`:
+ * un push que se agotaba en silencio. Se aprende de cada respuesta (que trae
+ * `serverTime`) y se persiste.
  */
-export function acotarFechaRemota<T extends { updatedAt: number }>(fila: T, ahora: number): T {
-  return fila.updatedAt > ahora ? { ...fila, updatedAt: ahora } : fila;
+export function sesgoDe(serverTime: number, ahora: number): number {
+  return serverTime - ahora;
+}
+
+/**
+ * Sello de una fila tal como viaja por la nube: su fecha local traducida al
+ * reloj del servidor. Es el mismo desfase que usa reestampar, aplicado al revés.
+ */
+export function sellarParaServidor<T extends { updatedAt: number }>(fila: T, sesgo: number): T {
+  return { ...fila, updatedAt: fila.updatedAt + sesgo };
+}
+
+/**
+ * Sello local de una fila que viene de la nube.
+ *
+ * El servidor manda su `updatedAt` y ese reloj no es el nuestro. Guardarlo tal
+ * cual era un agujero con dos caras:
+ *
+ *  1) Si el servidor va adelantado, la fila queda localmente EN EL FUTURO y
+ *     envenena el cursor del push siguiente (lo tapa el recorte a "ahora" de
+ *     aquí, que existía justo para eso).
+ *  2) Aunque no lo esté, la copia local queda con EXACTAMENTE la fecha que ya
+ *     tiene en la nube, así que el push siguiente la reenvía y el guard estricto
+ *     del servidor la vuelve a rechazar: un empate perpetuo en cada arranque.
+ *
+ * Regla: la copia local se sella un milisegundo POR ENCIMA de lo que hay en la
+ * nube —traducido a nuestro reloj con el desfase aprendido— y nunca por delante
+ * de "ahora". Así el push la acepta a la primera y cualquier cambio real que la
+ * persona haga después la supera siempre.
+ */
+export function acotarFechaRemota<T extends { updatedAt: number }>(
+  fila: T,
+  ahora: number,
+  sesgo = 0,
+): T {
+  const local = Math.min(fila.updatedAt - sesgo + 1, ahora);
+  return local === fila.updatedAt ? fila : { ...fila, updatedAt: local };
+}
+
+/**
+ * Sello local para una fila que el servidor rechazó. Un milisegundo por encima
+ * de lo que hay allí, en NUESTRO reloj: sin esto la fila se reenvía con la
+ * misma fecha y el guard la vuelve a rechazar, una y otra vez.
+ */
+export function reestampar(local: number, remoto: number, sesgo = 0): number {
+  return Math.max(local, remoto - sesgo + 1);
 }
 
 // ── Push: enviar cambios locales (LWW en el servidor) ────────────────────────
@@ -342,9 +386,23 @@ async function migrarImagenesABlob(): Promise<void> {
   migracionImagenesHecha = true;
 }
 
+/** Respuesta del push: lo ESCRITO, lo RECHAZADO y el reloj del servidor. */
+interface RespuestaPush {
+  /** Filas que el servidor guardó de verdad (antes contaba la intención). */
+  pushed: number;
+  /** Filas que el guard LWW no dejó pasar, con la fecha que tienen allí. */
+  rechazados?: Rechazo[];
+  serverTime: number;
+}
+
+/** Una fila que el servidor no aceptó: colección, clave y su fecha en la nube. */
+interface Rechazo { t: 'a' | 'c' | 's' | 'o'; k: string; u: number }
+
 export async function pushChanges(full = false): Promise<number> {
   const state = (await db.syncState.get('1')) ?? { id: '1' };
   const cursor = full ? 0 : (state.lastPushAt ?? 0);
+  // Desfase aprendido de las respuestas anteriores (0 hasta la primera).
+  const sesgo = state.sesgoServidor ?? 0;
 
   await migrarImagenesABlob();
 
@@ -366,38 +424,96 @@ export async function pushChanges(full = false): Promise<number> {
   // los datos viajan planos legacy hasta el próximo login con password.
   const actsCifradas = await Promise.all(actsSuben.map(a => cifrarActividad(a)));
   const ovsCifrados = await Promise.all(ovsSuben.map(o => cifrarOverride(o)));
+  // El LWW se decide con el reloj del SERVIDOR y las filas se sellan con el del
+  // dispositivo. Traducir el sello al reloj del servidor es lo que hace que un
+  // reloj torcido deje de importar: sin esto, cada cambio nace con una fecha que
+  // el guard estricto del servidor va a rechazar y el push se agota en silencio.
+  const alServidor = <T extends { updatedAt: number }>(f: T): T => sellarParaServidor(f, sesgo);
   const payload = {
-    activities: actsCifradas,
-    categories: catsSuben,
-    settings: setsSuben,
-    dayOverrides: ovsCifrados,
+    activities: actsCifradas.map(alServidor),
+    categories: catsSuben.map(alServidor),
+    settings: setsSuben.map(alServidor),
+    dayOverrides: ovsCifrados.map(alServidor),
   };
-  const enviados = [...actsCifradas, ...catsSuben, ...setsSuben, ...ovsCifrados];
-  const total = enviados.length;
+  const total = actsSuben.length + catsSuben.length + setsSuben.length + ovsSuben.length;
   if (total === 0) return 0;
 
   pendingCount += total;
   setStatus('syncing');
 
   try {
-    const res = await api<{ pushed: number; serverTime: number }>('/api/sync', {
+    const res = await api<RespuestaPush>('/api/sync', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    pendingCount = Math.max(0, pendingCount - res.pushed);
+
+    // Cada respuesta del servidor enseña cuánto va de adelantado su reloj.
+    const sesgoNuevo = sesgoDe(res.serverTime, Date.now());
+    const rechazados = res.rechazados ?? [];
+    if (rechazados.length > 0) await resellarRechazados(rechazados, sesgoNuevo);
+
+    // El cursor avanza SOLO por lo que el servidor confirmó. Con todo lo
+    // enviado, una fila rechazada quedaba justo en el cursor y el filtro
+    // estricto de seleccionables la convertía en una fila muerta: la siguiente
+    // push ya no la elegía y el pull la sobrescribía con la versión vieja.
+    const rechazadas = new Set(rechazados.map(r => `${r.t}:${r.k}`));
+    const aceptadas = [
+      ...actsSuben.filter(a => !rechazadas.has(`a:${a.id}`)),
+      ...catsSuben.filter(c => !rechazadas.has(`c:${c.id}`)),
+      ...setsSuben.filter(s => !rechazadas.has(`s:${s.id}`)),
+      ...ovsSuben.filter(o => !rechazadas.has(`o:${o.day}`)),
+    ];
+    pendingCount = Math.max(0, pendingCount - res.pushed - rechazados.length);
+
     // MERGE: conservar los demás campos de la fila (persistState hace lo mismo
     // en la dirección contraria — los cursores nunca se pierden por un put parcial).
     const prev = await db.syncState.get('1');
     await db.syncState.put({
       ...prev,
       id: '1',
-      lastPushAt: cursorPushTras(enviados, cursor, Date.now()),
+      lastPushAt: cursorPushTras(aceptadas, cursor, Date.now()),
+      sesgoServidor: sesgoNuevo,
     });
     setStatus(pendingCount > 0 ? 'syncing' : 'synced');
     return res.pushed;
   } catch (err: any) {
+    // Sin sesión no hay nada que reintentar: es la app volviendo al modo local,
+    // no una avería (y api() ya apagó la sesión, así que los triggers paran).
+    if (err?.sinSesion) {
+      setStatus('local');
+      throw err;
+    }
     setStatus(navigator.onLine ? 'error' : 'offline', err?.message ?? 'Error de red');
     throw err;
+  }
+}
+
+/**
+ * Re-sella en local las filas que el guard LWW del servidor rechazó.
+ *
+ * El servidor devuelve, con cada rechazo, la fecha que él tiene. Si el cliente
+ * no hace nada, esa fila conserva una fecha que ya fue rechazada y vuelve a
+ * ser rechazada en cada intento: el push se agota en silencio, sin error. Con el
+ * re-sello, la copia local queda un milisegundo por encima de lo que hay en la
+ * nube (traducido al reloj del dispositivo), así que el siguiente push la acepta
+ * a la primera. La escritura pasa por Dexie, de modo que sus propios hooks
+ * encolan ese reintento sin que nadie lo pida.
+ */
+async function resellarRechazados(rechazados: Rechazo[], sesgo: number): Promise<void> {
+  const tablas: Record<string, Table<any>> = {
+    a: db.activities, c: db.categories, s: db.settings, o: db.dayOverrides,
+  };
+  for (const r of rechazados) {
+    const tabla = tablas[r.t];
+    if (!tabla) continue;
+    const clave = r.t === 'o' ? Number(r.k) : r.k;
+    try {
+      const fila = await tabla.get(clave);
+      // La fila puede haber desaparecido o cambiado entre el push y este
+      // momento: si ya no existe, no hay nada que re-sellar.
+      if (!fila) continue;
+      await tabla.update(clave, { updatedAt: reestampar(fila.updatedAt, r.u, sesgo) });
+    } catch { /* una fila que falla al re-sellarse se reintentará en el próximo push */ }
   }
 }
 
@@ -421,16 +537,17 @@ export async function pullChanges(): Promise<{ applied: number }> {
     const res = await api<PullResponse>(`/api/sync?since=${since}`);
 
     let applied = 0;
-    // Reloj local del momento: techo de toda fecha que venga de la nube (ver
-    // acotarFechaRemota). La comparación LWW sigue usando la fecha CRUDA del
-    // servidor; lo que se acota es lo que queda almacenado.
+    // Dos relojes y una sola comparación: el desfase que el servidor acaba de
+    // decirnos y el techo del reloj local. La comparación LWW sigue usando la
+    // fecha CRUDA del servidor; lo que se acota es lo que queda almacenado.
+    const sesgo = sesgoDe(res.serverTime, Date.now());
     const ahora = Date.now();
 
     await db.transaction('rw', db.activities, db.categories, db.settings, db.dayOverrides, db.syncState, async () => {
       for (const c of res.categories) {
         const local = await db.categories.get(c.id);
         if (!local || local.updatedAt <= c.updatedAt) {
-          await db.categories.put(acotarFechaRemota({ ...c } as Category, ahora));
+          await db.categories.put(acotarFechaRemota({ ...c } as Category, ahora, sesgo));
           applied++;
         }
       }
@@ -438,14 +555,14 @@ export async function pullChanges(): Promise<{ applied: number }> {
         const local = await db.activities.get(a.id);
         if (!local || local.updatedAt <= a.updatedAt) {
           const aPlano = await descifrarActividad(a);
-          await db.activities.put(acotarFechaRemota({ ...aPlano } as Activity, ahora));
+          await db.activities.put(acotarFechaRemota({ ...aPlano } as Activity, ahora, sesgo));
           applied++;
         }
       }
       for (const s of res.settings) {
         const local = await db.settings.get(s.id);
         if (!local || local.updatedAt <= s.updatedAt) {
-          await db.settings.put(acotarFechaRemota({ ...s } as AppSettings, ahora));
+          await db.settings.put(acotarFechaRemota({ ...s } as AppSettings, ahora, sesgo));
           applied++;
         }
       }
@@ -453,20 +570,31 @@ export async function pullChanges(): Promise<{ applied: number }> {
         const local = await db.dayOverrides.get(o.day);
         if (!local || local.updatedAt <= o.updatedAt) {
           const oPlano = await descifrarOverride(o);
-          await db.dayOverrides.put(acotarFechaRemota({ ...oPlano } as DayOverride, ahora));
+          await db.dayOverrides.put(acotarFechaRemota({ ...oPlano } as DayOverride, ahora, sesgo));
           applied++;
         }
       }
       // El cursor va con holgura hacia atrás (cursorPull): solapar lecturas
       // permite que un cambio remoto escrito justo en la frontera llegue en el
       // siguiente pull en vez de perderse entre los relojes de los dos equipos.
-      await db.syncState.put({ ...state, id: '1', lastServerPullAt: cursorPull(res.serverTime), lastPullAt: Date.now() });
+      await db.syncState.put({
+        ...state, id: '1',
+        lastServerPullAt: cursorPull(res.serverTime),
+        lastPullAt: Date.now(),
+        sesgoServidor: sesgo,
+      });
     });
 
     lastSyncAt = Date.now();
     setStatus(pendingCount > 0 ? 'syncing' : 'synced');
     return { applied };
   } catch (err: any) {
+    // Sin sesión no hay nada que reintentar: es la app volviendo al modo local,
+    // no una avería (y api() ya apagó la sesión, así que los triggers paran).
+    if (err?.sinSesion) {
+      setStatus('local');
+      throw err;
+    }
     setStatus(navigator.onLine ? 'error' : 'offline', err?.message ?? 'Error de red');
     throw err;
   } finally {
@@ -499,6 +627,7 @@ export async function syncNow(full = false): Promise<void> {
   syncing = true;
   try {
     await pushChanges(full);
+    if (!sesionActiva) return; // la cookie caducó: no encadenar otro 401
     await pullChanges();
   } finally {
     syncing = false;
@@ -608,7 +737,11 @@ export async function subirAhora(): Promise<ResultadoSubida> {
  */
 export async function bajarAhora(): Promise<ResultadoBajada> {
   if (!(await haySesionOperativa())) throw new Error(SIN_SESION);
-  return await pullChanges();
+  // pullChanges cuenta 'applied' y este contrato pide 'aplicados': sin el mapa,
+  // la UI recibía undefined y el toast decía SIEMPRE "ya tenías todo", que era
+  // una mentira incluso bajando de verdad.
+  const { applied } = await pullChanges();
+  return { aplicados: applied };
 }
 
 export async function isLoggedIn(): Promise<boolean> {
