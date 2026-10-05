@@ -40,6 +40,7 @@ bunx drizzle-kit push  # migraciones → DATABASE_URL (requiere .env.local)
 ## Git
 
 - Commits atómicos por fase, mensajes en español explicando el "por qué".
+- **Commit y push sin pedir confirmación** (pedido explícito del usuario): `main` + espejo `feat/cloud-sync`. Única excepción: avisar antes si el cambio **puede romper producción** — a saber: pérdida de datos o migraciones irreversibles (esquema Drizzle), caminos de auth/credenciales, o lógica de integridad del sync (cursor LWW). Ante la duda en esas tres, preguntar antes de tocar.
 - Push a `main` (dispara deploy Vercel) y espejo a `feat/cloud-sync`: `git push origin main:feat/cloud-sync`.
 - Tags semver (`v0.2.x`) en releases. PRs verificados por CI (`.github/workflows/ci.yml`).
 - OneDrive es lento: evitar operaciones masivas sobre `node_modules`.
