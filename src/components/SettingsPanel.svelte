@@ -19,6 +19,7 @@
   import { clearUndo } from '../lib/undo';
   import { notifyDataChange } from '../lib/dataBus';
   import Toasts from './Toasts.svelte';
+  import { paletaSugerida, colorSugerido } from '../lib/paletaCategorias';
 
   interface Props {
     settings: { startHour: number; endHour: number };
@@ -31,6 +32,9 @@
   let startHour = $state(0);
   let endHour = $state(0);
   let localCategories = $state<Category[]>([]);
+  /** Categoría recién creada: la única que ve la franja de paleta
+   *  (sugerencia al crear; al elegir o editar el color se retira). */
+  let catNuevaId: string | null = $state(null);
   let initialized = $state(false);
   let panelEl: HTMLElement | undefined = $state();
 
@@ -361,18 +365,29 @@
     const id = `cat-${Date.now()}`;
     localCategories = [
       ...localCategories,
-      { id, label: tNow('settings.newCategory'), color: '#999999', order: localCategories.length, updatedAt: Date.now() }
+      { id, label: tNow('settings.newCategory'), color: colorSugerido(localCategories.map(c => c.color)), order: localCategories.length, updatedAt: Date.now() }
     ];
   }
 
+    // Paleta automática: la categoría nace con el primer color
+    // libre de la paleta (no el gris de siempre) y la franja de
+    // sugerencias se le ofrece hasta que elija una.
   function removeCategory(id: string) {
     localCategories = localCategories.filter(c => c.id !== id);
   }
 
+    catNuevaId = id;
+  }
+
+  /** Un toque en la franja: aplica el color y retira la sugerencia. */
+  function elegirColorPaleta(id: string, color: string) {
+    updateCategory(id, 'color', color);
+    catNuevaId = null;
   function updateCategory(id: string, field: string, value: any) {
     localCategories = localCategories.map(c => 
       c.id === id ? { ...c, [field]: value, updatedAt: Date.now() } : c
     );
+    if (catNuevaId === id) catNuevaId = null;
   }
 
   async function restoreDefaultsConfirm() {
@@ -384,6 +399,7 @@
   // ── Borrar todo (zona de peligro) ──
   let confirmWipeAll = $state(false);
   let wipingAll = $state(false);
+    catNuevaId = null;
 
   /**
    * Borra TODOS los datos locales: actividades, categorías, ajustes
@@ -786,7 +802,7 @@
               <div class="grip-handle">
                 <GripVertical size={16} />
               </div>
-              <input type="color" value={cat.color} aria-label={$t('settings.colorOf', { name: cat.label })} oninput={e => updateCategory(cat.id, 'color', e.currentTarget.value)} />
+              <input type="color" value={cat.color} aria-label={$t('settings.colorOf', { name: cat.label })} oninput={e => { updateCategory(cat.id, 'color', e.currentTarget.value); if (cat.id === catNuevaId) catNuevaId = null; }} />
               <input type="text" value={cat.label} aria-label={$t('settings.categoryName')} oninput={e => updateCategory(cat.id, 'label', e.currentTarget.value)} />
               <button class="remove-cat" onclick={() => removeCategory(cat.id)} aria-label={$t('settings.removeCategory', { name: cat.label })}>
                 <Trash2 size={16} />
@@ -806,6 +822,17 @@
           <h3>{$t('settings.backup')}</h3>
         </header>
         <div class="backup-container">
+              {#if cat.id === catNuevaId}
+                <!-- Franja de sugerencias: solo mientras la categoría
+                     es nueva (sugerencia al crear). Un toque elige
+                     el base; el input nativo sigue abierto a cualquier
+                     otro color. -->
+                <div class="palette-sugerencia" role="group" aria-label={$t('settings.paletteSuggestion')}>
+                  {#each paletaSugerida(localCategories.filter(c => c.id !== cat.id).map(c => c.color)) as color}
+                    <button type="button" class="swatch" class:activo={cat.color === color} style="background: {color}" aria-label={$t('settings.useColor', { color })} aria-pressed={cat.color === color} onclick={() => elegirColorPaleta(cat.id, color)}></button>
+                  {/each}
+                </div>
+              {/if}
           <!-- Formato del respaldo: compacto posicional o JSON completo -->
           <fieldset class="export-mode">
             <legend>{$t('settings.exportMode')}</legend>
@@ -1244,6 +1271,7 @@
   .grip-handle {
     color: rgb(var(--texto-2)); /* AA (antes #999) */
     cursor: grab;
+    flex-wrap: wrap;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1291,6 +1319,36 @@
     justify-content: center;
     gap: 0.5rem;
   }
+  /* Franja de paleta sugerida: solo para la categoría recién
+     creada. Se enrolla a su propia línea dentro de la fila,
+     alineada con el input de color (tras el grip de 44px). */
+  .palette-sugerencia {
+    flex: 1 1 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding-top: 0.35rem;
+    padding-left: 3.25rem;
+  }
+  .swatch {
+    width: 44px; /* target táctil ≥44px (regla dura #5) */
+    height: 44px;
+    padding: 0;
+    border-radius: 10px;
+    border: 2px solid rgb(var(--linea) / 0.35);
+    cursor: pointer;
+    transition: transform 0.12s ease;
+  }
+  .swatch:hover {
+    transform: scale(1.07);
+  }
+  /* La selección se marca con un anillo (no con un tick: el
+     color ya dice cuál es). */
+  .swatch.activo {
+    border-color: rgb(var(--verde-fuerte));
+    box-shadow: 0 0 0 2px rgb(var(--sup)), 0 0 0 4px rgb(var(--verde-fuerte));
+  }
+
 
   .btn-full {
     width: 100%;
