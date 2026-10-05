@@ -1592,11 +1592,11 @@
     flex-shrink: 0;
   }
 
-  .sync-dot.sync-synced { background: #2d5a27; box-shadow: 0 0 6px rgba(45, 90, 39, 0.5); }
-  .sync-dot.sync-syncing { background: #f59e0b; animation: pulse 1.2s infinite; }
-  .sync-dot.sync-error { background: #e53e3e; }
-  .sync-dot.sync-offline { background: #a0aec0; }
-  .sync-dot.sync-local { background: #a0aec0; }
+  .sync-dot.sync-synced { background: rgb(var(--verde-fuerte)); box-shadow: 0 0 6px rgb(var(--verde-fuerte) / 0.5); }
+  .sync-dot.sync-syncing { background: rgb(var(--ambar-solido)); animation: pulse 1.2s infinite; }
+  .sync-dot.sync-error { background: rgb(var(--rojo-solido)); }
+  .sync-dot.sync-offline { background: rgb(var(--gris-medio)); }
+  .sync-dot.sync-local { background: rgb(var(--gris-medio)); }
 
   @keyframes pulse {
     0%, 100% { opacity: 1; }

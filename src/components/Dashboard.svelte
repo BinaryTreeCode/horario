@@ -1508,11 +1508,13 @@
     border: 1.5px solid rgb(var(--borde-blanco));
     background: rgb(var(--gris-medio));
   }
-  .sync-dot.synced { background: #2e7d32; }
-  .sync-dot.syncing { background: #f9a825; }
-  .sync-dot.error { background: #c62828; }
-  .sync-dot.offline { background: #8a8a8a; }
-  .sync-dot.pendiente { background: #f9a825; }
+  /* Puntos de estado por token (regla #7): antes llevaban hex
+     sueltos que no cambiaban con el tema. */
+  .sync-dot.synced { background: rgb(var(--verde-fuerte)); }
+  .sync-dot.syncing { background: rgb(var(--ambar-solido)); }
+  .sync-dot.error { background: rgb(var(--rojo-solido)); }
+  .sync-dot.offline { background: rgb(var(--gris-medio)); }
+  .sync-dot.pendiente { background: rgb(var(--ambar-solido)); }
 
   .sync-badge {
     display: flex;
