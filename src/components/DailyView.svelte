@@ -1896,7 +1896,11 @@
        para un texto de 56 ("12:14 PM"), o sea invisible. Hay que dejar un solo
        ancla. */
     .time-bar-label {
-      font-size: 0.6rem;
+      /* 0.7rem = 11.2px: el 0.6rem anterior (9.6px) se leía con lupa en el
+         celu. Es el piso cómodo para texto chico en móvil y sigue entrando de
+         sobra en la cinta más angosta: medido a 320px, el chip mide 63x22
+         ("7:16 p. m.") dentro de una pista de 281px, sin recorte. */
+      font-size: 0.7rem;
       right: auto;
       left: 0.25rem;
     }
