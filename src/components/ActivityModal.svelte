@@ -7,6 +7,7 @@
   import ImageLightbox from './ImageLightbox.svelte';
   import { t, tNow } from '../lib/i18n';
   import { fueConsumido } from '../lib/dialogStack';
+  import { sembrarSinPisar } from '../lib/activitySeed';
   import { comprimirImagen, subirABlob, DIM_LOCAL, DIM_BLOB } from '../lib/routineImages';
   import { isLoggedIn } from '../lib/sync';
 
@@ -273,6 +274,11 @@
   const days = $derived([0, 1, 2, 3, 4, 5, 6].map(i => ({ label: $t(`modal.dayLetter.${i}`), index: i })));
 
   onMount(async () => {
+    // Foto de los campos en el montaje: la referencia para saber qué NO tocó
+    // nadie antes de que llegue la lectura async de la fila.
+    const foto = {
+      categoryId, name, description, startTime, endTime, daysOfWeek, steps, image
+    };
     // If initialData is provided (from dayOverride), use it
     if (initialData) {
       categoryId = initialData.categoryId;
@@ -286,14 +292,18 @@
     } else if (id !== null) {
       const activity = await db.activities.get(id);
       if (activity) {
-        categoryId = activity.categoryId;
-        name = activity.name;
-        description = activity.description || '';
-        startTime = activity.startTime;
-        endTime = activity.endTime;
-        daysOfWeek = [...activity.daysOfWeek];
-        steps = activity.steps ? [...activity.steps] : [];
-        image = activity.image || null;
+        // La lectura es async: entre que montó y que llegó, la persona pudo
+        // tocar un campo. sembrarSinPisar solo siembra lo que sigue igual que en
+        // el montaje, así una elección rápida ya no se pierde (el bug que
+        // hacia fallar al guard "Modal: aumentar" 1 de cada 8 corridas).
+        categoryId = sembrarSinPisar(categoryId, foto.categoryId, activity.categoryId);
+        name = sembrarSinPisar(name, foto.name, activity.name);
+        description = sembrarSinPisar(description, foto.description, activity.description || '');
+        startTime = sembrarSinPisar(startTime, foto.startTime, activity.startTime);
+        endTime = sembrarSinPisar(endTime, foto.endTime, activity.endTime);
+        daysOfWeek = sembrarSinPisar(daysOfWeek, foto.daysOfWeek, [...activity.daysOfWeek]);
+        steps = sembrarSinPisar(steps, foto.steps, activity.steps ? [...activity.steps] : []);
+        image = sembrarSinPisar(image, foto.image, activity.image || null);
       }
     } else {
       const defaultStart = Math.max(settings.startHour, 8);

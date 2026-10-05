@@ -141,6 +141,62 @@ async function asaIzquierda(page: import('@playwright/test').Page) {
 }
 
 /**
+ * La precarga del modal es async (`await db.activities.get`). Si la persona
+ * elige un campo antes de que llegue, la lectura le pisaba la elección: el modal
+ * mostraba los defaults de creación y el guardado salía sin cambios. Eso se
+ * veía 1 de cada 8 veces y lo cazó el guard "Modal: aumentar".
+ *
+ * Acá se hace al revés de lo natural: elegir AL VOLADO, apenas aparece, que es
+ * justo cuando la persona apura. El nombre no se toca y por eso sirve de
+ * bandera — cuando dice "Desayuno", la lectura ya llegó — así que la aserción
+ * queda determinista en vez de depender de ganar la carrera.
+ *
+ * El guardado NO se verifica acá a propósito: la inyección que abre la ventana
+ * retrasa también las lecturas de Dexie y rompe la escritura (TransactionInactive
+ * sobre una transacción ya cerrada), así que "guardar" acá probaría el mecanismo
+ * de la inyección y no el bug. Que el estiramiento llegue a la base lo cubre el
+ * guard "Modal: aumentar", sin inyección.
+ */
+test('Modal: elegir antes de que termine de precargar no se pierde lo elegido', async ({ page }) => {
+  // Inyección de falla para poder pegar la carrera: IndexedDB local responde en
+  // microsegundos, así que esperando "a ver si pasa" el guard no probaba nada
+  // (medido: 0 de 8 fallos con el bug presente). Acá se retrasa 700ms la
+  // entrega de TODOS los onsuccess de IDBRequest, que abre una ventana
+  // reproducible entre que el modal monta y que llega su lectura. Es el mismo
+  // hacking de red que usan los guards de "la vista Día avisa cuando no carga".
+  await page.addInitScript(() => {
+    const proto = IDBRequest.prototype as unknown as {
+      onsuccess: ((e: Event) => unknown) | null;
+    };
+    const original = Object.getOwnPropertyDescriptor(proto, 'onsuccess');
+    if (!original) return;
+    Object.defineProperty(proto, 'onsuccess', {
+      configurable: true,
+      enumerable: original.enumerable,
+      get() { return original.get!.call(this); },
+      set(handler: ((e: Event) => unknown) | null) {
+        original.set!.call(
+          this,
+          typeof handler === 'function'
+            ? function (this: IDBRequest, e: Event) {
+                setTimeout(() => handler.call(this, e), 700);
+              }
+            : handler
+        );
+      }
+    });
+  });
+  await page.reload();
+  await expect(page.locator('.day-column').first()).toBeVisible({ timeout: 30_000 });
+
+  const modal = await abrirModalDe(page, 'Desayuno', 0);
+
+  await modal.locator('#act-end').selectOption('11:30');
+  await expect(modal.locator('#act-name'), 'la precarga del modal nunca llegó').toHaveValue('Desayuno', { timeout: 10_000 });
+  await expect(modal.locator('#act-end'), 'la precarga pisó lo que se eligió al volado').toHaveValue('11:30');
+});
+
+/**
  * Crea una actividad por la UI real (mismo camino que un usuario) para forzar
  * una colisión. Los toggles de día son `.day-toggle` con `aria-pressed` en
  * orden Lunes..Domingo, así que se eligen por índice y no por texto: el test
