@@ -94,6 +94,17 @@
     return off;
   });
 
+  // Reintento del banner de error: mientras vuela la orden el
+  // banner NO desaparece (el sync pasa por 'syncing' intermedio)
+  // y el botón muestra spinner. Igual que nubeOcupada: sin este
+  // guard, un doble clic lanza dos pushes.
+  let reintentando = $state(false);
+  async function reintentarSync() {
+    if (reintentando) return;
+    reintentando = true;
+    try { await syncNow(true); } catch { /* el estado ya queda en error/offline */ } finally { reintentando = false; }
+  }
+
   // ── Nube: subir y bajar a mano ──
   // El sync automático existe (hooks + arranque) pero es invisible, y para el
   // "¿ya llegó lo del otro?" hace falta una acción que el usuario dispare y de
@@ -749,9 +760,16 @@
 
   {#if syncStatus === 'error' || syncStatus === 'offline'}
     <div class="sync-banner glass-panel" role="alert">
-      <CloudOff size={16} />
-      <span>{$t(syncStatus === 'error' ? 'sync.bannerError' : 'sync.bannerOffline')}</span>
-      <button class="sync-retry" onclick={() => syncNow(true).catch(() => {})}>{$t('sync.retry')}</button>
+      {#if reintentando}
+        <RefreshCw size={16} class="spin" aria-hidden="true" />
+      {:else}
+        <CloudOff size={16} aria-hidden="true" />
+      {/if}
+      <span>{reintentando ? $t('sync.retrying') : $t(syncStatus === 'error' ? 'sync.bannerError' : 'sync.bannerOffline')}</span>
+      <button class="sync-retry" disabled={reintentando} onclick={reintentarSync}>
+        {#if reintentando}<RefreshCw size={16} class="spin" aria-hidden="true" />{/if}
+        {reintentando ? $t('sync.retrying') : $t('sync.retry')}
+      </button>
     </div>
   {/if}
 
@@ -1460,16 +1478,23 @@
   }
   .sync-banner span { flex: 1; }
   .sync-retry {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
     border: none;
     background: rgb(var(--verde-fuerte));
     color: rgb(var(--texto-calido));
     border-radius: 10px;
-    padding: 0.45rem 0.9rem;
-    min-height: 40px;
+    padding: 0.55rem 1rem;
+    min-height: 44px;
     font-weight: 600;
     cursor: pointer;
   }
-  .sync-retry:hover { filter: brightness(1.1); }
+  .sync-retry:hover:not(:disabled) { filter: brightness(1.1); }
+  .sync-retry:disabled { cursor: progress; }
+  /* El spinner del reintento no gira: el texto "Reintentando…"
+     ya dice lo que pasa (y menos movimiento = menos ruido). */
+  .sync-banner .spin { animation: none; }
 
   /* Punto de estado del sync (hallazgo amarillo de la auditoría: el icono
      de nube no decía NADA del estado). Colores semánticos con tokens. */

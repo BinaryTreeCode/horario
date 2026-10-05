@@ -59,6 +59,7 @@ const es: Catalogo = {
   'sync.bannerError': 'No se pudo sincronizar con la nube.',
   'sync.bannerOffline': 'Sin conexión: los cambios se guardan localmente.',
   'sync.retry': 'Reintentar',
+  'sync.retrying': 'Reintentando…',
 
   // ── Días ──
   'day.0': 'Lunes',
@@ -394,6 +395,7 @@ const en: Catalogo = {
   'sync.bannerError': 'Could not sync with the cloud.',
   'sync.bannerOffline': 'Offline: your changes are saved locally.',
   'sync.retry': 'Retry',
+  'sync.retrying': 'Retrying…',
 
   'day.0': 'Monday',
   'day.1': 'Tuesday',
