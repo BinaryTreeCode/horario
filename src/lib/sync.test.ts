@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { esSemilla, seleccionables, cursorPushTras, cursorPull } from './sync';
+import { esSemilla, seleccionables, cursorPushTras, cursorPull, acotarFechaRemota } from './sync';
 
 // La sincronización entre dispositivos se decide en tres cálculos puros: qué
 // filas viajan, hasta dónde avanza el cursor del push y dónde queda el del
@@ -105,5 +105,49 @@ describe('cursorPull', () => {
 
   it('con solape 0 deja el cursor justo en el reloj del servidor', () => {
     expect(cursorPull(100000, 0)).toBe(100000);
+  });
+});
+
+describe('acotarFechaRemota', () => {
+  it('acota al reloj local la fecha de una fila que el servidor fecha en el futuro', () => {
+    // Servidor 60s adelantado: sin acotar, la fila queda localmente en el
+    // futuro y envenena el cursor del push siguiente.
+    expect(acotarFechaRemota({ id: 'x', updatedAt: 1_060_000 }, 1_000_000)).toEqual({ id: 'x', updatedAt: 1_000_000 });
+  });
+
+  it('deja intacta una fila que no está en el futuro', () => {
+    const fila = { id: 'x', updatedAt: 900_000 };
+    expect(acotarFechaRemota(fila, 1_000_000)).toBe(fila);
+  });
+
+  it('no muta la fila original (el resto de la fila viene intacta)', () => {
+    const remota = { id: 'x', name: 'Rota', updatedAt: 1_060_000 };
+    const acotada = acotarFechaRemota(remota, 1_000_000);
+    expect(remota.updatedAt).toBe(1_060_000);
+    expect(acotada.name).toBe('Rota');
+  });
+
+  it('LA CADENA COMPLETA: un cambio hecho despues del pull sigue viéndose al empujar', () => {
+    // El agujero que hacia fallar el guard de sync ~1 de cada 15 corridas:
+    //   1) el pull deja la fila del servidor con su fecha (60s adelantada), o sea
+    //      localmente en el FUTURO,
+    //   2) esa fila sube en el push siguiente y cursorPushTras la recorta al reloj
+    //      de la RESPUESTA, que ya es posterior al cambio que la persona hizo
+    //      mientras el push volaba,
+    //   3) seleccionables filtra por > cursor: ese cambio queda por debajo y no
+    //      vuelve a subirse nunca. Sin error y sin aviso.
+    //
+    // El reloj del push responde DESPUES del cambio (T_respuesta > T_cambio), que
+    // es exactamente la condición que hace perder la fila.
+    const relojPull = 1_000_000;
+    const filaRemota = acotarFechaRemota({ id: 'remota', updatedAt: relojPull + 60_000 }, relojPull);
+    expect(filaRemota.updatedAt, 'la fila del servidor quedo en el futuro').toBe(relojPull);
+
+    // La persona edita un segundo después del pull, con el push en vuelo.
+    const cambioLocal = { id: 'escrito-durante-el-push', updatedAt: relojPull + 1 };
+    const respuestaDelPush = relojPull + 50;
+    const cursor = cursorPushTras([filaRemota], 0, respuestaDelPush);
+
+    expect(seleccionables([cambioLocal], cursor).length, 'el cambio local quedo invisible para siempre').toBe(1);
   });
 });

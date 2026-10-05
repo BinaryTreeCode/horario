@@ -260,6 +260,33 @@ export function cursorPull(serverTime: number, solapeMs = 5000): number {
   return Math.max(0, serverTime - solapeMs);
 }
 
+/**
+ * Fecha de una fila que viene de la nube, acotada al reloj local.
+ *
+ * El agujero: el pull guarda la fila con el `updatedAt` que le dio el servidor.
+ * Si ese reloj va adelantado (60s en el guard que lo cubre), la fila queda
+ * localmente EN EL FUTURO. En el push siguiente sube al lote y cursorPushTras la
+ * recorta al reloj local (`Math.min(ahora, ...)`), o sea que el cursor queda en
+ * el instante en que llegó la respuesta: >= que el `updatedAt` de cualquier
+ * cambio que la persona haya hecho mientras el push volaba. seleccionables filtra
+ * por `> cursor`, así que ese cambio queda por debajo y ya no vuelve a subirse
+ * nunca. Sin error y sin aviso, que es lo peor.
+ *
+ * La salida es no dejar que un reloj ajeno se instale como reloj propio: la fila
+ * se guarda con `min(updatedAt remoto, ahora local)`. La COMPARACIÓN de LWW se
+ * sigue haciendo contra la fecha cruda del servidor (es su reloj el que decide
+ * qué es más nuevo), así que la decisión no cambia; lo que cambia es que la
+ * línea de tiempo local nunca queda anticipada.
+ *
+ * Renuncia consciente: si los dos equipos tienen relojes muy distintos, el LWW
+ * local puede decidir distinto que el servidor. A favor: el servidor nunca
+ * rechaza una fila por ser más vieja (eso ya lo hacía con la fila original) y se
+ * pierde el caso invisible de un cambio que no vuelve a subirse nunca.
+ */
+export function acotarFechaRemota<T extends { updatedAt: number }>(fila: T, ahora: number): T {
+  return fila.updatedAt > ahora ? { ...fila, updatedAt: ahora } : fila;
+}
+
 // ── Push: enviar cambios locales (LWW en el servidor) ────────────────────────
 
 /**
@@ -394,12 +421,16 @@ export async function pullChanges(): Promise<{ applied: number }> {
     const res = await api<PullResponse>(`/api/sync?since=${since}`);
 
     let applied = 0;
+    // Reloj local del momento: techo de toda fecha que venga de la nube (ver
+    // acotarFechaRemota). La comparación LWW sigue usando la fecha CRUDA del
+    // servidor; lo que se acota es lo que queda almacenado.
+    const ahora = Date.now();
 
     await db.transaction('rw', db.activities, db.categories, db.settings, db.dayOverrides, db.syncState, async () => {
       for (const c of res.categories) {
         const local = await db.categories.get(c.id);
         if (!local || local.updatedAt <= c.updatedAt) {
-          await db.categories.put({ ...c } as Category);
+          await db.categories.put(acotarFechaRemota({ ...c } as Category, ahora));
           applied++;
         }
       }
@@ -407,14 +438,14 @@ export async function pullChanges(): Promise<{ applied: number }> {
         const local = await db.activities.get(a.id);
         if (!local || local.updatedAt <= a.updatedAt) {
           const aPlano = await descifrarActividad(a);
-          await db.activities.put({ ...aPlano } as Activity);
+          await db.activities.put(acotarFechaRemota({ ...aPlano } as Activity, ahora));
           applied++;
         }
       }
       for (const s of res.settings) {
         const local = await db.settings.get(s.id);
         if (!local || local.updatedAt <= s.updatedAt) {
-          await db.settings.put({ ...s } as AppSettings);
+          await db.settings.put(acotarFechaRemota({ ...s } as AppSettings, ahora));
           applied++;
         }
       }
@@ -422,7 +453,7 @@ export async function pullChanges(): Promise<{ applied: number }> {
         const local = await db.dayOverrides.get(o.day);
         if (!local || local.updatedAt <= o.updatedAt) {
           const oPlano = await descifrarOverride(o);
-          await db.dayOverrides.put({ ...oPlano } as DayOverride);
+          await db.dayOverrides.put(acotarFechaRemota({ ...oPlano } as DayOverride, ahora));
           applied++;
         }
       }
