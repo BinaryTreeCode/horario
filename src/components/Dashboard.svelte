@@ -14,7 +14,7 @@
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { undoStack, redoStack } from '../lib/undo';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Download, Upload, Cloud, CloudOff, CloudUpload, CloudDownload, LogIn, RefreshCw, Info } from '@lucide/svelte';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Download, Upload, Cloud, CloudOff, CloudUpload, CloudDownload, LogIn, RefreshCw, Info, TriangleAlert } from '@lucide/svelte';
   import { portal } from '../lib/portal';
   import { onSyncChange, syncNow, subirAhora, bajarAhora, SIN_SESION } from '../lib/sync';
   import { t, tNow, idioma } from '../lib/i18n';
@@ -85,11 +85,11 @@
   // Detalle del último sync (pendientes y fecha): el badge era invisible
   // (hallazgo amarillo de la auditoría UX) — ahora muestra punto de estado y
   // el title explica cuándo sincronizó y cuántos cambios quedan por subir.
-  let syncDetail = $state<{ pending: number; lastSyncAt?: number; sesion: boolean }>({ pending: 0, sesion: false });
+  let syncDetail = $state<{ pending: number; lastSyncAt?: number; sesion: boolean; truncado: number }>({ pending: 0, sesion: false, truncado: 0 });
   $effect(() => {
     const off = onSyncChange((s, d) => {
       syncStatus = s;
-      syncDetail = { pending: d.pending, lastSyncAt: d.lastSyncAt, sesion: d.sesion };
+      syncDetail = { pending: d.pending, lastSyncAt: d.lastSyncAt, sesion: d.sesion, truncado: d.truncado };
     });
     return off;
   });
@@ -168,6 +168,9 @@
     }
     if (syncDetail.pending > 0) {
       extras.push($t(syncDetail.pending === 1 ? 'sync.pending' : 'sync.pendingMany', { n: syncDetail.pending }));
+    }
+    if (syncDetail.truncado > 0) {
+      extras.push($t('sync.truncado', { n: syncDetail.truncado }));
     }
     return extras.length ? base + ' — ' + extras.join(' — ') : base;
   });
@@ -947,6 +950,15 @@
       <button role="menuitem" onclick={importarDatos} title={$t('sidebar.importTitle')}>
         <Upload size={16} /> {$t('sidebar.import')}
       </button>
+      {#if syncDetail.truncado > 0}
+        <!-- Aviso persistente: el servidor descartó filas del push. El toast
+             es efímero y esto tiene que seguir visible mientras el descarte
+             siga sin subir (el cursor NO avanzó: se reintentará solo). -->
+        <div class="menu-truncado" role="status">
+          <TriangleAlert size={14} aria-hidden="true" />
+          <span>{$t('sync.truncado', { n: syncDetail.truncado })}</span>
+        </div>
+      {/if}
       <div class="menu-datos-sep" role="presentation"></div>
       <button role="menuitemcheckbox" aria-checked={$modoPrivacidad} onclick={alternarPrivacidad} title={$t('header.privacy')}>
         {#if $modoPrivacidad}<EyeOff size={16} />{:else}<Eye size={16} />{/if}
@@ -1339,6 +1351,27 @@
     color: rgb(var(--verde-texto));
     font-weight: 700;
   }
+  /* Aviso persistente de descarte del servidor (sync truncado). Solo
+     lectura, no interacción: no aplica el mínimo de 44px. */
+  .menu-truncado {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin: 0.35rem 0.5rem;
+    padding: 0.5rem 0.65rem;
+    border-radius: 8px;
+    background: rgb(var(--ambar-solido) / 0.14);
+    color: rgb(var(--tinta));
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: normal;
+  }
+  .menu-truncado svg {
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+    color: rgb(var(--ambar-solido));
+  }
   .menu-datos-sep {
     height: 1px;
     margin: 0.35rem 0.5rem;
@@ -1472,6 +1505,11 @@
     .skel-chip, .skel-line, .skel-block {
       animation: none;
     }
+    /* El spinner del reintento no gira: el texto "Reintentando…"
+       ya dice lo que pasa. */
+    .sync-banner .spin {
+      animation: none;
+    }
   }
 
   .sync-banner {
@@ -1495,8 +1533,13 @@
     color: rgb(var(--texto-calido));
     border-radius: 10px;
     padding: 0.55rem 1rem;
+    /* Regla dura #5: target táctil real de 44px — antes el
+       min-height de 40px no lo cubría ni con el padding. */
     min-height: 44px;
+    min-width: 44px;
     font-weight: 600;
+    font-size: 0.88rem;
+    white-space: nowrap;
     cursor: pointer;
   }
   .sync-retry:hover:not(:disabled) { filter: brightness(1.1); }
@@ -1505,11 +1548,6 @@
      estado; reduced-motion lo apaga más abajo. */
   .sync-banner .spin { animation: spin 1.2s linear infinite; }
 
-    /* El spinner del reintento no gira: el texto "Reintentando…"
-       ya dice lo que pasa. */
-    .sync-banner .spin {
-      animation: none;
-    }
   /* Punto de estado del sync (hallazgo amarillo de la auditoría: el icono
      de nube no decía NADA del estado). Colores semánticos con tokens. */
   .sync-dot {
@@ -1533,13 +1571,8 @@
   .sync-badge {
     display: flex;
     align-items: center;
-    /* Regla dura #5: target táctil real de 44px — antes el
-       min-height de 40px no lo cubría ni con el padding. */
     justify-content: center;
-    min-width: 44px;
     background: transparent;
-    font-size: 0.88rem;
-    white-space: nowrap;
     border: 1px solid rgb(var(--verde-borde) / 0.25);
     color: rgb(var(--verde-texto));
     border-radius: 50%;

@@ -4,7 +4,7 @@
   import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync, subirAhora, bajarAhora, SIN_SESION } from '../lib/sync';
   import { establecerClave, olvidarClave } from '../lib/crypto';
   import type { SyncStatus } from '../lib/types';
-  import { Cloud, CloudUpload, CloudDownload, LogIn, LogOut, RefreshCw, UserPlus } from '@lucide/svelte';
+  import { Cloud, CloudUpload, CloudDownload, LogIn, LogOut, RefreshCw, UserPlus, TriangleAlert } from '@lucide/svelte';
   import type { Category } from '../lib/types';
   import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck, Languages } from '@lucide/svelte';
   import { idioma, cambiarIdioma, t, IDIOMAS_DISPONIBLES } from '../lib/i18n';
@@ -60,11 +60,17 @@
   let importFileName = $state<string | null>(null);
 
   let pushPausado = $state(false);
+  // Cambios que el servidor descartó en el último push (ver sync.ts):
+  // el cursor no avanzó por encima y el aviso sigue hasta que suban.
+  let truncadoNube = $state(0);
 
   $effect(() => {
     isLoggedIn().then(v => { loggedIn = v; authLoading = false; });
     pushPausado = isPushPaused();
-    const off = onSyncChange((s) => { syncStatus = s; });
+    const off = onSyncChange((s, d) => {
+      syncStatus = s;
+      truncadoNube = d.truncado;
+    });
     return off;
   });
 
@@ -363,19 +369,13 @@
 
   function addCategory() {
     const id = `cat-${Date.now()}`;
+    // Paleta automática: la categoría nace con el primer color
+    // libre de la paleta (no el gris de siempre) y la franja de
+    // sugerencias se le ofrece hasta que elija una.
     localCategories = [
       ...localCategories,
       { id, label: tNow('settings.newCategory'), color: colorSugerido(localCategories.map(c => c.color)), order: localCategories.length, updatedAt: Date.now() }
     ];
-  }
-
-    // Paleta automática: la categoría nace con el primer color
-    // libre de la paleta (no el gris de siempre) y la franja de
-    // sugerencias se le ofrece hasta que elija una.
-  function removeCategory(id: string) {
-    localCategories = localCategories.filter(c => c.id !== id);
-  }
-
     catNuevaId = id;
   }
 
@@ -383,23 +383,29 @@
   function elegirColorPaleta(id: string, color: string) {
     updateCategory(id, 'color', color);
     catNuevaId = null;
+  }
+
+  function removeCategory(id: string) {
+    localCategories = localCategories.filter(c => c.id !== id);
+    if (catNuevaId === id) catNuevaId = null;
+  }
+
   function updateCategory(id: string, field: string, value: any) {
     localCategories = localCategories.map(c => 
       c.id === id ? { ...c, [field]: value, updatedAt: Date.now() } : c
     );
-    if (catNuevaId === id) catNuevaId = null;
   }
 
   async function restoreDefaultsConfirm() {
     const { INITIAL_CATEGORIES } = await import('../lib/db');
     localCategories = [...INITIAL_CATEGORIES];
+    catNuevaId = null;
     toastOk(tNow('settings.catsReset'));
   }
 
   // ── Borrar todo (zona de peligro) ──
   let confirmWipeAll = $state(false);
   let wipingAll = $state(false);
-    catNuevaId = null;
 
   /**
    * Borra TODOS los datos locales: actividades, categorías, ajustes
@@ -623,6 +629,15 @@
             <span class="sync-status-text">
               {#if syncStatus === 'synced'}{$t('settings.synced')}{:else if syncStatus === 'syncing'}{$t('settings.syncing')}{:else if syncStatus === 'error'}{$t('settings.syncError')}{:else if syncStatus === 'offline'}{$t('settings.offline')}{:else if pushPausado}{$t('settings.cloudPausedShort')}{:else}{$t('settings.cloudConnecting')}{/if}
             </span>
+            {#if truncadoNube > 0}
+              <!-- El servidor descartó filas del push: el cursor no avanzó y
+                   lo descartado se reintentará. Aviso persistente mientras
+                   la situación siga (el toast efímero se puede perder). -->
+              <p class="sync-truncado" role="status">
+                <TriangleAlert size={13} aria-hidden="true" />
+                {$t('sync.truncado', { n: truncadoNube })}
+              </p>
+            {/if}
             <button class="btn-sync-refresh" onclick={handleManualSync} title={$t('settings.syncNow')} aria-label={$t('settings.syncNow')} disabled={syncStatus === 'syncing'}>
               <RefreshCw size={14} />
             </button>
@@ -807,6 +822,17 @@
               <button class="remove-cat" onclick={() => removeCategory(cat.id)} aria-label={$t('settings.removeCategory', { name: cat.label })}>
                 <Trash2 size={16} />
               </button>
+              {#if cat.id === catNuevaId}
+                <!-- Franja de sugerencias: solo mientras la categoría
+                     es nueva (sugerencia al crear). Un toque elige
+                     el base; el input nativo sigue abierto a cualquier
+                     otro color. -->
+                <div class="palette-sugerencia" role="group" aria-label={$t('settings.paletteSuggestion')}>
+                  {#each paletaSugerida(localCategories.filter(c => c.id !== cat.id).map(c => c.color)) as color}
+                    <button type="button" class="swatch" class:activo={cat.color === color} style="background: {color}" aria-label={$t('settings.useColor', { color })} aria-pressed={cat.color === color} onclick={() => elegirColorPaleta(cat.id, color)}></button>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -822,17 +848,6 @@
           <h3>{$t('settings.backup')}</h3>
         </header>
         <div class="backup-container">
-              {#if cat.id === catNuevaId}
-                <!-- Franja de sugerencias: solo mientras la categoría
-                     es nueva (sugerencia al crear). Un toque elige
-                     el base; el input nativo sigue abierto a cualquier
-                     otro color. -->
-                <div class="palette-sugerencia" role="group" aria-label={$t('settings.paletteSuggestion')}>
-                  {#each paletaSugerida(localCategories.filter(c => c.id !== cat.id).map(c => c.color)) as color}
-                    <button type="button" class="swatch" class:activo={cat.color === color} style="background: {color}" aria-label={$t('settings.useColor', { color })} aria-pressed={cat.color === color} onclick={() => elegirColorPaleta(cat.id, color)}></button>
-                  {/each}
-                </div>
-              {/if}
           <!-- Formato del respaldo: compacto posicional o JSON completo -->
           <fieldset class="export-mode">
             <legend>{$t('settings.exportMode')}</legend>
@@ -1256,6 +1271,7 @@
   .category-edit-item {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
   }
 
@@ -1271,7 +1287,6 @@
   .grip-handle {
     color: rgb(var(--texto-2)); /* AA (antes #999) */
     cursor: grab;
-    flex-wrap: wrap;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1304,21 +1319,6 @@
     opacity: 1;
   }
 
-  .modal-footer {
-    display: flex;
-    gap: 1rem;
-    padding-top: 1.5rem;
-    margin-top: 1.5rem;
-    border-top: 1px solid rgb(var(--linea) / 0.05);
-  }
-
-  .btn-primary {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-  }
   /* Franja de paleta sugerida: solo para la categoría recién
      creada. Se enrolla a su propia línea dentro de la fila,
      alineada con el input de color (tras el grip de 44px). */
@@ -1349,6 +1349,21 @@
     box-shadow: 0 0 0 2px rgb(var(--sup)), 0 0 0 4px rgb(var(--verde-fuerte));
   }
 
+  .modal-footer {
+    display: flex;
+    gap: 1rem;
+    padding-top: 1.5rem;
+    margin-top: 1.5rem;
+    border-top: 1px solid rgb(var(--linea) / 0.05);
+  }
+
+  .btn-primary {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
 
   .btn-full {
     width: 100%;
@@ -1594,6 +1609,28 @@
     color: rgb(var(--texto-2));
     margin: 0;
     line-height: 1.45;
+  }
+
+  /* Descarte del servidor en el push (sync truncado): ocupa todo el ancho
+     de la fila de estado. Solo lectura: sin mínimo de 44px. */
+  .sync-truncado {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    width: 100%;
+    margin: 0.45rem 0 0;
+    padding: 0.5rem 0.65rem;
+    border-radius: 8px;
+    background: rgb(var(--ambar-solido) / 0.14);
+    color: rgb(var(--tinta));
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .sync-truncado svg {
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+    color: rgb(var(--ambar-solido));
   }
 
   /* Aviso informativo tras un registro ambiguo (respuesta 200 uniforme). */

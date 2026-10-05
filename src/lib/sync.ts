@@ -78,13 +78,15 @@ async function descifrarOverride(o: any): Promise<DayOverride> {
 
 type Listener = (
   status: SyncStatus,
-  detail: { pending: number; error?: string; lastSyncAt?: number; sesion: boolean }
+  detail: { pending: number; error?: string; lastSyncAt?: number; sesion: boolean; truncado: number }
 ) => void;
 
 let status: SyncStatus = 'local';
 let pendingCount = 0;
 let lastError: string | undefined;
 let lastSyncAt: number | undefined;
+/** Cambios que el servidor DESCARTÓ en el último push (0 = todo cabía). */
+let ultimoTruncado = 0;
 const listeners = new Set<Listener>();
 
 // ── Sesión: la cookie es la fuente de verdad, no el estado local ─────────────
@@ -156,7 +158,7 @@ export async function resumePushAndSync(): Promise<void> {
 
 export function onSyncChange(fn: Listener): () => void {
   listeners.add(fn);
-  fn(status, { pending: pendingCount, error: lastError, lastSyncAt, sesion: sesionActiva });
+  fn(status, { pending: pendingCount, error: lastError, lastSyncAt, sesion: sesionActiva, truncado: ultimoTruncado });
   return () => listeners.delete(fn);
 }
 
@@ -165,7 +167,7 @@ function setStatus(next: SyncStatus, error?: string) {
   if (error !== undefined) lastError = error;
   if (next === 'synced' || next === 'local') lastError = error;
   persistState();
-  for (const fn of listeners) fn(status, { pending: pendingCount, error: lastError, lastSyncAt, sesion: sesionActiva });
+  for (const fn of listeners) fn(status, { pending: pendingCount, error: lastError, lastSyncAt, sesion: sesionActiva, truncado: ultimoTruncado });
 }
 
 async function persistState() {
@@ -260,6 +262,43 @@ export function cursorPushTras(
   if (enviados.length === 0) return cursorPrevio; // nada enviado: no avanzar
   const mayor = enviados.reduce((m, r) => Math.max(m, r.updatedAt), 0);
   return Math.min(ahora, Math.max(mayor, cursorPrevio));
+}
+
+/**
+ * Cursor tras un push que el servidor TRUNCÓ. Sus tope de lote
+ * (`listar`: 2000 actividades, 7 overrides…) y de jsonb por override
+ * (512 KB) descartan el excedente SIN rechazarlo: no llegó, así que
+ * no está en `rechazos` y el cliente no sabría qué filas quedaron fuera.
+ * Como el filtro de `seleccionables` es `>` estricto, un cursor que
+ * avanzara por encima condenaría esas filas a no volver a subir jamás:
+ * edición perdida, sin error y sin aviso. Con `truncado > 0` el cursor
+ * se queda donde estaba y el próximo push reenvía el lote entero.
+ */
+export function cursorPushTrasLote(
+  enviados: { updatedAt: number }[],
+  cursorPrevio: number,
+  ahora: number,
+  truncado: number
+): number {
+  if (truncado > 0) return cursorPrevio; // descartó filas: no darlas por subidas
+  return cursorPushTras(enviados, cursorPrevio, ahora);
+}
+
+/**
+ * Aviso de descarte del servidor. El toast solo en la primera vez (o
+ * si empeora): un push truncado se reintentará en cada ciclo y un
+ * toast por ciclo sería spam. El detalle `truncado` deja el aviso
+ * visible mientras persista (menú Datos y Ajustes).
+ */
+function avisoDeDescarte(truncado: number): void {
+  const empeoro = truncado > ultimoTruncado;
+  ultimoTruncado = truncado;
+  if (!empeoro) return;
+  // Import diferido: sync es lib pura y toast↔db ya son circulares.
+  import('./toast').then(async ({ toastErr }) => {
+    const { tNow } = await import('./i18n');
+    toastErr(tNow('sync.truncado', { n: truncado }));
+  });
 }
 
 /**
@@ -386,12 +425,14 @@ async function migrarImagenesABlob(): Promise<void> {
   migracionImagenesHecha = true;
 }
 
-/** Respuesta del push: lo ESCRITO, lo RECHAZADO y el reloj del servidor. */
+/** Respuesta del push: lo ESCRITO, lo RECHAZADO y lo DESCARTADO. */
 interface RespuestaPush {
   /** Filas que el servidor guardó de verdad (antes contaba la intención). */
   pushed: number;
   /** Filas que el guard LWW no dejó pasar, con la fecha que tienen allí. */
   rechazados?: Rechazo[];
+  /** Filas que el servidor descartó por sus tope (no llegó: no es rechazo). */
+  truncado?: number;
   serverTime: number;
 }
 
@@ -451,6 +492,10 @@ export async function pushChanges(full = false): Promise<number> {
     const sesgoNuevo = sesgoDe(res.serverTime, Date.now());
     const rechazados = res.rechazados ?? [];
     if (rechazados.length > 0) await resellarRechazados(rechazados, sesgoNuevo);
+    // Filas que el servidor DESCARTÓ por sus tope: nunca llegaron, así
+    // que no están en `rechazos` y el cursor no puede avanzar por
+    // encima so pena de no reintentarlas jamás (ver cursorPushTrasLote).
+    const truncado = res.truncado ?? 0;
 
     // El cursor avanza SOLO por lo que el servidor confirmó. Con todo lo
     // enviado, una fila rechazada quedaba justo en el cursor y el filtro
@@ -464,6 +509,8 @@ export async function pushChanges(full = false): Promise<number> {
       ...ovsSuben.filter(o => !rechazadas.has(`o:${o.day}`)),
     ];
     pendingCount = Math.max(0, pendingCount - res.pushed - rechazados.length);
+    // Las filas descartadas NO se restan: no fueron escritas ni
+    // rechazadas, así que siguen pendientes de verdad.
 
     // MERGE: conservar los demás campos de la fila (persistState hace lo mismo
     // en la dirección contraria — los cursores nunca se pierden por un put parcial).
@@ -471,9 +518,12 @@ export async function pushChanges(full = false): Promise<number> {
     await db.syncState.put({
       ...prev,
       id: '1',
-      lastPushAt: cursorPushTras(aceptadas, cursor, Date.now()),
+      lastPushAt: cursorPushTrasLote(aceptadas, cursor, Date.now(), truncado),
       sesgoServidor: sesgoNuevo,
     });
+    // Antes del setStatus: el detalle que avisa a los listeners ya
+    // lleva el descarte.
+    avisoDeDescarte(truncado);
     setStatus(pendingCount > 0 ? 'syncing' : 'synced');
     return res.pushed;
   } catch (err: any) {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import {
-  esSemilla, seleccionables, cursorPushTras, cursorPull,
+  esSemilla, seleccionables, cursorPushTras, cursorPushTrasLote, cursorPull,
   acotarFechaRemota, sesgoDe, sellarParaServidor, reestampar,
 } from './sync';
 
@@ -92,6 +92,33 @@ describe('cursorPushTras', () => {
     const ahora = 1_000_000;
     const filaDelServidor = { updatedAt: ahora + 60_000 };
     expect(cursorPushTras([filaDelServidor], 0, ahora)).toBe(ahora);
+  });
+});
+
+describe('cursorPushTrasLote', () => {
+  it('con truncado 0 delega en cursorPushTras (avanza lo confirmado)', () => {
+    expect(cursorPushTrasLote([{ updatedAt: 700 }], 200, 1000, 0)).toBe(700);
+  });
+
+  it('con truncado > 0 el cursor NO avanza (lo descartado se reintenta)', () => {
+    // El servidor descartó filas por su tope de lote y no dice cuáles: el
+    // único cursor honesto es el de antes. Reenviar es inofensivo (LWW);
+    // avanzar condenaba esas filas a no subir jamás.
+    expect(cursorPushTrasLote([{ updatedAt: 700 }], 200, 1000, 3)).toBe(200);
+  });
+
+  it('con truncado > 0 y SIN enviados tampoco retrocede', () => {
+    expect(cursorPushTrasLote([], 400, 9999, 1)).toBe(400);
+  });
+
+  it('la cadena completa: descarte → reintento del lote entero', () => {
+    // Push 1: 3 cambios, servidor descarta (truncado=1) → cursor sigue en 0.
+    // Push 2: los mismos 3 vuelven a salir (seleccionables con cursor 0).
+    const filas = [{ updatedAt: 100 }, { updatedAt: 200 }, { updatedAt: 300 }];
+    const cursorTras1 = cursorPushTrasLote(filas, 0, 1000, 1);
+    expect(cursorTras1).toBe(0);
+    // seleccionables(filas, cursorTras1) vuelve a contener las 3: se reintentan.
+    expect(seleccionables(filas, cursorTras1)).toHaveLength(3);
   });
 });
 

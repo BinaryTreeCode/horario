@@ -159,6 +159,16 @@ function listar(coleccion: unknown, max: number): unknown[] {
 }
 
 /**
+ * Filas que `listar` deja fuera del lote. El cliente las contaba como
+ * "subidas": su cursor avanzaba por encima y, como el filtro de "qué
+ * va en el siguiente push" es un `>` estricto, esas filas no volvían
+ * a intentarlo nunca. `truncado` es el contrato que lo evita.
+ */
+function descartadas(coleccion: unknown, max: number): number {
+  return Array.isArray(coleccion) ? Math.max(0, coleccion.length - max) : 0;
+}
+
+/**
  * Un override guarda el día entero en un jsonb. Antes solo se filtraba por el
  * tipo de `id`, así que una fila podía traer actividades completas con su
  * imagen de hasta 3 MB cada una: un único registro de varios megabytes. Aquí
@@ -265,6 +275,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
 
   try {
     // Categorías
+    truncado += descartadas(body.categories, MAX_FILAS.categories);
     const cats = listar(body.categories, MAX_FILAS.categories)
       .flatMap(raw => { const c = normCategory(raw); return c ? [c] : []; });
     for (const c of cats) {
@@ -284,6 +295,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     pushed += await repartoDeEscrituras(categories, user.id, cats, c => c.id, c => c.updatedAt, 'c', rechazos);
 
     // Actividades
+    truncado += descartadas(body.activities, MAX_FILAS.activities);
     const acts = listar(body.activities, MAX_FILAS.activities)
       .flatMap(raw => { const a = normActivity(raw); return a ? [a] : []; });
     for (const a of acts) {
@@ -303,6 +315,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     pushed += await repartoDeEscrituras(activities, user.id, acts, a => a.id, a => a.updatedAt, 'a', rechazos);
 
     // Settings
+    truncado += descartadas(body.settings, MAX_FILAS.settings);
     const sets = listar(body.settings, MAX_FILAS.settings)
       .flatMap(raw => { const x = normSetting(raw); return x ? [x] : []; });
     for (const x of sets) {
@@ -318,11 +331,14 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     pushed += await repartoDeEscrituras(userSettings, user.id, sets, x => x.id, x => x.updatedAt, 's', rechazos);
 
     // DayOverrides
+    truncado += descartadas(body.dayOverrides, MAX_FILAS.overrides);
     const ovrs = listar(body.dayOverrides, MAX_FILAS.overrides)
       .flatMap(raw => { const o = normOverride(raw); return o ? [o] : []; });
     for (const o of ovrs) {
       const acotadas = acotarActsOverride(o.activities);
-      if (acotadas.length < o.activities.length) truncado++;
+      // Se cuenta lo que el horario del día PERDIÓ (actividades), no
+      // el override: son los cambios del usuario los que no llegan.
+      truncado += o.activities.length - acotadas.length;
       await db
         .insert(dayOverrides)
         .values({ userId: user.id, ...o, activities: acotadas })
