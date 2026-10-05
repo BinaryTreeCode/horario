@@ -107,6 +107,9 @@ const es: Catalogo = {
   'dayView.limitedBy': 'Limitado por {what}',
   'dayView.prevDay': 'Ir al día anterior: {day}',
   'dayView.nextDay': 'Ir al día siguiente: {day}',
+  'dayView.summaryActs': '{n} actividades',
+  'dayView.summaryPlanned': 'planificadas',
+  'dayView.summaryFree': '{h} sin planificar',
 
   // ── Menú contextual ──
   'menu.createHere': 'Crear actividad a las {time}',
@@ -433,6 +436,9 @@ const en: Catalogo = {
   'dayView.limitedBy': 'Limited by {what}',
   'dayView.prevDay': 'Go to previous day: {day}',
   'dayView.nextDay': 'Go to next day: {day}',
+  'dayView.summaryActs': '{n} activities',
+  'dayView.summaryPlanned': 'planned',
+  'dayView.summaryFree': '{h} unplanned',
 
   'menu.createHere': 'Create activity at {time}',
   'menu.duplicate': 'Duplicate (Independent)',

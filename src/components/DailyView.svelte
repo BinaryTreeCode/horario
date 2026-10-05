@@ -11,6 +11,7 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr, toastErrRepetido } from '../lib/toast';
   import { portal } from '../lib/portal';
+  import { formatHours } from '../lib/timeStats';
   import { t, tNow } from '../lib/i18n';
   import { pushUndo, cloneAct } from '../lib/undo';
 
@@ -209,6 +210,11 @@
     left: string;
     width: string;
     durationMins: number;
+    /** Horas efectivas del bloque (mismas que usa 'top'): durante un arrastre
+     *  son las del preview, no las de la BD. La etiqueta de la tarjeta tiene
+     *  que decir lo mismo que la caja que se está viendo. */
+    _start: number;
+    _end: number;
   }
 
   const layoutActivities = $derived((() => {
@@ -324,6 +330,15 @@
 
     return result;
   })());
+
+  /**
+   * Resumen del día para la cabecera. En escritorio la columna se estrecha para
+   * poder leerse (una cinta de 1200px con el nombre pegado a la izquierda no lo
+   * es), así que el ancho que sobra se cuenta en vez de quedar vacío: cuántas
+   * hay, cuánto ocupan y cuánto del rango visible queda sin planificar.
+   */
+  const minutosDia = $derived(layoutActivities.reduce((s, a) => s + a.durationMins, 0));
+  const minutosSinPlanificar = $derived(Math.max(0, Math.round(totalHours * 60) - minutosDia));
 
   // ── Temporary mode helpers ──────────────────────────────────────────────
 
@@ -867,6 +882,23 @@
       </div>
     </div>
 
+    <!-- Resumen del día: lo que la columna estrecha deja libre a lo ancho -->
+    {#if layoutActivities.length > 0}
+      <div class="day-summary">
+        <span class="sum-item">{$t('dayView.summaryActs', { n: layoutActivities.length })}</span>
+        <span class="sum-dot" aria-hidden="true"></span>
+        <span class="sum-item sum-strong">
+          {formatHours(minutosDia / 60)} {$t('dayView.summaryPlanned')}
+        </span>
+        {#if minutosSinPlanificar > 0}
+          <span class="sum-dot" aria-hidden="true"></span>
+          <span class="sum-item">
+            {$t('dayView.summaryFree', { h: formatHours(minutosSinPlanificar / 60) })}
+          </span>
+        {/if}
+      </div>
+    {/if}
+
     <!-- Mode toggle -->
     <div class="mode-pill-toggle">
       <button
@@ -912,7 +944,15 @@
       {/each}
     </div>
 
-    <div class="activities-track" class:track-dragging={draggedActivityId !== null} class:track-entrada={entradaDia} onclick={handleTrackTap} oncontextmenu={handleTrackContextMenu} role="presentation">
+    <div
+      class="activities-track"
+      class:track-dragging={draggedActivityId !== null}
+      class:track-entrada={entradaDia}
+      style="--horas: {totalHours}"
+      onclick={handleTrackTap}
+      oncontextmenu={handleTrackContextMenu}
+      role="presentation"
+    >
       {#if layoutActivities.length === 0}
         <div class="empty-state glass-panel" aria-live="polite">
           <span class="empty-icon">🌱</span>
@@ -959,6 +999,16 @@
                 </span>
               {/if}
             </div>
+            <!-- Tramo y duración: en escritorio la tarjeta es ancha y no puede
+                 quedarse con el nombre pegado a la izquierda y cientos de
+                 píxeles vacíos a la derecha. aria-hidden porque el dato ya está
+                 en el contexto de la tarjeta y repetirlo en todas es ruido. -->
+            {#if activity.durationMins > 20}
+              <span class="activity-span" class:has-edit={activity.durationMins >= 90} aria-hidden="true">
+                {format12h(formatTime(activity._start))} – {format12h(formatTime(activity._end))}
+                {#if activity.durationMins >= 45} · {formatHours(activity.durationMins / 60)}{/if}
+              </span>
+            {/if}
             <!-- Botón Edit solo en tarjetas con altura real suficiente (≥90 min
                  ≈ ≥52px en el track: siempre > 44px regla dura #5). En tarjetas
                  más cortas la edición queda a un click en la tarjeta o menú
@@ -1067,6 +1117,46 @@
     gap: 0.75rem;
     padding: 1.5rem;
     border-bottom: 1px solid rgb(var(--linea) / 0.05);
+    /* Comparte el ancho con la línea de tiempo (--dia-ancho): antes cada una
+       llevaba su propio max-width y se desalineaban entre sí. */
+    width: 100%;
+    max-width: var(--dia-ancho, 100%);
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Columna legible. Antes el tope solo existía a partir de 1536px, así que en
+     los tamaños de escritorio más comunes (1280x800, 1440x900, 1512 de un MacBook)
+     el track se estiraba a 1200px: el nombre pegado a la izquierda y 900px de
+     tarjeta vacía. Ahora la columna crece con la pantalla hasta un ancho de
+     lectura real, en cuanto hay sitio para ella. */
+  @media (min-width: 900px) {
+    .daily-view {
+      --dia-ancho: clamp(580px, 56vw, 820px);
+    }
+    .daily-header h2 {
+      font-size: 1.7rem;
+    }
+  }
+
+  /* Resumen del día: cuenta el ancho que la columna estrecha deja libre. */
+  .day-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    color: rgb(var(--texto-2));
+  }
+  .day-summary .sum-strong {
+    color: rgb(var(--verde-texto));
+    font-weight: 600;
+  }
+  .day-summary .sum-dot {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: rgb(var(--linea) / 0.55);
   }
 
   .header-top-row {
@@ -1242,35 +1332,14 @@
     flex: 1;
     position: relative;
     display: flex;
-    margin: 1.5rem;
+    margin: 1.5rem auto;
+    width: 100%;
+    max-width: var(--dia-ancho, 100%);
     overflow-y: auto;
     min-height: 1600px; /* Scale so 15-min tasks have ~25px and don't crowd */
     /* Scrollbar invisible: el scroll queda (rueda del mouse + touch), pero sin
        la barra pegada al borde de las tarjetas. */
     scrollbar-width: none;
-    /* En pantallas grandes (≥1536px) el track de actividades deja de ser una
-       cinta kilométrica: tope 900px y centrado — las tarjetas conservan
-       proporción legible y los ojos no viajan 60cm de lado a lado. */
-  }
-  @media (min-width: 1536px) {
-    .daily-container {
-      /* Escala con la pantalla hasta un tope: 900px se quedaba chico en
-         2560px (ultrawide) dejando ~1660px muertos. clamp: crece 1px por
-         cada 2px de viewport entre 1536 y 2412, techo 1200px. */
-      max-width: clamp(900px, 58vw, 1200px);
-      margin-left: auto;
-      margin-right: auto;
-      width: 100%;
-    }
-    .daily-header {
-      max-width: clamp(900px, 58vw, 1200px);
-      margin-left: auto;
-      margin-right: auto;
-      width: 100%;
-    }
-    .daily-header h2 {
-      font-size: 1.7rem;
-    }
   }
   .daily-container::-webkit-scrollbar {
     display: none;
@@ -1297,6 +1366,15 @@
     flex: 1;
     position: relative;
     margin-left: 1rem;
+    /* Rayas de hora: sin ellas, un bloque de 15 min a las 7 y otro a las 12
+       son la misma caja y el ojo no tiene ninguna referencia vertical. La raya
+       cae donde el rótulo de la hora (ambos marcan (hora - inicio) / horas), así
+       que el rótulo se apoya justo en su línea. --horas lo inyecta el markup. */
+    background-image: repeating-linear-gradient(
+      to bottom,
+      rgb(var(--linea) / 0.18) 0 1px,
+      rgb(var(--linea) / 0) 1px calc(100% / var(--horas, 16))
+    );
   }
 
   /* G12: invitación cuando el día no tiene actividades (el tap en el track crea) */
@@ -1552,6 +1630,29 @@
     gap: 0.5rem;
     flex: 1;
     min-width: 0;
+  }
+
+  /* Tramo y duración a la derecha de la tarjeta. Muted para no competir con el
+     nombre; tabular-nums para que las columnas de horas queden alineadas. */
+  .activity-span {
+    flex: 0 0 auto;
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    color: rgb(var(--texto-2));
+    white-space: nowrap;
+  }
+  /* El botón Edit va posicionado en absoluto sobre el borde derecho, así que el
+     tramo se aparta a mano en las tarjetas que sí lo tienen (≥90 min). */
+  .activity-span.has-edit {
+    margin-right: 2.4rem;
+  }
+  /* Solo cuando la tarjeta tiene sitio para el dato: en móvil la tarjeta es de
+     ~300px y el tramo (140px) se comería el nombre. El ancho sobrante es
+     exactamente lo que pasa en escritorio. */
+  @media (max-width: 899px) {
+    .activity-span {
+      display: none;
+    }
   }
 
   .activity-name {
