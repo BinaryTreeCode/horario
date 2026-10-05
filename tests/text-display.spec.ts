@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { leerPixeles, esRojoSolido, esRojoDeLinea } from './helpers/pixeles';
 
 // Regresión del display de texto en los bloques de la Semana: con columnas de
 // piso móvil, un nombre que no cabe se partía a mitad de palabra dejando una
@@ -225,3 +226,78 @@ for (const [ancho, minFuentePx] of [[320, 11], [390, 11], [480, 11], [768, 9]] a
     ).toBeGreaterThanOrEqual(minFuentePx);
   });
 }
+
+/**
+ * La línea roja cruzaba la etiqueta de la hora y le partía el número en dos.
+ *
+ * No era un problema de geometría (la línea estaba bien ubicada en el tiempo:
+ * 21:12 cae 20px bajo el "9:00 PM", que son 12 minutos a 100px/hora) sino de ORDEN
+ * DE PINTADO: la etiqueta vive dentro del `.time-bar-dot` y la línea es su
+ * hermano posterior, así que a igual nivel de apilado ganaba el hermano del
+ * árbol. En escritorio no se nota porque la etiqueta queda a la izquierda del
+ * punto; en móvil la etiqueta se ancla a la izquierda DENTRO del punto y la
+ * línea entra ~60px dentro de ella.
+ *
+ * Por eso este guard lee PÍXELES del recorte y no la geometría: la geometría
+ * estaba bien, lo mal era quién se pintaba encima. La línea es una corrida
+ * horizontal continua, así que si atraviesa la etiqueta deja una tira de píxeles
+ * rojos al 50% más ancha que el grosor de un glifo (medido con el bug: 50 de
+ * 118). El antialias de los propios números también genera 1-2px rosados, por eso
+ * la condición es sobre CORRIDAS de 4px o más.
+ */
+test('Día 390px: la línea roja no se pinta encima del número', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fijarRango24h(page);
+  await page.locator('#tab-day').click();
+  const chip = page.locator('.time-bar-label');
+  await expect(chip, 'la vista Día no pintó la línea de la hora actual').toBeVisible({ timeout: 30_000 });
+  await chip.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+
+  const caja = await chip.evaluate((el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    return { x: Math.floor(r.x) - 16, y: Math.floor(r.y) - 6, width: Math.ceil(r.width) + 32, height: Math.ceil(r.height) + 12 };
+  });
+  const png = await page.screenshot({ clip: caja });
+  const img = await leerPixeles(png);
+
+  // La etiqueta: columnas con rojo sólido (fondo #c53030).
+  let x0 = Infinity, x1 = -1;
+  for (let x = 0; x < img.w; x++) {
+    for (let y = 0; y < img.h; y++) {
+      const [r, g, b] = img.px(x, y);
+      if (esRojoSolido(r, g, b)) { if (x < x0) x0 = x; if (x > x1) x1 = x; break; }
+    }
+  }
+  expect(x1, 'no se encontró la etiqueta en el recorte').toBeGreaterThan(x0);
+
+  // Las filas de la línea: donde hay rojo al 50% FUERA de la etiqueta (a la
+  // derecha, que es donde la línea sigue) y no en su borde redondeado.
+  const filas: number[] = [];
+  for (let y = 0; y < img.h; y++) {
+    let fuera = 0;
+    for (let x = x1 + 2; x < Math.min(img.w, x1 + 14); x++) {
+      const [r, g, b] = img.px(x, y);
+      if (esRojoDeLinea(r, g, b)) fuera++;
+    }
+    if (fuera >= 6) filas.push(y);
+  }
+  expect(filas.length, 'no se encontró la línea roja en el recorte').toBeGreaterThanOrEqual(2);
+
+  // La corrida más larga de rojo de línea DENTRO de la etiqueta, en esas filas.
+  let peorCorrida = 0;
+  for (const y of filas) {
+    let corrida = 0;
+    for (let x = x0; x <= x1; x++) {
+      const [r, g, b] = img.px(x, y);
+      if (esRojoDeLinea(r, g, b)) {
+        corrida++;
+        peorCorrida = Math.max(peorCorrida, corrida);
+      } else corrida = 0;
+    }
+  }
+  expect(
+    peorCorrida,
+    `la línea roja se pintó encima de la etiqueta (corrida de ${peorCorrida}px dentro de un número de ${x1 - x0 + 1}px)`
+  ).toBeLessThan(4);
+});

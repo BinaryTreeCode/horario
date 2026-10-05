@@ -1689,6 +1689,16 @@
   .time-bar-label {
     position: absolute;
     right: 15px; /* Move to the left of the dot */
+    /* La etiqueta vive DENTRO del .time-bar-dot y la línea es su hermano
+       POSTERIOR: a igual nivel de apilado (ambos z-index auto dentro del
+       .time-bar) gana el hermano del árbol, así que la línea se pintaba encima.
+       En escritorio no se nota porque la etiqueta queda a la izquierda del punto
+       y no se tocan; en móvil la etiqueta se ancla a la izquierda DENTRO del
+       punto, la línea entra ~60px dentro de ella y le partía el número en dos
+       (verificado por pixel: los glifos blancos de la mitad salían con una
+       franja roja al 50%). Con z-index la etiqueta queda por encima y la línea
+       arranca después de ella. */
+    z-index: 1;
     background: #c53030; /* AA con blanco 4.9:1 (antes #e53e3e = 3.7:1) */
     color: white;
     font-size: 0.65rem;
