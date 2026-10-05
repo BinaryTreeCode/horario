@@ -4,10 +4,11 @@
   import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync, subirAhora, bajarAhora, SIN_SESION } from '../lib/sync';
   import { establecerClave, olvidarClave } from '../lib/crypto';
   import type { SyncStatus } from '../lib/types';
-  import { Cloud, CloudUpload, CloudDownload, LogIn, LogOut, RefreshCw, UserPlus, TriangleAlert } from '@lucide/svelte';
+  import { Cloud, CloudUpload, CloudDownload, LogIn, LogOut, RefreshCw, UserPlus, TriangleAlert, Eye, EyeOff } from '@lucide/svelte';
   import type { Category } from '../lib/types';
   import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck, Languages } from '@lucide/svelte';
   import { idioma, cambiarIdioma, t, IDIOMAS_DISPONIBLES } from '../lib/i18n';
+  import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
   import { tema, elegirTema, TEMAS, type Tema } from '../lib/tema';
   import { formatTime as horaReloj } from '../lib/stores';
   import { dndzone } from 'svelte-dnd-action';
@@ -924,6 +925,19 @@
       <!-- ── Tus datos: transparencia sobre el tratamiento (pedido del usuario) ── -->
       <section class="settings-section data-transparency">
         <h3><ShieldCheck size={16} /> {$t('settings.dataTitle')}</h3>
+        <!-- Modo privacidad: vivía en el menú Datos, pero no es cosa de la
+             nube — con el resto de la configuración es donde se buscaba. -->
+        <button
+          type="button"
+          class="privacy-toggle"
+          role="switch"
+          aria-checked={$modoPrivacidad}
+          onclick={alternarPrivacidad}
+        >
+          {#if $modoPrivacidad}<EyeOff size={16} aria-hidden="true" />{:else}<Eye size={16} aria-hidden="true" />{/if}
+          <span class="menu-item-flex">{$t('header.privacy')}</span>
+          <span class="privacy-estado" aria-hidden="true">{$modoPrivacidad ? '✓' : ''}</span>
+        </button>
         <ul class="data-points">
           <li>{@html $t('privacy.noAccount')}</li>
           <li>{@html $t('privacy.withAccount')}</li>
@@ -1518,6 +1532,28 @@
     gap: 0.4rem;
     color: rgb(var(--verde-texto));
   }
+  /* Modo privacidad: fila completa con estado visible (✓) y target de 44px.
+     Antes vivía en el menú Datos; con su configuración es donde se buscaba. */
+  .privacy-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    min-height: 44px;
+    margin: 0.6rem 0 0;
+    padding: 0.55rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid rgb(var(--linea) / 0.4);
+    background: rgb(var(--sup) / 0.5);
+    color: rgb(var(--tinta));
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+  }
+  .privacy-toggle svg { flex-shrink: 0; }
+  .privacy-toggle:hover { border-color: rgb(var(--verde-borde) / 0.5); }
+  .privacy-estado { margin-left: auto; color: rgb(var(--verde-fuerte)); font-weight: 700; }
   .data-points {
     margin: 0.5rem 0 0;
     padding: 0;

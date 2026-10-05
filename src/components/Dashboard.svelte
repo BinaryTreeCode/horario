@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { db, exportarRespaldoBinario, leerUltimoRespaldo } from '../lib/db';
+    import { db } from '../lib/db';
   import type { Activity } from '../lib/types';
   import { 
     activitiesStore, 
@@ -14,13 +14,11 @@
   import Toasts from './Toasts.svelte';
   import { toastOk, toastErr } from '../lib/toast';
   import { undoStack, redoStack } from '../lib/undo';
-  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Download, Upload, Cloud, CloudOff, CloudUpload, CloudDownload, LogIn, RefreshCw, Info, TriangleAlert } from '@lucide/svelte';
+  import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Cloud, CloudOff, CloudUpload, CloudDownload, LogIn, RefreshCw, Info, TriangleAlert } from '@lucide/svelte';
   import { portal } from '../lib/portal';
   import { onSyncChange, syncNow, subirAhora, bajarAhora, SIN_SESION } from '../lib/sync';
   import { t, tNow, idioma } from '../lib/i18n';
-  import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
-  import { temaEfectivo, alternarTema } from '../lib/tema';
-  import { Eye, EyeOff, Sun, Moon } from '@lucide/svelte';
+  import { modoPrivacidad } from '../lib/privacy';
   import type { SyncStatus } from '../lib/types';
 
   let currentView = $state('week'); // 'week' | 'day'
@@ -239,11 +237,10 @@
     location.reload();
   }
   
-  // Que dice el interruptor de tema del header. El icono y el texto apuntan al
-  // tema al que SALTA, no al que hay: es el criterio del Eye/EyeOff del menu
-  // Datos. Y no dice cual es el actual porque eso ya se ve en la pantalla, y
-  // cambiar de tema es reversible de un clic.
-  const temaTitulo = $derived($temaEfectivo === 'oscuro' ? $t('header.themeToLight') : $t('header.themeToDark'));
+  // Un SOLO icono de nube: el del menú Datos lleva el estado (Cloud/CloudOff)
+  // y solo ofrece subir/bajar. El sync-badge y el toggle de tema del header
+  // se retiraron: redundantes (el tema vive en Ajustes y el estado lo pinta
+  // este icono).
 
   let showSettings = $state(false);
   let showActivityModal = $state(false);
@@ -338,58 +335,11 @@
     loadSettingsPanel();
   }
 
-  /** Exportar (menú Datos / sidebar): descarga el respaldo con toast de éxito/error.
-   *  Usa el formato binario .npz (imágenes recompresidas como binario ZIP). */
-  async function exportarDatos() {
-    cerrarMenuDatos();
-    try {
-      const stats = await exportarRespaldoBinario();
-      const kb = stats.bytes >= 1024 * 1024
-        ? `${(stats.bytes / 1024 / 1024).toFixed(1)} MB`
-        : `${Math.max(1, Math.round(stats.bytes / 1024))} KB`;
-      toastOk(
-        stats.imagenesBinarias > 0
-          ? `${tNow('sidebar.exported')} ${kb} · ${tNow('sidebar.exportImages', { n: stats.imagenesBinarias })}`
-          : `${tNow('sidebar.exported')} ${kb}`
-      );
-    } catch (err: any) {
-      toastErr(tNow('settings.exportError', { msg: err?.message || err }));
-    }
-  }
-
-  /** Importar: abre Ajustes donde vive el flujo con confirmación. */
-  function importarDatos() {
-    cerrarMenuDatos();
-    openSettings();
-  }
-
   // ── Menú desplegable "Datos" del header ──
   let menuDatos = $state(false);
   let menuDatosSaliendo = $state(false); // animación de subida al cerrar
   let menuDatosEl: HTMLElement | undefined = $state();
   let menuDatosPos = $state({ x: 0, y: 0 });
-
-  // Fecha del último respaldo descargado (pie del menú). Se lee al abrir el
-  // menú para que muestre siempre el valor fresco (incluida la descarga recién
-  // hecha desde el propio menú o desde Ajustes).
-  let ultimoRespaldo = $state<string | null>(null);
-  const fechaUltimoRespaldo = $derived.by(() => {
-    if (!ultimoRespaldo) return null;
-    const d = new Date(ultimoRespaldo);
-    if (isNaN(d.getTime())) return null;
-    return d.toLocaleDateString(
-      getLocaleActivo(),
-      { day: '2-digit', month: '2-digit', year: 'numeric' }
-    );
-  });
-
-  /** Locale en espejo del idioma de la app (no el del navegador: si el usuario
-   *  eligió español en un navegador en inglés, el menú respeta su elección). */
-  function getLocaleActivo(): string {
-    let lang = 'es';
-    idioma.subscribe(v => (lang = v))();
-    return lang === 'en' ? 'en-US' : 'es-AR';
-  }
 
   /**
    * Duración de la animación de CIERRE del menú, en ms. Tiene que coincidir
@@ -401,7 +351,6 @@
 
   function alternarMenuDatos() {
     if (!menuDatos) {
-      ultimoRespaldo = leerUltimoRespaldo();
       if (menuDatosEl) {
         // Posicionar bajo el botón ANTES de abrir (el portal manda al body:
         // sin ancla de layout, las coords deben medirse del botón real).
@@ -713,63 +662,39 @@
           <Plus size={20} /> <span class="hide-mobile">{$t('header.newActivity')}</span>
         </button>
         </div>
-        <!-- (Modo privacidad retirado del header: vive como ítem del menú
-             Datos. Header mínimo: compactar ×2, nueva actividad, ajustes.) -->
-        <!-- Interruptor rapido de tema. El header es lo unico comun a las DOS
-             vistas, asi que un atajo a un clic no puede depender de entrar a
-             Ajustes (que en Dia es un paso extra y en movil cuesta un scroll).
-             Icono solo, como los demas btn-icon: con el texto la fila del
-             header no entra ni en ultrawide y las pestañas se descentran. -->
-        <button
-          id="btn-tema"
-          class="btn btn-secondary btn-icon"
-          onclick={alternarTema}
-          aria-label={temaTitulo}
-          title={temaTitulo}
-        >
-          {#if $temaEfectivo === 'oscuro'}
-            <Sun size={20} />
-          {:else}
-            <Moon size={20} />
-          {/if}
-        </button>
+        <!-- (Interruptor de tema retirado del header: vive en Ajustes → Tema,
+             que ya existía. Un solo icono de nube lleva el estado de la nube.) -->
         <button class="btn btn-secondary btn-icon" onclick={openSettings} aria-label={$t('header.settings')}>
           <Settings size={20} />
         </button>
       </div>
       <!-- Menú Datos: FUERA de .header-actions para ser visible en AMBAS vistas
            (en Día el header-actions se oculta y las acciones viven en la
-           sidebar; los datos siempre están a un clic aquí). -->
+           sidebar; los datos siempre están a un clic aquí). ÚNICO icono de
+           nube: su icono y su title reflejan el estado de la conexión. -->
       <div class="menu-datos-wrap" bind:this={menuDatosEl}>
         <button
           class="btn btn-secondary btn-icon"
           onclick={alternarMenuDatos}
-          aria-label={$t('sidebar.menuDatos')}
+          aria-label={$t('sidebar.menuDatos') + ' — ' + syncTitulo}
           aria-expanded={menuDatos}
           aria-haspopup="menu"
-          title={$t('sidebar.menuDatos')}
+          title={syncTitulo}
         >
-          <Cloud size={20} />
+          {#if syncStatus === 'syncing'}
+            <RefreshCw size={20} class="girando" />
+          {:else if syncStatus === 'error' || syncStatus === 'offline' || !syncDetail.sesion}
+            <CloudOff size={20} />
+          {:else}
+            <Cloud size={20} />
+          {/if}
           {#if syncDetail.pending > 0}
             <span class="sync-dot pendiente" aria-hidden="true"></span>
           {/if}
         </button>
       </div>
-      {#if syncStatus !== 'local'}
-        <button
-          class="sync-badge"
-          class:syncing={syncStatus === 'syncing'}
-          class:error={syncStatus === 'error'}
-          onclick={() => syncNow(true).catch(() => {})}
-          aria-label={syncTitulo}
-          title={syncTitulo}
-        >
-          {#if syncStatus === 'synced'}<Cloud size={16} />
-          {:else if syncStatus === 'syncing'}<RefreshCw size={16} />
-          {:else}<CloudOff size={16} />{/if}
-          <span class="sync-dot {syncStatus}" aria-hidden="true"></span>
-        </button>
-      {/if}
+      <!-- (Sync-badge retirado: era un segundo icono de nube. El estado lo
+           muestra el botón del menú Datos, único icono de nube del header.) -->
     </div>
   </header>
 
@@ -975,13 +900,6 @@
           <span class="menu-item-flex">{$t('cloud.sinSesion')}</span>
         </button>
       {/if}
-      <div class="menu-datos-sep" role="presentation"></div>
-      <button role="menuitem" onclick={exportarDatos} title={$t('sidebar.exportTitle')}>
-        <Download size={16} /> {$t('sidebar.export')}
-      </button>
-      <button role="menuitem" onclick={importarDatos} title={$t('sidebar.importTitle')}>
-        <Upload size={16} /> {$t('sidebar.import')}
-      </button>
       {#if syncDetail.truncado > 0}
         <!-- Aviso persistente: el servidor descartó filas del push. El toast
              es efímero y esto tiene que seguir visible mientras el descarte
@@ -991,19 +909,9 @@
           <span>{$t('sync.truncado', { n: syncDetail.truncado })}</span>
         </div>
       {/if}
-      <div class="menu-datos-sep" role="presentation"></div>
-      <button role="menuitemcheckbox" aria-checked={$modoPrivacidad} onclick={alternarPrivacidad} title={$t('header.privacy')}>
-        {#if $modoPrivacidad}<EyeOff size={16} />{:else}<Eye size={16} />{/if}
-        <span class="menu-item-flex">{$t('header.privacy')}</span>
-        {#if $modoPrivacidad}<span class="menu-check">✓</span>{/if}
-      </button>
-      <div class="menu-datos-pie" role="presentation">
-        {#if fechaUltimoRespaldo}
-          {$t('sidebar.lastBackup', { fecha: fechaUltimoRespaldo })}
-        {:else}
-          {$t('sidebar.lastBackupNever')}
-        {/if}
-      </div>
+      <!-- (Exportar/Restaurar/Modo privacidad retirados del menú: no son de la
+           nube. Viven en Ajustes — export/import en Copia local, privacidad
+           en el bloque de privacidad.) -->
     </div>
   {/if}
 
@@ -1600,34 +1508,8 @@
   .sync-dot.offline { background: rgb(var(--gris-medio)); }
   .sync-dot.pendiente { background: rgb(var(--ambar-solido)); }
 
-  .sync-badge {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: 1px solid rgb(var(--verde-borde) / 0.25);
-    color: rgb(var(--verde-texto));
-    border-radius: 50%;
-    width: 44px;
-    height: 44px;
-    cursor: pointer;
-    transition: all 0.2s;
-    position: relative;
-  }
-
-  .sync-badge:hover {
-    background: rgb(var(--verde-lavado) / 0.08);
-  }
-
-  .sync-badge.syncing {
-    animation: spin 1.2s linear infinite;
-    pointer-events: none;
-  }
-
-  .sync-badge.error {
-    color: rgb(var(--rojo-texto));
-    border-color: rgb(var(--rojo-borde) / 0.4);
-  }
+  /* (Sync-badge retirado: era un segundo icono de nube junto al menú Datos.
+     El estado de la conexión lo pinta el único icono de nube del header.) */
 
   @keyframes spin {
     from { transform: rotate(0deg); }

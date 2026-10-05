@@ -462,79 +462,65 @@ test('Modo sistema: sin preferencia guardada sigue al tema del dispositivo', asy
  * pierde al recregar y no viaja en el sync) y que siga disponible en la
  * vista Día, que es donde el usuario consulta el horario.
  */
-test('Interruptor del header: cambia la pantalla, la guarda y vuelve a cambiarla', async ({ page }) => {
+test('El selector de tema en Ajustes: cambia la pantalla, la guarda y vuelve a cambiarla', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto('/');
   await guardarTema(page, 'claro');
   await page.reload();
   expect(await temaPintado(page)).toBe('claro');
 
-  const btn = page.locator('#btn-tema');
-  await expect(btn, 'no aparece el interruptor de tema en el header').toBeVisible({ timeout: 30_000 });
+  // El interruptor del header se retiró (pedido del usuario: un solo icono de
+  // nube, y la configuración — incluido el tema — vive en Ajustes, donde ya
+  // existía el selector: data-tema-opcion = claro | oscuro | sistema).
+  const abrirAjustes = page.getByRole('button', { name: /Abrir ajustes|Open settings/ });
+  await expect(abrirAjustes).toBeVisible({ timeout: 30_000 });
+  await abrirAjustes.click();
 
-  // Zona táctil: es un botón icónico del header y comparte la regla de 44px con
-  // el resto (regla dura #5). Un icono de 20px dentro de una caja de 30 sería
-  // inalcanzable con el dedo.
-  const alto = await btn.evaluate(el => Math.round(el.getBoundingClientRect().height));
-  expect(alto, `el interruptor mide ${alto}px de alto`).toBeGreaterThanOrEqual(44);
-
-  // El aria-label describe la ACCIÓN (a qué tema salta), no el estado. Se
-  // comprueba que existe y que cambia al invertir el tema: al depender del
-  // idioma guardado, comparar el texto con una palabra fija haría el guard
-  // pasar en verde solo en español.
-  const etiquetaAntes = await btn.getAttribute('aria-label');
-  expect(etiquetaAntes, 'el interruptor no tiene aria-label').toBeTruthy();
-  expect(await btn.getAttribute('title'), 'el title no coincide con el aria-label')
-    .toBe(etiquetaAntes);
-
-  await btn.click();
+  const opcionOscuro = page.locator('[data-tema-opcion="oscuro"]');
+  await expect(opcionOscuro).toBeVisible({ timeout: 30_000 });
+  await opcionOscuro.click();
   expect(
     await page.evaluate(() => document.documentElement.dataset.tema),
-    'una pulsación del interruptor no cambió la pantalla'
+    'elegir oscuro en Ajustes no cambió la pantalla'
   ).toBe('oscuro');
-  expect(
-    await btn.getAttribute('aria-label'),
-    'el aria-label sigue igual tras cambiar: ya no describe el destino'
-  ).not.toBe(etiquetaAntes);
-
-  expect(await leerTemaGuardado(page), 'el interruptor no persistió el tema').toBe('oscuro');
+  expect(await leerTemaGuardado(page), 'el selector no persistió el tema').toBe('oscuro');
 
   await page.reload();
-  expect(await temaPintado(page), 'al recargar se perdió el tema del interruptor').toBe('oscuro');
+  expect(await temaPintado(page), 'al recargar se perdió el tema elegido').toBe('oscuro');
 
-  // Sigue disponible en Día: el header es lo único común a las dos vistas.
+  // También en Día: Ajustes es común a las dos vistas.
   await page.locator('#tab-day').click();
   await expect(page.locator('.activities-track').first()).toBeVisible({ timeout: 30_000 });
-  await expect(btn, 'el interruptor desaparece en la vista Día').toBeVisible();
-  await btn.click();
+  await page.getByRole('button', { name: /Abrir ajustes|Open settings/ }).click();
+  await page.locator('[data-tema-opcion="claro"]').click();
   expect(
     await page.evaluate(() => document.documentElement.dataset.tema),
-    'la segunda pulsación no volvió al tema claro'
+    'la segunda elección no volvió al tema claro'
   ).toBe('claro');
 });
 
 /**
- * El caso que separa un interruptor de una trampa: la preferencia "sistema" es
- * el estado por defecto de una instalación nueva, así que es el primer
- * interruptor que pulsa cualquiera.
- *
- * Si la decisión se tomara sobre la PREFERENCIA en vez de sobre lo que se ve,
- * "sistema" saltaría a "sistema" y el botón no haría nada — con el agravante de
- * que el atributo <html> ni siquiera cambiaría y el guard de este archivo
- * pasaría en verde. De ahí que este caso sea propio y no un detalle del otro.
+ * El caso que separa una preferencia de una trampa: "sistema" es el estado por
+ * defecto de una instalación nueva. Elegir un tema concreto desde Ajustes debe
+ * pisar lo que dice el SO y FIJARSE en el guardado (si la decisión se tomara
+ * sobre la preferencia, "sistema" no cambiaría nada y el atributo <html> ni
+ * siquiera se movería — el guard pasaría en verde sin probar nada).
  */
-test('Interruptor: con la preferencia en "sistema" igual cambia la pantalla', async ({ page }) => {
+test('Tema en Ajustes: con la preferencia en "sistema" igual cambia la pantalla', async ({ page }) => {
   await page.goto('/');
   await guardarTema(page, 'sistema');
-  // SO en oscuro: se ve oscuro y el interruptor tiene que llevar a claro.
+  // SO en oscuro: se ve oscuro y elegir claro tiene que llevar a claro.
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.reload();
   expect(await temaPintado(page)).toBe('oscuro');
 
-  await page.locator('#btn-tema').click();
+  await page.getByRole('button', { name: /Abrir ajustes|Open settings/ }).click();
+  const opcionClaro = page.locator('[data-tema-opcion="claro"]');
+  await expect(opcionClaro).toBeVisible({ timeout: 30_000 });
+  await opcionClaro.click();
   expect(
     await page.evaluate(() => document.documentElement.dataset.tema),
-    'con la preferencia en "sistema" el interruptor no hizo nada'
+    'con la preferencia en "sistema" elegir claro no hizo nada'
   ).toBe('claro');
   expect(await leerTemaGuardado(page), 'no fijó un tema concreto').toBe('claro');
 });

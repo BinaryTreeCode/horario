@@ -375,8 +375,9 @@ test.describe('Sincronización entre dispositivos', () => {
     await abrirMenuDatos(page);
     await expect(page.locator('.menu-datos button', { hasText: TEXTO_SUBIR })).toBeVisible();
     await expect(page.locator('.menu-datos button', { hasText: TEXTO_BAJAR })).toBeVisible();
-    // Y no desaparecen las de archivo: son caminos distintos.
-    await expect(page.locator('.menu-datos button')).toHaveCount(5);
+    // SOLO nube: export/import (archivo) y privacidad viven en Ajustes — el
+    // menú del único icono de nube ofrece subir y bajar, nada más.
+    await expect(page.locator('.menu-datos button')).toHaveCount(2);
   });
 
   test('el botón "Bajar de la nube" trae lo que cambió en el otro dispositivo', async ({ page }) => {
