@@ -750,11 +750,12 @@
         </div>
       {:else}
         <!-- Vista Día: en escritorio las acciones de edición viven en una tira
-             vertical a la derecha del horario (el panel se corre a la izquierda
-             y deja de sobrar espacio); en móvil siguen en el header. La
+             vertical DENTRO del panel, a la derecha del horario: aprovecha el
+             espacio muerto del panel en pantallas anchas y los botones llevan
+             texto, no solo icono. En móvil siguen en el header. La
              configuración (tema, ajustes, datos) SIEMPRE queda arriba. -->
-        <div class="dia-con-tira">
         <div class="day-layout glass-panel">
+        <div class="day-contenido">
           {#if DailyViewComp}
             <DailyViewComp 
               day={selectedDay}
@@ -794,26 +795,32 @@
           {/if}
         </div>
 
-        <!-- Tira vertical de acciones: los mismos handlers y guards que los
-             botones del header (que en Día-escritorio se ocultan). IDs nuevos
-             para no duplicar btn-undo/btn-redo del header (axe: ids únicos). -->
+        <!-- Tira vertical de acciones DENTRO del panel: los mismos handlers y
+             guards que los botones del header (que en Día-escritorio se
+             ocultan). IDs nuevos para no duplicar btn-undo/btn-redo del header
+             (axe: ids únicos). -->
         <div class="tira-dia" role="toolbar" aria-orientation="vertical" aria-label={$t('dayView.tiraAcciones')}>
-          <button class="btn btn-secondary btn-icon" onclick={() => ejecutarUndo(false)} disabled={stackCount === 0} aria-label={undoTitulo} title={undoTitulo}>
-            <Undo2 size={20} />
+          <button class="btn btn-secondary" onclick={() => ejecutarUndo(false)} disabled={stackCount === 0} aria-label={undoTitulo} title={undoTitulo}>
+            <Undo2 size={18} />
+            <span class="tira-texto">{$t('header.undo')}</span>
           </button>
-          <button class="btn btn-secondary btn-icon" onclick={() => ejecutarUndo(true)} disabled={redoCount === 0} aria-label={redoTitulo} title={redoTitulo}>
-            <Redo2 size={20} />
+          <button class="btn btn-secondary" onclick={() => ejecutarUndo(true)} disabled={redoCount === 0} aria-label={redoTitulo} title={redoTitulo}>
+            <Redo2 size={18} />
+            <span class="tira-texto">{$t('header.redo')}</span>
           </button>
           <div class="tira-sep" role="presentation"></div>
-          <button class="btn btn-secondary btn-icon" onclick={coverGapsAbove} aria-label={$t('header.adjustUp')} title={$t('header.adjustUpTitle')}>
-            <ChevronsUp size={20} />
+          <button class="btn btn-secondary" onclick={coverGapsAbove} aria-label={$t('header.adjustUp')} title={$t('header.adjustUpTitle')}>
+            <ChevronsUp size={18} />
+            <span class="tira-texto">{$t('header.adjustUp')}</span>
           </button>
-          <button class="btn btn-secondary btn-icon" onclick={coverGapsBelow} aria-label={$t('header.adjustDown')} title={$t('header.adjustDownTitle')}>
-            <ChevronsDown size={20} />
+          <button class="btn btn-secondary" onclick={coverGapsBelow} aria-label={$t('header.adjustDown')} title={$t('header.adjustDownTitle')}>
+            <ChevronsDown size={18} />
+            <span class="tira-texto">{$t('header.adjustDown')}</span>
           </button>
           <div class="tira-sep" role="presentation"></div>
           <button class="btn btn-plus" onclick={() => openActivityModal(null, selectedDay)} aria-label={$t('header.newActivity')} title={$t('header.newActivity')}>
-            <Plus size={20} />
+            <Plus size={18} />
+            <span class="tira-texto">{$t('header.newActivity')}</span>
           </button>
         </div>
         </div>
@@ -1537,32 +1544,51 @@
      derecha. El panel se corre a la izquierda (deja de sobrar espacio en
      pantallas anchas) y las acciones de edición quedan a un clic del track.
      En móvil (<1024px) la tira no existe: las acciones siguen en el header. */
-  .dia-con-tira {
+  /* Vista Día escritorio: el panel es una fila — horario + tira de acciones
+     DENTRO del panel (antes flotaba afuera, colgada en el fondo de la página).
+     El contenido se centra en su columna y la tira ocupa el espacio muerto de
+     la derecha con botones que llevan texto, no solo icono. */
+  .day-layout {
     display: flex;
     align-items: flex-start;
-    justify-content: center;
-    gap: 1rem;
   }
-  .dia-con-tira > .day-layout {
+  .day-contenido {
     flex: 1;
     min-width: 0;
   }
   .tira-dia {
     display: none;
     flex-direction: column;
-    align-items: center;
-    gap: 0.4rem;
+    align-items: stretch;
+    gap: 0.35rem;
     position: sticky;
-    top: 1rem;
-    padding: 0.6rem 0.45rem;
+    top: 1.25rem;
+    margin: 1.25rem 1rem 1.25rem 0;
+    padding: 0.6rem 0.5rem;
     border-radius: 14px;
     border: 1px solid rgb(var(--linea) / 0.35);
     background: rgb(var(--sup) / 0.6);
     backdrop-filter: blur(8px);
   }
+  /* Botones con texto: fila completa, icono + etiqueta a la izquierda.
+     El texto a 0.85rem se lee de un vistazo (los iconos solos obligaban a
+     adivinar); el title conserva la descripción larga de la acción. */
+  .tira-dia .btn {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.55rem;
+    min-height: 44px;
+    padding: 0.55rem 0.75rem;
+    white-space: nowrap;
+  }
+  .tira-texto {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
   /* Separador entre grupos (undo/redo · ajustar · nueva) */
   .tira-sep {
-    width: 60%;
+    width: 100%;
     height: 1px;
     margin: 0.1rem 0;
     background: rgb(var(--linea) / 0.4);
@@ -1574,10 +1600,6 @@
   @media (min-width: 1024px) {
     .tira-dia { display: flex; }
     .acciones-edicion.en-dia { display: none; }
-    .tira-dia .btn {
-      min-width: 44px;
-      min-height: 44px;
-    }
   }
 
   .dashboard-main {
