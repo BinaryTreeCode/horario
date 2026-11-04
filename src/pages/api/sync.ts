@@ -92,8 +92,8 @@ function normActivity(a: any): {
     daysOfWeek: days,
     // steps: array plano legacy O string cifrado np1 (blob ilegible)
     steps: Array.isArray(a.steps)
-      ? a.steps.filter((s: any) => typeof s?.title === 'string')
-      : (typeof a.steps === 'string' && a.steps.startsWith('np1:') ? a.steps : null),
+      ? a.steps.filter((s: any) => typeof s?.title === 'string').slice(0, 100)
+      : (typeof a.steps === 'string' && a.steps.startsWith('np1:') ? a.steps.slice(0, 32_000) : null),
     updatedAt,
     deletedAt: null,
   };
@@ -113,10 +113,14 @@ function normCategory(c: any) {
 
 function normSetting(s: any) {
   if (typeof s?.key !== 'string' || !s.key) return null;
+  const val = s.value !== undefined ? s.value : {};
+  // Acotar tamaño de settings para evitar jsonb desmedido (máx 64 KB serializado)
+  const valStr = JSON.stringify(val);
+  if (valStr && valStr.length > 64 * 1024) return null;
   return {
     id: typeof s.id === 'string' ? s.id.slice(0, 64) : s.key.slice(0, 64),
     key: s.key.slice(0, 64),
-    value: s.value !== undefined ? s.value : {},
+    value: val,
     updatedAt: normTimestamp(s.updatedAt, Date.now()),
     deletedAt: s.deletedAt ? normTimestamp(s.deletedAt, Date.now()) : null,
   };
@@ -148,8 +152,8 @@ const MAX_FILAS = {
   overrides: 7, // uno por día de la semana
 };
 
-/** Tope del body completo. Por encima, 413 sin tocar la BD. */
-const MAX_BODY_BYTES = 8 * 1024 * 1024;
+/** Tope del body completo (4 MB, acotado al límite de Vercel de 4.5 MB). */
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 /** Máximo de actividades embebidas en un override del día. */
 const MAX_ACTOS_POR_OVERRIDE = 100;
@@ -419,13 +423,14 @@ export const GET: APIRoute = async ({ cookies, url }) => {
   if (!user) return json({ error: 'No autenticado' }, 401);
 
   const since = Math.max(0, Number(url.searchParams.get('since') ?? '0') || 0);
+  const PULL_LIMIT = 2000;
 
   try {
     const [cats, acts, setts, ovrs] = await Promise.all([
-      db.select().from(categories).where(and(eq(categories.userId, user.id), gt(categories.updatedAt, since))),
-      db.select().from(activities).where(and(eq(activities.userId, user.id), gt(activities.updatedAt, since))),
-      db.select().from(userSettings).where(and(eq(userSettings.userId, user.id), gt(userSettings.updatedAt, since))),
-      db.select().from(dayOverrides).where(and(eq(dayOverrides.userId, user.id), gt(dayOverrides.updatedAt, since))),
+      db.select().from(categories).where(and(eq(categories.userId, user.id), gt(categories.updatedAt, since))).limit(PULL_LIMIT),
+      db.select().from(activities).where(and(eq(activities.userId, user.id), gt(activities.updatedAt, since))).limit(PULL_LIMIT),
+      db.select().from(userSettings).where(and(eq(userSettings.userId, user.id), gt(userSettings.updatedAt, since))).limit(PULL_LIMIT),
+      db.select().from(dayOverrides).where(and(eq(dayOverrides.userId, user.id), gt(dayOverrides.updatedAt, since))).limit(PULL_LIMIT),
     ]);
 
     const serverTime = Date.now();

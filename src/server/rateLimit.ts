@@ -19,7 +19,7 @@
  * con un diccionario de emails comunes.
  */
 import { createHash } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db, isDbConfigured } from './db';
 import { loginAttempts } from './schema';
 
@@ -68,7 +68,7 @@ export async function consultarLimite(key: string): Promise<EstadoLimite> {
 }
 
 /** Registra un fallo y devuelve el estado resultante (bloquea si toca). */
-export async function registrarFallo(key: string): Promise<EstadoLimite> {
+export async function registrarFallo(key: string, maxFallos = LIMITE): Promise<EstadoLimite> {
   if (!isDbConfigured) return { bloqueado: false, reintentarEnSeg: 0 };
   const ahora = Date.now();
   try {
@@ -79,15 +79,20 @@ export async function registrarFallo(key: string): Promise<EstadoLimite> {
     const base = enVentana ? fila.failedCount : 0;
     const inicio = enVentana ? fila.windowStart : ahora;
     const failedCount = base + 1;
-    const bloquea = failedCount > LIMITE;
+    const bloquea = failedCount > maxFallos;
     const blockedUntil = bloquea ? ahora + BLOQUEO_MS : null;
 
     await db
       .insert(loginAttempts)
-      .values({ key, failedCount, windowStart: inicio, blockedUntil, updatedAt: ahora })
+      .values({ key, failedCount: 1, windowStart: ahora, blockedUntil: null, updatedAt: ahora })
       .onConflictDoUpdate({
         target: loginAttempts.key,
-        set: { failedCount, windowStart: inicio, blockedUntil, updatedAt: ahora },
+        set: {
+          failedCount: sql`CASE WHEN ${ahora} - ${loginAttempts.windowStart} < ${VENTANA_MS} THEN ${loginAttempts.failedCount} + 1 ELSE 1 END`,
+          windowStart: sql`CASE WHEN ${ahora} - ${loginAttempts.windowStart} < ${VENTANA_MS} THEN ${loginAttempts.windowStart} ELSE ${ahora} END`,
+          blockedUntil: sql`CASE WHEN (${ahora} - ${loginAttempts.windowStart} < ${VENTANA_MS} AND ${loginAttempts.failedCount} + 1 > ${maxFallos}) THEN ${ahora + BLOQUEO_MS} ELSE NULL END`,
+          updatedAt: ahora,
+        },
       });
 
     return bloquea
@@ -111,6 +116,11 @@ export async function limpiarFallos(key: string): Promise<void> {
 /** Clave por correo: frena el credential stuffing contra una cuenta. */
 export function claveLogin(email: string): string {
   return claveHash('login', email);
+}
+
+/** Clave por IP para login: frena password spraying contra muchas cuentas. */
+export function claveLoginIp(ip: string): string {
+  return claveHash('login_ip', ip || 'desconocida');
 }
 
 /**
@@ -173,10 +183,15 @@ export async function consumirPresupuestoSync(userId: string): Promise<EstadoLim
     const blockedUntil = bloquea ? ahora + SYNC_BLOQUEO_MS : null;
     await db
       .insert(loginAttempts)
-      .values({ key, failedCount: usado, windowStart: inicio, blockedUntil, updatedAt: ahora })
+      .values({ key, failedCount: 1, windowStart: ahora, blockedUntil: null, updatedAt: ahora })
       .onConflictDoUpdate({
         target: loginAttempts.key,
-        set: { failedCount: usado, windowStart: inicio, blockedUntil, updatedAt: ahora },
+        set: {
+          failedCount: sql`CASE WHEN ${ahora} - ${loginAttempts.windowStart} < ${SYNC_VENTANA_MS} THEN ${loginAttempts.failedCount} + 1 ELSE 1 END`,
+          windowStart: sql`CASE WHEN ${ahora} - ${loginAttempts.windowStart} < ${SYNC_VENTANA_MS} THEN ${loginAttempts.windowStart} ELSE ${ahora} END`,
+          blockedUntil: sql`CASE WHEN (${ahora} - ${loginAttempts.windowStart} < ${SYNC_VENTANA_MS} AND ${loginAttempts.failedCount} + 1 > ${SYNC_LIMITE}) THEN ${ahora + SYNC_BLOQUEO_MS} ELSE NULL END`,
+          updatedAt: ahora,
+        },
       });
     return bloquea
       ? { bloqueado: true, reintentarEnSeg: Math.ceil(SYNC_BLOQUEO_MS / 1000) }

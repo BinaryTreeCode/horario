@@ -3,9 +3,12 @@ import { eq } from 'drizzle-orm';
 import { db, isDbConfigured } from '../../server/db';
 import { users } from '../../server/schema';
 import { hashPassword, verifyPassword, createSession, destroySession, getSessionUser, sessionCookieOptions, SESSION_COOKIE } from '../../server/auth';
-import { consultarLimite, registrarFallo, limpiarFallos, claveLogin, claveRegistro, ipDeRequest } from '../../server/rateLimit';
+import { consultarLimite, registrarFallo, limpiarFallos, claveLogin, claveLoginIp, claveRegistro, ipDeRequest } from '../../server/rateLimit';
 
 export const prerender = false;
+
+// Hash dummy con formato idéntico a scrypt (16B salt : 64B hash en hex) para evitar oráculo de timing si el email no existe
+const DUMMY_HASH = '0123456789abcdef0123456789abcdef:' + '0'.repeat(128);
 
 /**
  * POST /api/auth?op=register  body: { email, password, name? }
@@ -102,6 +105,17 @@ export const POST: APIRoute = async ({ url, cookies, request }) => {
       const rows = await db.select().from(users).where(eq(users.email, email)).limit(1);
       const user = rows[0];
 
+      // Rate limiting por IP: frena password spraying contra muchas cuentas
+      const ip = ipDeRequest(request);
+      const keyIp = claveLoginIp(ip);
+      const limiteIp = await consultarLimite(keyIp);
+      if (limiteIp.bloqueado) {
+        return demasiadosIntentos(
+          'Demasiados intentos desde esta red. Espera unos minutos antes de reintentar.',
+          limiteIp.reintentarEnSeg,
+        );
+      }
+
       // Rate limiting por cuenta: frena el credential stuffing. Va ANTES de
       // verificar la contraseña para que un atacante no pueda usar intentos
       // gratis como oráculo de fuerza bruta.
@@ -114,11 +128,14 @@ export const POST: APIRoute = async ({ url, cookies, request }) => {
         );
       }
 
-      const ok = user ? await verifyPassword(password, user.passwordHash) : false;
+      // Anti-timing attack: si el usuario no existe, ejecuta scrypt sobre DUMMY_HASH para tardar el mismo tiempo
+      const hashParaVerificar = user ? user.passwordHash : DUMMY_HASH;
+      const ok = await verifyPassword(password, hashParaVerificar).catch(() => false);
       if (!user || !ok) {
         // Un único camino para "no existe" y "contraseña mala": ni el mensaje
         // ni el status permiten distinguir un email registrado de uno que no.
         await registrarFallo(keyLogin);
+        await registrarFallo(keyIp, 50); // Límite amplio por IP para tolerar NATs/redes compartidas
         return json({ error: 'Email o contraseña incorrectos' }, 401);
       }
 

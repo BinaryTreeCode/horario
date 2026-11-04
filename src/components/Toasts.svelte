@@ -96,16 +96,16 @@
     animation: toast-in 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2);
     border: 1px solid rgb(var(--borde-blanco) / 0.14);
   }
-  .toast-success { background: rgba(46, 84, 52, 0.92); color: #eafbee; }
-  .toast-error   { background: rgba(96, 34, 34, 0.94); color: #fdeaea; }
-  .toast-info    { background: rgba(38, 50, 56, 0.94); color: #eceff1; }
+  .toast-success { background: rgb(var(--verde-fuerte) / 0.94); color: rgb(var(--sobre-color)); }
+  .toast-error   { background: rgb(var(--rojo-solido) / 0.94); color: rgb(var(--sobre-color)); }
+  .toast-info    { background: rgb(var(--gris-solido) / 0.94); color: rgb(var(--sobre-color)); }
   /* El icono viene de lucide (componente hijo): Svelte no le pone el hash de
      ambito, asi que la parte que lo selecciona debe ser :global o la regla
      nunca casa. Sin esto los tres tonos de aviso salian del color heredado. */
   :global(.toast-icon) { flex-shrink: 0; }
-  .toast-success :global(.toast-icon) { color: #9ae6b4; }
-  .toast-error :global(.toast-icon) { color: #f9b4b4; }
-  .toast-info :global(.toast-icon) { color: #b0bec5; }
+  .toast-success :global(.toast-icon) { color: rgb(var(--sobre-color)); }
+  .toast-error :global(.toast-icon) { color: rgb(var(--sobre-color)); }
+  .toast-info :global(.toast-icon) { color: rgb(var(--sobre-color)); }
   .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-line; }
   .toast-close {
     flex-shrink: 0;
@@ -119,7 +119,7 @@
     color: inherit;
     cursor: pointer;
   }
-  .toast-close:hover { background: rgba(255, 255, 255, 0.22); }
+  .toast-close:hover { background: rgb(var(--sobre-color) / 0.22); }
   @keyframes toast-in {
     from { opacity: 0; transform: translateY(-12px) scale(0.96); }
     to   { opacity: 1; transform: translateY(0) scale(1); }

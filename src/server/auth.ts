@@ -70,8 +70,9 @@ export async function getSessionUser(cookies: {
       return null;
     }
     return { id: row.userId, email: row.email, name: row.name };
-  } catch {
-    return null;
+  } catch (err) {
+    console.error('[auth/getSessionUser]', err);
+    throw err;
   }
 }
 
