@@ -419,13 +419,13 @@ export const POST: APIRoute = async ({ cookies, request }) => {
 // ── GET /api/sync?since=<ms> — pull incremental ──────────────────────────────
 
 export const GET: APIRoute = async ({ cookies, url }) => {
-  const user = await getSessionUser(cookies);
-  if (!user) return json({ error: 'No autenticado' }, 401);
-
-  const since = Math.max(0, Number(url.searchParams.get('since') ?? '0') || 0);
-  const PULL_LIMIT = 2000;
-
   try {
+    const user = await getSessionUser(cookies);
+    if (!user) return json({ error: 'No autenticado' }, 401);
+
+    const since = Math.max(0, Number(url.searchParams.get('since') ?? '0') || 0);
+    const PULL_LIMIT = 2000;
+
     const [cats, acts, setts, ovrs] = await Promise.all([
       db.select().from(categories).where(and(eq(categories.userId, user.id), gt(categories.updatedAt, since))).limit(PULL_LIMIT),
       db.select().from(activities).where(and(eq(activities.userId, user.id), gt(activities.updatedAt, since))).limit(PULL_LIMIT),

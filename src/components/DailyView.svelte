@@ -966,8 +966,8 @@
       {/if}
       {#key day}
       {#each layoutActivities as activity (activity.id)}
-        {@const totalSteps = activity.steps?.length || 0}
-        {@const doneSteps = activity.steps?.filter(s => s.completed).length || 0}
+        {@const totalSteps = Array.isArray(activity.steps) ? activity.steps.length : 0}
+        {@const doneSteps = Array.isArray(activity.steps) ? activity.steps.filter(s => s.completed).length : 0}
         <!-- Sin role="button" NI tabindex: la tarjeta contiene botones reales
              (miniatura, editar) y axe lo marca como nested-interactive. La
              accesibilidad la llevan esos botones (editar con aria-label) y el

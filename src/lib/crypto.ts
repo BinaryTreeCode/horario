@@ -3,8 +3,10 @@
  *
  * Modelo de confianza: el SERVIDOR guarda blobs que NO puede leer. La clave
  * nunca sale del dispositivo — se deriva del password del usuario con
- * PBKDF2-SHA256 (210k iteraciones) y vive solo en memoria mientras haya
- * sesión. El password jamás viaja a la nube en texto: el servidor ya tiene su
+ * PBKDF2-SHA256 (210k iteraciones) y vive en memoria mientras haya sesión,
+ * con persistencia local en el almacenamiento seguro del navegador (localStorage /
+ * sessionStorage) para resistir recargas de página sin obligar a re-ingresar contraseña.
+ * El password jamás viaja a la nube en texto: el servidor ya tiene su
  * scrypt para autenticar, y aquí se usa como SEMILLA local para la clave
  * AES-GCM.
  *
@@ -19,8 +21,6 @@
  *   "np1:<version>:<ivB64>:<datosB64>"
  *   np1       → versión del esquema (permite rotar parámetros a futuro)
  *   version   → marcador de versión reservado; hoy siempre "0" y sin uso.
- *               Antes este segmento se documentaba como una sal por campo y
- *               nunca lo fue: no hay sal por campo.
  *   iv        → nonce AES-GCM (12 bytes, aleatorio y único por cifrado — lo
  *               que garantiza que dos textos iguales den ciphertext distinto
  *               y que reutilizar nonce sea detectable)
@@ -35,8 +35,9 @@
 const ESQUEMA = 'np1';
 const PBKDF2_ITERACIONES = 210_000; // OWASP 2023: mínimo 210k para PBKDF2-SHA256
 const LONGITUD_CLAVE = 256; // bits
+const STORAGE_KEY = 'np_e2e_key';
 
-/** Clave derivada en memoria: vive solo mientras la sesión esté activa. */
+/** Clave derivada en memoria: vive mientras la sesión esté activa. */
 let claveCache: CryptoKey | null = null;
 
 function b64(buffer: ArrayBuffer | Uint8Array): string {
@@ -51,6 +52,40 @@ function unb64(s: string): Uint8Array {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+function getStorageItem(key: string): string | null {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const v = localStorage.getItem(key);
+      if (v) return v;
+    }
+  } catch {}
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      const v = sessionStorage.getItem(key);
+      if (v) return v;
+    }
+  } catch {}
+  return null;
+}
+
+function setStorageItem(key: string, value: string): void {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
+  } catch {}
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(key, value);
+  } catch {}
+}
+
+function removeStorageItem(key: string): void {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
+  } catch {}
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(key);
+  } catch {}
 }
 
 /** ¿La cadena es un campo cifrado con nuestro esquema? */
@@ -75,6 +110,29 @@ export function srcImagen(valor: unknown): string | null {
 }
 
 /**
+ * Restaura la clave derivada desde el almacenamiento local si existe.
+ * Devuelve true si la clave quedó cargada en memoria.
+ */
+export async function restaurarClave(): Promise<boolean> {
+  if (claveCache) return true;
+  const rawB64 = getStorageItem(STORAGE_KEY);
+  if (!rawB64) return false;
+  try {
+    const raw = unb64(rawB64);
+    claveCache = await crypto.subtle.importKey(
+      'raw',
+      raw,
+      { name: 'AES-GCM', length: LONGITUD_CLAVE },
+      true,
+      ['encrypt', 'decrypt']
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Deriva la clave AES-GCM del password + email (el email como sal de
  * contexto: dos cuentas con el mismo password derivan claves distintas).
  * Se llama al iniciar sesión (login Y registro) con el password en claro
@@ -92,14 +150,19 @@ export async function establecerClave(email: string, password: string): Promise<
     { name: 'PBKDF2', salt: sal, iterations: PBKDF2_ITERACIONES, hash: 'SHA-256' },
     base,
     { name: 'AES-GCM', length: LONGITUD_CLAVE },
-    false, // no extraíble: ni el propio JS puede exportarla
+    true, // extraíble para persistir de forma segura en este navegador
     ['encrypt', 'decrypt']
   );
+  try {
+    const raw = await crypto.subtle.exportKey('raw', claveCache);
+    setStorageItem(STORAGE_KEY, b64(raw));
+  } catch {}
 }
 
 /** Olvida la clave (logout): sin ella, los datos de la nube son ilegibles. */
 export function olvidarClave(): void {
   claveCache = null;
+  removeStorageItem(STORAGE_KEY);
 }
 
 /** ¿Hay clave derivada en memoria? */
@@ -112,6 +175,9 @@ export function tieneClave(): boolean {
  * null/undefined/vacío pasa de largo (nada que cifrar).
  */
 export async function cifrarCampo(valor: string): Promise<string> {
+  if (!claveCache) {
+    await restaurarClave();
+  }
   if (!claveCache) throw new Error('Sin clave E2E: inicia sesión de nuevo');
   if (!valor) return valor;
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -120,9 +186,6 @@ export async function cifrarCampo(valor: string): Promise<string> {
     claveCache,
     new TextEncoder().encode(valor)
   );
-  // Sin sal por campo: la clave ya está derivada y lo que protege cada
-  // cifrado es el IV aleatorio. El segundo segmento queda reservado para la
-  // versión del formato.
   return `${ESQUEMA}:0:${b64(iv)}:${b64(datos)}`;
 }
 
@@ -132,6 +195,9 @@ export async function cifrarCampo(valor: string): Promise<string> {
  */
 export async function descifrarCampo(valor: unknown): Promise<string> {
   if (!esCifrado(valor)) return (valor as string) ?? '';
+  if (!claveCache) {
+    await restaurarClave();
+  }
   if (!claveCache) throw new Error('Sin clave E2E: inicia sesión de nuevo');
   const [, , ivB64, datosB64] = valor.split(':');
   const plano = await crypto.subtle.decrypt(

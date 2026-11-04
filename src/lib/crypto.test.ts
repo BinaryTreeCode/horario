@@ -97,4 +97,32 @@ describe('crypto E2E (PBKDF2 + AES-GCM)', () => {
     const cifrado = await cifrarCampo(steps);
     expect(JSON.parse(await descifrarCampo(cifrado))).toEqual(JSON.parse(steps));
   });
+
+  test('restaurarClave recupera la clave guardada en almacenamiento local', async () => {
+    // Simula almacenamiento local
+    const mockStorage: Record<string, string> = {};
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => mockStorage[k] ?? null,
+      setItem: (k: string, v: string) => { mockStorage[k] = v; },
+      removeItem: (k: string) => { delete mockStorage[k]; },
+    };
+
+    await establecerClave('a@x.com', 'password-seguro');
+    const texto = 'información confidencial';
+    const cifrado = await cifrarCampo(texto);
+
+    // Simula reinicio de memoria (recarga de página)
+    (globalThis as any).claveCache = null;
+    const { restaurarClave } = await import('./crypto');
+
+    // Sin memoria pero con storage
+    const restaurado = await restaurarClave();
+    expect(restaurado).toBe(true);
+    expect(await descifrarCampo(cifrado)).toBe(texto);
+
+    // Tras olvidarClave, storage queda limpio
+    olvidarClave();
+    expect(mockStorage['np_e2e_key']).toBeUndefined();
+    delete (globalThis as any).localStorage;
+  });
 });

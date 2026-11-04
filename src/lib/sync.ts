@@ -1,19 +1,21 @@
 import { db, now } from './db';
 import type { Table } from 'dexie';
 import type { Activity, Category, AppSettings, DayOverride, SyncState, SyncStatus } from './types';
-import { cifrarCampo, descifrarCampo, esCifrado, tieneClave } from './crypto';
+import { cifrarCampo, descifrarCampo, esCifrado, tieneClave, restaurarClave, olvidarClave } from './crypto';
 import { esDataUrlImagen, subirABlob } from './routineImages';
 
 // ── Cifrado E2E de campos sensibles ─────────────────────────────────────
 // description, steps e image se cifran en el dispositivo (AES-GCM, clave
 // derivada del password con PBKDF2 — ver crypto.ts) ANTES del push. La nube
 // guarda blobs "np1:..." que no puede leer. En el pull se descifran para la
-// UI. Sin clave en memoria (sesión restaurada por cookie tras recargar),
-// los blobs se dejan como están: la UI muestra el marcador y el próximo
-// login con password los vuelve legibles.
+// UI. Si la clave no estuviera cargada en memoria, se intenta restaurar desde
+// el almacenamiento seguro local (localStorage/sessionStorage); y si aún no
+// hay clave, los datos existentes no se destruyen: se conserva lo que ya
+// estaba legible o el blob intacto para descifrar tras el próximo login.
 
 /** Campos de una actividad que viajan cifrados. */
 async function cifrarActividad(a: Activity): Promise<Activity> {
+  if (!tieneClave()) await restaurarClave();
   if (!tieneClave()) return a;
   try {
     return {
@@ -28,38 +30,71 @@ async function cifrarActividad(a: Activity): Promise<Activity> {
 }
 
 /** Descifra los campos E2E de una actividad entrante (o los deja si son legacy). */
-export async function descifrarActividad(a: any): Promise<Activity> {
-  if (!esCifrado(a.description) && !esCifrado(a.image) && !esCifrado(a.steps)) return a as Activity;
+export async function descifrarActividad(a: any, localExistente?: Activity): Promise<Activity> {
+  if (!esCifrado(a.description) && !esCifrado(a.image) && !esCifrado(a.steps)) {
+    let steps = a.steps;
+    if (typeof steps === 'string' && steps.startsWith('[')) {
+      try { steps = JSON.parse(steps); } catch { steps = []; }
+    } else if (!Array.isArray(steps)) {
+      steps = [];
+    }
+    return { ...a, steps } as Activity;
+  }
+
   if (!tieneClave()) {
-    // Sin clave: reemplazar blobs por marcador neutro (la UI no debe mostrar "np1:0:...")
-    //
-    // EXCEPTO la imagen: aquí `null` se guardaría local con fecha fresca y el
-    // siguiente push lo subiría, borrando la foto de la nube para TODOS los
-    // dispositivos. Se conserva el ciphertext: quien la pinta usa srcImagen()
-    // (devuelve null y no dibuja un icono roto) y, al entrar con password, el
-    // próximo pull la descifra igual. Borrar para no tener que mirarla es
-    // exactamente el fallo que reporta la persona: "las fotos no bajan".
+    await restaurarClave();
+  }
+
+  if (!tieneClave()) {
+    // Sin clave: no destruir datos existentes.
+    // Si tenemos una versión local con texto descifrado, CONSERVARLA.
+    // Para la imagen, conservar el ciphertext para no perderlo.
+    // Para steps, si la versión local tiene steps válidos, conservarlos.
+    const stepsPreservados = Array.isArray(localExistente?.steps) && localExistente.steps.length > 0
+      ? localExistente.steps
+      : (Array.isArray(a.steps) ? a.steps : []);
+    const descPreservada = localExistente?.description && !esCifrado(localExistente.description)
+      ? localExistente.description
+      : (esCifrado(a.description) ? '🔒 Contenido cifrado — inicia sesión de nuevo' : a.description);
+
     return {
       ...a,
-      description: esCifrado(a.description) ? '🔒 Contenido cifrado — inicia sesión de nuevo' : a.description,
+      description: descPreservada,
       image: a.image ?? null,
-      steps: esCifrado(a.steps) ? [] : a.steps,
+      steps: stepsPreservados,
     } as Activity;
   }
+
   try {
+    let steps = a.steps;
+    if (esCifrado(a.steps)) {
+      const planoSteps = await descifrarCampo(a.steps);
+      try { steps = JSON.parse(planoSteps); } catch { steps = []; }
+    } else if (typeof steps === 'string' && steps.startsWith('[')) {
+      try { steps = JSON.parse(steps); } catch { steps = []; }
+    } else if (!Array.isArray(steps)) {
+      steps = [];
+    }
+
     return {
       ...a,
       description: esCifrado(a.description) ? await descifrarCampo(a.description) : a.description,
       image: esCifrado(a.image) ? await descifrarCampo(a.image) : a.image,
-      steps: esCifrado(a.steps) ? JSON.parse(await descifrarCampo(a.steps)) : a.steps,
+      steps,
     } as Activity;
   } catch {
-    return a as Activity; // blob corrupto/otra clave: no romper el pull
+    return {
+      ...a,
+      description: localExistente?.description ?? a.description,
+      image: a.image ?? null,
+      steps: Array.isArray(localExistente?.steps) ? localExistente.steps : [],
+    } as Activity;
   }
 }
 
 /** Cifra los steps de las actividades dentro de un dayOverride. */
 async function cifrarOverride(o: DayOverride): Promise<DayOverride> {
+  if (!tieneClave()) await restaurarClave();
   if (!tieneClave() || !o.activities?.length) return o;
   try {
     return {
@@ -72,10 +107,14 @@ async function cifrarOverride(o: DayOverride): Promise<DayOverride> {
 }
 
 /** Descifra los steps de las actividades de un dayOverride entrante. */
-async function descifrarOverride(o: any): Promise<DayOverride> {
+async function descifrarOverride(o: any, localExistente?: DayOverride): Promise<DayOverride> {
   if (!o?.activities?.length) return o as DayOverride;
   try {
-    return { ...o, activities: await Promise.all(o.activities.map((a: any) => descifrarActividad(a))) } as DayOverride;
+    const mapaLocales = new Map((localExistente?.activities ?? []).map(a => [a.id, a]));
+    return {
+      ...o,
+      activities: await Promise.all(o.activities.map((a: any) => descifrarActividad(a, mapaLocales.get(a.id)))),
+    } as DayOverride;
   } catch {
     return o as DayOverride;
   }
@@ -640,9 +679,9 @@ interface PullResponse {
   serverTime: number; hasMore: boolean;
 }
 
-export async function pullChanges(): Promise<{ applied: number }> {
+export async function pullChanges(full = false): Promise<{ applied: number }> {
   const state = (await db.syncState.get('1')) ?? { id: '1' };
-  const since = state.lastServerPullAt ?? 0;
+  const since = full ? 0 : (state.lastServerPullAt ?? 0);
 
   setStatus('syncing');
   // Freno de hooks: todo lo que se escriba abajo (incluido el syncState) es
@@ -662,6 +701,19 @@ export async function pullChanges(): Promise<{ applied: number }> {
     const ahora = Date.now();
 
     await db.transaction('rw', db.activities, db.categories, db.settings, db.dayOverrides, db.syncState, async () => {
+      // Si la nube nos devuelve actividades reales, limpiamos las actividades semilla
+      // por defecto (updatedAt === 0) que el usuario nunca tocó, para que no
+      // queden duplicadas o estorben su horario real.
+      if (res.activities.length > 0) {
+        const remoteIds = new Set(res.activities.map(a => a.id));
+        const locales = await db.activities.toArray();
+        for (const loc of locales) {
+          if (esSemilla(loc) && !remoteIds.has(loc.id)) {
+            await db.activities.delete(loc.id);
+          }
+        }
+      }
+
       for (const c of res.categories) {
         const local = await db.categories.get(c.id);
         if (remotaGana(local, c, sesgo)) {
@@ -672,7 +724,7 @@ export async function pullChanges(): Promise<{ applied: number }> {
       for (const a of res.activities) {
         const local = await db.activities.get(a.id);
         if (remotaGana(local, a, sesgo)) {
-          const aPlano = await descifrarActividad(a);
+          const aPlano = await descifrarActividad(a, local);
           await db.activities.put(acotarFechaRemota({ ...aPlano } as Activity, ahora, sesgo));
           applied++;
         }
@@ -687,11 +739,23 @@ export async function pullChanges(): Promise<{ applied: number }> {
       for (const o of res.dayOverrides) {
         const local = await db.dayOverrides.get(o.day);
         if (remotaGana(local, o, sesgo)) {
-          const oPlano = await descifrarOverride(o);
+          const oPlano = await descifrarOverride(o, local);
           await db.dayOverrides.put(acotarFechaRemota({ ...oPlano } as DayOverride, ahora, sesgo));
           applied++;
         }
       }
+
+      // El cursor de push debe cubrir lo que acabamos de recibir para que el push
+      // no considere erróneamente que las filas recién bajadas son ediciones locales.
+      const maxPulled = Math.max(
+        0,
+        ...res.activities.map(a => a.updatedAt || 0),
+        ...res.categories.map(c => c.updatedAt || 0),
+        ...res.settings.map(s => s.updatedAt || 0),
+        ...res.dayOverrides.map(o => o.updatedAt || 0),
+      );
+      const nuevoPushAt = Math.max(state.lastPushAt ?? 0, Math.min(ahora, maxPulled - sesgo));
+
       // El cursor va con holgura hacia atrás (cursorPull): solapar lecturas
       // permite que un cambio remoto escrito justo en la frontera llegue en el
       // siguiente pull en vez de perderse entre los relojes de los dos equipos.
@@ -699,6 +763,7 @@ export async function pullChanges(): Promise<{ applied: number }> {
         ...state, id: '1',
         lastServerPullAt: cursorPull(res.serverTime),
         lastPullAt: Date.now(),
+        lastPushAt: nuevoPushAt,
         sesgoServidor: sesgo,
       });
     });
@@ -769,6 +834,7 @@ export async function syncNow(full = false): Promise<void> {
  */
 export async function arrancarSync(): Promise<void> {
   if (typeof window === 'undefined') return;
+  await restaurarClave();
   let haySesion = false;
   try {
     haySesion = await isLoggedIn();
@@ -855,10 +921,11 @@ export async function subirAhora(): Promise<ResultadoSubida> {
  */
 export async function bajarAhora(): Promise<ResultadoBajada> {
   if (!(await haySesionOperativa())) throw new Error(SIN_SESION);
+  await restaurarClave();
   // pullChanges cuenta 'applied' y este contrato pide 'aplicados': sin el mapa,
   // la UI recibía undefined y el toast decía SIEMPRE "ya tenías todo", que era
   // una mentira incluso bajando de verdad.
-  const { applied } = await pullChanges();
+  const { applied } = await pullChanges(true);
   return { aplicados: applied };
 }
 
@@ -919,8 +986,9 @@ export function installSyncListeners() {
  */
 export async function initialSyncAfterLogin(): Promise<void> {
   sesionActiva = true;
+  await restaurarClave();
   setStatus('syncing');
-  await pullChanges();
+  await pullChanges(true);
   if (!pushPaused) await pushChanges(true);
 }
 
@@ -929,9 +997,11 @@ export async function initialSyncAfterLogin(): Promise<void> {
  *  subir (la decisión fue sobre esos datos, no sobre la sesión). */
 export function resetSyncAfterLogout(): void {
   sesionActiva = false;
+  olvidarClave();
   status = 'local';
   pendingCount = 0;
   lastError = undefined;
   persistState();
+  db.syncState.put({ id: '1', lastPushAt: 0, lastServerPullAt: 0, pendingPushPaused: false }).catch(() => {});
   for (const fn of listeners) fn(status, { pending: 0, sesion: sesionActiva });
 }

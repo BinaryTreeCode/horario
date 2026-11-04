@@ -291,7 +291,7 @@
       startTime = initialData.startTime;
       endTime = initialData.endTime;
       daysOfWeek = [...(initialData.daysOfWeek || [])];
-      steps = initialData.steps ? [...initialData.steps] : [];
+      steps = Array.isArray(initialData.steps) ? [...initialData.steps] : [];
       image = initialData.image || null;
     } else if (id !== null) {
       const activity = await db.activities.get(id);
@@ -306,7 +306,7 @@
         startTime = sembrarSinPisar(startTime, foto.startTime, activity.startTime);
         endTime = sembrarSinPisar(endTime, foto.endTime, activity.endTime);
         daysOfWeek = sembrarSinPisar(daysOfWeek, foto.daysOfWeek, [...activity.daysOfWeek]);
-        steps = sembrarSinPisar(steps, foto.steps, activity.steps ? [...activity.steps] : []);
+        steps = sembrarSinPisar(steps, foto.steps, Array.isArray(activity.steps) ? [...activity.steps] : []);
         image = sembrarSinPisar(image, foto.image, activity.image || null);
       }
     } else {

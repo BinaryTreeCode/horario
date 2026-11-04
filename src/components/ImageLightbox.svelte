@@ -15,7 +15,7 @@
   let { activity, onClose }: Props = $props();
 
   let stepsOpen = $state(true);
-  const hasSteps = $derived(!!activity.steps && activity.steps.length > 0);
+  const hasSteps = $derived(Array.isArray(activity.steps) && activity.steps.length > 0);
 
   let lightboxEl = $state<HTMLElement | null>(null);
   let closeBtnEl = $state<HTMLElement | null>(null);

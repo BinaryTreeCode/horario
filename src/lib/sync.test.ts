@@ -396,6 +396,40 @@ describe('descifrarActividad sin clave: la foto no se pierde', () => {
     await olvidarClave();
   });
 
+  it('sin clave, conserva la descripción y pasos locales ya descifrados en vez de pisarlos', async () => {
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    const descCifrada = await cifrarCampo('Descripción secreta');
+    const stepsCifrados = await cifrarCampo(JSON.stringify([{ id: 's1', title: 'Paso 1', completed: true }]));
+    await olvidarClave();
+
+    const localPrevia: any = {
+      id: 'a1',
+      name: 'Rutina',
+      description: 'Descripción secreta',
+      steps: [{ id: 's1', title: 'Paso 1', completed: true }],
+      updatedAt: 100,
+    };
+    const remota = {
+      id: 'a1',
+      name: 'Rutina',
+      description: descCifrada,
+      steps: stepsCifrados,
+      updatedAt: 200,
+    };
+
+    const result = await descifrarActividad(remota, localPrevia);
+    expect(result.description).toBe('Descripción secreta');
+    expect(result.steps).toEqual([{ id: 's1', title: 'Paso 1', completed: true }]);
+  });
+
+  it('steps devuelto por descifrarActividad siempre es un Array (nunca rompe filter ni forEach)', async () => {
+    await olvidarClave();
+    const r1 = await descifrarActividad({ id: 'a1', steps: null });
+    expect(Array.isArray(r1.steps)).toBe(true);
+    const r2 = await descifrarActividad({ id: 'a2', steps: undefined });
+    expect(Array.isArray(r2.steps)).toBe(true);
+  });
+
   it('una foto plana (URL de Blob) pasa intacta por el pull', async () => {
     await olvidarClave();
     const result = await descifrarActividad({ id: 'a2', image: url, description: null, steps: null });

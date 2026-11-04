@@ -1384,12 +1384,12 @@
                   onEditActivity(activity.id!);
                 }
               }}
-              aria-label="{activity.name}, {format12h(activity.startTime)} — {format12h(activity.endTime)}{activity.steps?.length ? `, ${activity.steps.length}` : ''}. {$t('dayView.keyboardHint')}"
+              aria-label="{activity.name}, {format12h(activity.startTime)} — {format12h(activity.endTime)}{Array.isArray(activity.steps) && activity.steps.length ? `, ${activity.steps.length}` : ''}. {$t('dayView.keyboardHint')}"
               title={activity.name}
             >
               <div class="activity-title">
                 <span>{activity.name}</span>
-                {#if activity.steps && activity.steps.length > 0}
+                {#if Array.isArray(activity.steps) && activity.steps.length > 0}
                   <span class="grid-steps-icon">
                     <ListChecks size={10} />
                   </span>
