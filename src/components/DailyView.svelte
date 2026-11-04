@@ -14,6 +14,7 @@
   import { formatHours } from '../lib/timeStats';
   import { t, tNow } from '../lib/i18n';
   import { pushUndo, cloneAct } from '../lib/undo';
+  import { srcImagen } from '../lib/crypto';
 
   interface Props {
     day: number;
@@ -383,26 +384,30 @@
     // Get current master activities for this day
     const masterDayActs = activities.filter(a => a.daysOfWeek.includes(day));
 
-    // Remove this day from all master activities that had it
-    for (const act of masterDayActs) {
-      const newDays = act.daysOfWeek.filter(d => d !== day);
-      if (newDays.length === 0) {
-        await db.activities.update(act.id!, { deletedAt: Date.now(), updatedAt: Date.now() });
-      } else {
-        await db.activities.update(act.id!, { daysOfWeek: newDays, updatedAt: Date.now() });
+    const stamp = Date.now();
+    await db.transaction('rw', db.activities, db.dayOverrides, async () => {
+      // Remove this day from all master activities that had it
+      for (const act of masterDayActs) {
+        const newDays = act.daysOfWeek.filter(d => d !== day);
+        if (newDays.length === 0) {
+          await db.activities.update(act.id!, { deletedAt: stamp, updatedAt: stamp });
+        } else {
+          await db.activities.update(act.id!, { daysOfWeek: newDays, updatedAt: stamp });
+        }
       }
-    }
 
-    // Add override activities as new master activities assigned to this day
-    for (const act of overrideActs) {
-      const { id: _, ...clone } = act;
-      clone.daysOfWeek = [day];
-      clone.id = newId(); // sin id, add() falla con DataError (PK 'id' sin autoincrement)
-      await db.activities.add(clone);
-    }
+      // Add override activities as new master activities assigned to this day
+      for (const act of overrideActs) {
+        const { id: _, ...clone } = act;
+        clone.daysOfWeek = [day];
+        clone.id = newId(); // sin id, add() falla con DataError (PK 'id' sin autoincrement)
+        clone.updatedAt = stamp;
+        await db.activities.add(clone);
+      }
 
-    // Remove the override since it's now the master
-    await db.dayOverrides.delete(day);
+      // Remove the override since it's now the master
+      await db.dayOverrides.delete(day);
+    });
     toastOk(tNow('toast.appliedWeek'));
   }
 
@@ -983,14 +988,14 @@
           <div class="activity-content" class:compact={activity.durationMins <= 20}>
             <div class="activity-title-group">
               <span class="activity-name">{activity.name}</span>
-              {#if activity.image}
+              {#if srcImagen(activity.image)}
                 <button
                   type="button"
                   class="activity-image-thumb"
                   aria-label={$t('dayView.viewImage', { name: activity.name })}
                   onclick={(e) => { e.stopPropagation(); viewingImageActivity = activity; }}
                 >
-                  <img src={activity.image} alt="" />
+                  <img src={srcImagen(activity.image)} alt="" />
                 </button>
               {/if}
               {#if totalSteps > 0 && activity.durationMins > 20}
@@ -1063,7 +1068,7 @@
       <button onclick={duplicateActivity}>
         <Copy size={16} /> {$t('menu.duplicate')}
       </button>
-      {#if contextMenuActivity?.image}
+      {#if srcImagen(contextMenuActivity?.image)}
         <button onclick={() => { viewingImageActivity = contextMenuActivity; }}>
           <ImageIcon size={16} /> {$t('menu.viewImage')}
         </button>

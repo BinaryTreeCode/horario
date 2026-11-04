@@ -10,6 +10,7 @@
   import { sembrarSinPisar } from '../lib/activitySeed';
   import { comprimirImagen, subirABlob, DIM_LOCAL, DIM_BLOB, MAX_BYTES_ENTRADA } from '../lib/routineImages';
   import { isLoggedIn } from '../lib/sync';
+  import { srcImagen } from '../lib/crypto';
 
   interface Props {
     id: string | null;
@@ -714,7 +715,7 @@
             <ImageIcon size={18} />
             <span>{$t('modal.routineImage')}</span>
           </div>
-          {#if image}
+          {#if srcImagen(image)}
             <div class="image-header-actions">
               <button type="button" class="image-btn" onclick={openImagePreview} title={$t('modal.viewImageTitle')}>
                 {$t('modal.view')}
@@ -726,9 +727,9 @@
           {/if}
         </div>
 
-        {#if image}
+        {#if srcImagen(image)}
           <button type="button" class="image-preview" onclick={openImagePreview} title={$t('lightbox.viewFull')}>
-            <img src={image} alt={$t('modal.routineImage')} />
+            <img src={srcImagen(image)} alt={$t('modal.routineImage')} />
           </button>
         {:else}
           <div class="image-actions">

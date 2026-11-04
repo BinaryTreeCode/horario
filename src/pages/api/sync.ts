@@ -40,6 +40,13 @@ function isTime(v: unknown): v is string {
   return typeof v === 'string' && TIME_RE.test(v);
 }
 
+const MAX_FUTURO_MS = 5 * 60 * 1000; // 5 minutos de tolerancia para desfase de reloj
+
+function normTimestamp(n: unknown, fallback: number): number {
+  const num = typeof n === 'number' && Number.isSafeInteger(n) && n > 0 ? n : fallback;
+  return Math.min(num, Date.now() + MAX_FUTURO_MS);
+}
+
 function normNumber(n: unknown, fallback: number): number {
   return typeof n === 'number' && Number.isFinite(n) ? n : fallback;
 }
@@ -51,14 +58,14 @@ function normActivity(a: any): {
   updatedAt: number; deletedAt: number | null;
 } | null {
   if (typeof a?.id !== 'string' || !a.id || a.id.length > 64) return null;
-  const updatedAt = normNumber(a.updatedAt, Date.now());
+  const updatedAt = normTimestamp(a.updatedAt, Date.now());
   // Tombstones (deleted) pueden venir mínimos; los vivos requieren campos completos
   if (a.deletedAt) {
     return {
       id: a.id.slice(0, 64), categoryId: String(a.categoryId ?? 'rutina').slice(0, 64),
-      name: String(a.name ?? '').slice(0, 255), description: null, image: typeof a.image === 'string' ? a.image.slice(0, 3_000_000) : null,
+      name: String(a.name ?? '').slice(0, 255), description: null, image: null,
       startTime: '00:00', endTime: '00:00', daysOfWeek: [], steps: null,
-      updatedAt, deletedAt: normNumber(a.deletedAt, updatedAt),
+      updatedAt, deletedAt: normTimestamp(a.deletedAt, updatedAt),
     };
   }
   if (typeof a.name !== 'string' || !a.name.trim()) return null;
@@ -98,9 +105,9 @@ function normCategory(c: any) {
     id: c.id.slice(0, 64),
     label: c.label.trim().slice(0, 100),
     color: typeof c.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c.color) ? c.color : '#999999',
-    order: Number.isFinite(c.order) ? Math.trunc(c.order) : 0,
-    updatedAt: normNumber(c.updatedAt, Date.now()),
-    deletedAt: c.deletedAt ? normNumber(c.deletedAt, Date.now()) : null,
+    order: Number.isSafeInteger(c.order) ? Math.max(-2147483648, Math.min(2147483647, c.order)) : 0,
+    updatedAt: normTimestamp(c.updatedAt, Date.now()),
+    deletedAt: c.deletedAt ? normTimestamp(c.deletedAt, Date.now()) : null,
   };
 }
 
@@ -109,9 +116,9 @@ function normSetting(s: any) {
   return {
     id: typeof s.id === 'string' ? s.id.slice(0, 64) : s.key.slice(0, 64),
     key: s.key.slice(0, 64),
-    value: s.value ?? null,
-    updatedAt: normNumber(s.updatedAt, Date.now()),
-    deletedAt: s.deletedAt ? normNumber(s.deletedAt, Date.now()) : null,
+    value: s.value !== undefined ? s.value : {},
+    updatedAt: normTimestamp(s.updatedAt, Date.now()),
+    deletedAt: s.deletedAt ? normTimestamp(s.deletedAt, Date.now()) : null,
   };
 }
 
@@ -121,8 +128,8 @@ function normOverride(o: any) {
   return {
     day: o.day,
     activities: acts,
-    updatedAt: normNumber(o.updatedAt, Date.now()),
-    deletedAt: o.deletedAt ? normNumber(o.deletedAt, Date.now()) : null,
+    updatedAt: normTimestamp(o.updatedAt, Date.now()),
+    deletedAt: o.deletedAt ? normTimestamp(o.deletedAt, Date.now()) : null,
   };
 }
 
@@ -156,6 +163,35 @@ const MAX_ACTOS_POR_OVERRIDE = 100;
 function listar(coleccion: unknown, max: number): unknown[] {
   if (!Array.isArray(coleccion)) return [];
   return coleccion.slice(0, max);
+}
+
+/** Una fila que `norm*` rechazó. `k` es la clave del CLIENTE (id, o el día). */
+interface Ignorado { t: Rechazo['t']; k: string }
+
+/**
+ * Normaliza una colección contando lo que la normalización descartó.
+ *
+ * Estas filas no son rechazos del guard LWW ni truncados por límite: nunca
+ * llegaron a existir en la nube. Sin devolverlas, el cliente ve `pushed +
+ * rechazados == enviado` y avanza su cursor por encima de ellas — con el
+ * filtro `>` estricto de "qué va en el siguiente push", fila muerta para
+ * siempre y sin aviso. Es el mismo agujero que ya se cerró para el truncado
+ * (`truncado` + cursorPushTrasLote), abierto un paso más abajo.
+ */
+function normalizar<T>(
+  coleccion: unknown,
+  max: number,
+  tipo: Ignorado['t'],
+  nom: (raw: any) => T | null,
+  claveDe: (raw: any) => string,
+  ignorados: Ignorado[],
+): T[] {
+  return listar(coleccion, max).flatMap(raw => {
+    const fila = nom(raw);
+    if (fila) return [fila];
+    ignorados.push({ t: tipo, k: claveDe(raw) });
+    return [];
+  });
 }
 
 /**
@@ -208,6 +244,13 @@ function acotarActsOverride(acts: any[]): any[] {
  * es el suyo: también se reporta como rechazo y el cliente se re-sella por
  * encima, que es exactamente lo que toca.
  */
+export function clasificarEscritura(enNube: number | undefined, incomingUpdatedAt: number): 'escrita' | 'rechazada' {
+  if (enNube !== undefined && enNube > incomingUpdatedAt) {
+    return 'rechazada';
+  }
+  return 'escrita';
+}
+
 async function repartoDeEscrituras<T>(
   tabla: any,
   /** Columna clave del lote (id, o `day` en overrides — dayOverrides NO tiene columna id). */
@@ -231,8 +274,8 @@ async function repartoDeEscrituras<T>(
   for (const fila of lote) {
     const clave = claveDe(fila);
     const enNube = porClave.get(String(clave));
-    if (enNube !== undefined && enNube >= actualizado(fila)) {
-      rechazos.push({ t: tipo, k: String(clave), u: enNube });
+    if (clasificarEscritura(enNube, actualizado(fila)) === 'rechazada') {
+      rechazos.push({ t: tipo, k: String(clave), u: enNube! });
     } else {
       escritas++;
     }
@@ -274,12 +317,12 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   let pushed = 0;
   let truncado = 0;
   const rechazos: Rechazo[] = [];
+  const ignorados: Ignorado[] = [];
 
   try {
     // Categorías
     truncado += descartadas(body.categories, MAX_FILAS.categories);
-    const cats = listar(body.categories, MAX_FILAS.categories)
-      .flatMap(raw => { const c = normCategory(raw); return c ? [c] : []; });
+    const cats = normalizar(body.categories, MAX_FILAS.categories, 'c', normCategory, r => String(r?.id ?? ''), ignorados);
     for (const c of cats) {
       await db
         .insert(categories)
@@ -298,8 +341,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
 
     // Actividades
     truncado += descartadas(body.activities, MAX_FILAS.activities);
-    const acts = listar(body.activities, MAX_FILAS.activities)
-      .flatMap(raw => { const a = normActivity(raw); return a ? [a] : []; });
+    const acts = normalizar(body.activities, MAX_FILAS.activities, 'a', normActivity, r => String(r?.id ?? ''), ignorados);
     for (const a of acts) {
       await db
         .insert(activities)
@@ -318,8 +360,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
 
     // Settings
     truncado += descartadas(body.settings, MAX_FILAS.settings);
-    const sets = listar(body.settings, MAX_FILAS.settings)
-      .flatMap(raw => { const x = normSetting(raw); return x ? [x] : []; });
+    const sets = normalizar(body.settings, MAX_FILAS.settings, 's', normSetting, r => String(r?.id ?? r?.key ?? ''), ignorados);
     for (const x of sets) {
       await db
         .insert(userSettings)
@@ -334,8 +375,7 @@ export const POST: APIRoute = async ({ cookies, request }) => {
 
     // DayOverrides
     truncado += descartadas(body.dayOverrides, MAX_FILAS.overrides);
-    const ovrs = listar(body.dayOverrides, MAX_FILAS.overrides)
-      .flatMap(raw => { const o = normOverride(raw); return o ? [o] : []; });
+    const ovrs = normalizar(body.dayOverrides, MAX_FILAS.overrides, 'o', normOverride, r => String(r?.day ?? ''), ignorados);
     for (const o of ovrs) {
       const acotadas = acotarActsOverride(o.activities);
       // Se cuenta lo que el horario del día PERDIÓ (actividades), no
@@ -352,13 +392,23 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     }
     pushed += await repartoDeEscrituras(dayOverrides, dayOverrides.day, user.id, ovrs, o => o.day, o => o.updatedAt, 'o', rechazos);
 
-    // 'pushed' son filas ESCRITAS y 'rechazados' las que el guard LWW no dejó
-    // pasar. El cliente necesita las dos: solo con 'pushed' avanzaba su cursor
-    // por encima de filas que la nube nunca vio y las perdía sin avisar.
-    return json({ ok: true, pushed, rechazos, serverTime: now, truncado });
+    // 'pushed' son filas ESCRITAS y 'rechazos'/'rechazados' las que el guard LWW no dejó
+    // pasar. 'ignorados' es lo tercero: filas que llegaron y la normalización
+    // rechazó (no se escribieron, y tampoco las cuenta 'rechazos'). Las tres
+    // cosas las necesita el cliente para no avanzar su cursor por encima de
+    // nada que no haya llegado de verdad a la nube.
+    return json({
+      ok: true,
+      pushed,
+      rechazos,
+      rechazados: rechazos,
+      ignorados,
+      serverTime: now,
+      truncado,
+    });
   } catch (err: any) {
     console.error('[sync/push]', err);
-    return json({ error: 'Error en el push: ' + (err?.message ?? 'desconocido') }, 500);
+    return json({ error: 'Error en el servidor al sincronizar cambios' }, 500);
   }
 };
 
@@ -390,6 +440,6 @@ export const GET: APIRoute = async ({ cookies, url }) => {
     });
   } catch (err: any) {
     console.error('[sync/pull]', err);
-    return json({ error: 'Error en el pull: ' + (err?.message ?? 'desconocido') }, 500);
+    return json({ error: 'Error en el servidor al recuperar cambios' }, 500);
   }
 };

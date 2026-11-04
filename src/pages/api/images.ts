@@ -26,9 +26,10 @@ export const PUT: APIRoute = async ({ cookies, request }) => {
     return json({ error: 'Almacenamiento de imágenes no configurado (BLOB_READ_WRITE_TOKEN)' }, 503);
   }
 
-  const contentType = request.headers.get('content-type') ?? '';
-  if (!contentType.startsWith('image/')) {
-    return json({ error: 'El contenido debe ser una imagen' }, 400);
+  const contentType = (request.headers.get('content-type') ?? '').toLowerCase().split(';')[0].trim();
+  const TIPOS_PERMITIDOS = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+  if (!TIPOS_PERMITIDOS.has(contentType)) {
+    return json({ error: 'Formato de imagen no soportado (se admite JPEG, PNG, WebP o GIF)' }, 400);
   }
 
   const buffer = await request.arrayBuffer();
@@ -40,7 +41,7 @@ export const PUT: APIRoute = async ({ cookies, request }) => {
   }
 
   try {
-    const ext = (contentType.split('/')[1] ?? 'png').split(';')[0].replace(/[^a-z0-9]/gi, '') || 'png';
+    const ext = contentType.split('/')[1] || 'png';
     const pathname = `users/${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const blob = await put(pathname, buffer, {
       contentType,
@@ -50,7 +51,7 @@ export const PUT: APIRoute = async ({ cookies, request }) => {
     return json({ url: blob.url, pathname: blob.pathname });
   } catch (err: any) {
     console.error('[images/put]', err);
-    return json({ error: 'Error al subir la imagen: ' + (err?.message ?? '') }, 500);
+    return json({ error: 'Error al subir la imagen' }, 500);
   }
 };
 

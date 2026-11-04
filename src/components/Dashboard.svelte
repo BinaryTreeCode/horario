@@ -349,31 +349,48 @@
    */
   const MENU_CIERRE_MS = 130;
 
+  /** El botón de nube del header (ancla del menú Datos). */
+  function botonNubeHeader(): HTMLButtonElement | null {
+    // El botón de nube vive dentro de .menu-datos-wrap; si estamos en la vista
+    // Day y el header-actions está oculto, aún así el .menu-datos-wrap estÃ¡
+    // en el DOM (está fuera de header-actions). Pero el rect del botón puede ser
+    // (0,0) si estÃ¡ hidden/display:none: en ese caso el menú se ancla a la esquina.
+    const wrap = document.querySelector<HTMLElement>('.menu-datos-wrap');
+    if (!wrap) return null;
+    const btn = wrap.querySelector<HTMLButtonElement>('.btn-icon');
+    if (!btn) return null;
+    const r = btn.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0 && r.top === 0 && r.left === 0) return null; // no montado/oculto
+    return btn;
+  }
+
   function alternarMenuDatos() {
     if (!menuDatos) {
-      if (menuDatosEl) {
-        // Posicionar bajo el botón ANTES de abrir (el portal manda al body:
-        // sin ancla de layout, las coords deben medirse del botón real).
-        const r = menuDatosEl.querySelector('button')?.getBoundingClientRect();
-        if (r) {
-          const MENU_W = 230;
-          const MENU_H = 200; // altura máx estimada (4 items + pie); solo para el clamp
-          menuDatosPos = {
-            x: Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8)),
-            // Clamp vertical: con el header parcialmente scrolleado el botón
-            // puede quedar cerca/abajo del viewport y el menú salía recortado.
-            y: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - MENU_H - 8))
-          };
-        }
+      // Anchor: el botón de nube del HEADER (no del menú cerrado portado a body).
+      const btn = botonNubeHeader();
+      if (btn) {
+        const r = btn.getBoundingClientRect();
+        const MENU_W = 230;
+        const MENU_H = 220; // 4 items + pie; solo para el clamp vertical
+        menuDatosPos = {
+          x: Math.max(8, Math.min(r.left, window.innerWidth - MENU_W - 8)),
+          y: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - MENU_H - 8))
+        };
+      } else {
+        // Anclaje por defecto: abajo a la derecha del viewport, donde el dedo
+        // llega mÃ¡s fÃ¡cil (el header de la vista Day estÃ¡ recortado/oculto).
+        const MENU_W = 230;
+        menuDatosPos = {
+          x: Math.max(8, Math.min(window.innerWidth - MENU_W - 8, window.innerWidth - MENU_W - 8)),
+          y: Math.max(8, window.innerHeight - 230)
+        };
       }
-    }
-    if (menuDatos) {
-      // Cierre animado: el menú sube (menuDatosSaliendo) y se desmonta al
-      // terminar la animación, no antes.
+      menuDatos = true;
+    } else {
+      // Cierre animado: el menÃº sube (menuDatosSaliendo) y se desmonta al
+      // terminar la animaciÃ³n, no antes.
       menuDatosSaliendo = true;
       setTimeout(() => { menuDatos = false; menuDatosSaliendo = false; }, MENU_CIERRE_MS);
-    } else {
-      menuDatos = true;
     }
   }
   /** Cierra el menú directo (Esc / click-afuera / acción) con la misma animación. */

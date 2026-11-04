@@ -28,14 +28,21 @@ async function cifrarActividad(a: Activity): Promise<Activity> {
 }
 
 /** Descifra los campos E2E de una actividad entrante (o los deja si son legacy). */
-async function descifrarActividad(a: any): Promise<Activity> {
+export async function descifrarActividad(a: any): Promise<Activity> {
   if (!esCifrado(a.description) && !esCifrado(a.image) && !esCifrado(a.steps)) return a as Activity;
   if (!tieneClave()) {
     // Sin clave: reemplazar blobs por marcador neutro (la UI no debe mostrar "np1:0:...")
+    //
+    // EXCEPTO la imagen: aquí `null` se guardaría local con fecha fresca y el
+    // siguiente push lo subiría, borrando la foto de la nube para TODOS los
+    // dispositivos. Se conserva el ciphertext: quien la pinta usa srcImagen()
+    // (devuelve null y no dibuja un icono roto) y, al entrar con password, el
+    // próximo pull la descifra igual. Borrar para no tener que mirarla es
+    // exactamente el fallo que reporta la persona: "las fotos no bajan".
     return {
       ...a,
       description: esCifrado(a.description) ? '🔒 Contenido cifrado — inicia sesión de nuevo' : a.description,
-      image: esCifrado(a.image) ? null : a.image,
+      image: a.image ?? null,
       steps: esCifrado(a.steps) ? [] : a.steps,
     } as Activity;
   }
@@ -278,9 +285,13 @@ export function cursorPushTrasLote(
   enviados: { updatedAt: number }[],
   cursorPrevio: number,
   ahora: number,
-  truncado: number
+  truncado: number,
+  /** Filas que la normalización del servidor descartó (norm* → null). */
+  ignoradas = 0
 ): number {
-  if (truncado > 0) return cursorPrevio; // descartó filas: no darlas por subidas
+  // Lo mismo que con el truncado: nada de lo que NO llegó puede darse por
+  // subido, así que el cursor no avanza mientras quede algo fuera.
+  if (truncado > 0 || ignoradas > 0) return cursorPrevio;
   return cursorPushTras(enviados, cursorPrevio, ahora);
 }
 
@@ -298,6 +309,24 @@ function avisoDeDescarte(truncado: number): void {
   import('./toast').then(async ({ toastErr }) => {
     const { tNow } = await import('./i18n');
     toastErr(tNow('sync.truncado', { n: truncado }));
+  });
+}
+
+/** Cambios que el servidor NO pudo validar (no son límite: son filas inválidas). */
+let ultimosIgnorados = 0;
+
+/**
+ * Aviso de lo que la normalización del servidor descartó. Mismo criterio que
+ * avisoDeDescarte (solo al empeorar): sin esto el usuario vería su cambio
+ * "subido" y sin rastro, que es exactamente el fallo que había que cerrar.
+ */
+function avisoDeIgnorados(ignorados: number): void {
+  const empeoro = ignorados > ultimosIgnorados;
+  ultimosIgnorados = ignorados;
+  if (!empeoro) return;
+  import('./toast').then(async ({ toastErr }) => {
+    const { tNow } = await import('./i18n');
+    toastErr(tNow('sync.ignorados', { n: ignorados }));
   });
 }
 
@@ -370,6 +399,33 @@ export function reestampar(local: number, remoto: number, sesgo = 0): number {
   return Math.max(local, remoto - sesgo + 1);
 }
 
+/**
+ * ¿La fila remota gana sobre la local? La pregunta del pull, hecha en UN solo reloj.
+ *
+ * `local.updatedAt` vive en el reloj del DISPOSITIVO (lo selló acotarFechaRemota
+ * o lo escribió el usuario con Date.now()); `remota.updatedAt` llega en el reloj
+ * del SERVIDOR. Compararlas crudas es comparar dos relojes distintos: con el
+ * reloj local adelantado por más que el solape del pull (5 s), todo cambio
+ * remoto parecía VIEJO, se descartaba en el único pull que lo traía, y como el
+ * cursor de pull solo solapa 5 s ya no volvía a pedirlo nunca — un cambio
+ * perdido para ese dispositivo, sin error y sin aviso.
+ *
+ * El resto del archivo ya traducía fechas por todas partes (sellarParaServidor
+ * al salir, acotarFechaRemota al entrar); lo que faltaba era traducir ESTA
+ * comparación. Un sesgo no numérico (respuesta vieja sin serverTime) se trata
+ * como cero: mejor volver al comportamiento de antes que dejar el pull muerto
+ * para siempre por un NaN.
+ */
+export function remotaGana<T extends { updatedAt: number }>(
+  local: T | undefined,
+  remota: { updatedAt: number },
+  sesgo: number,
+): boolean {
+  if (!local) return true;
+  const s = Number.isFinite(sesgo) ? sesgo : 0;
+  return local.updatedAt <= remota.updatedAt - s;
+}
+
 // ── Push: enviar cambios locales (LWW en el servidor) ────────────────────────
 
 /**
@@ -433,6 +489,8 @@ interface RespuestaPush {
   rechazados?: Rechazo[];
   /** Filas que el servidor descartó por sus tope (no llegó: no es rechazo). */
   truncado?: number;
+  /** Filas que llegaron pero la normalización rechazó (nunca se escribieron). */
+  ignorados?: { t: Rechazo['t']; k: string }[];
   serverTime: number;
 }
 
@@ -501,7 +559,14 @@ export async function pushChanges(full = false): Promise<number> {
     // enviado, una fila rechazada quedaba justo en el cursor y el filtro
     // estricto de seleccionables la convertía en una fila muerta: la siguiente
     // push ya no la elegía y el pull la sobrescribía con la versión vieja.
-    const rechazadas = new Set(rechazados.map(r => `${r.t}:${r.k}`));
+    // Las ignoradas por el servidor tampoco están escritas ni rechazadas por
+    // LWW: sin esto entrarían en `aceptadas` y el cursor avanzaría por encima
+    // de filas que la nube jamás vio, convirtiéndolas en filas muertas.
+    const ignoradas = res.ignorados ?? [];
+    const rechazadas = new Set([
+      ...rechazados.map(r => `${r.t}:${r.k}`),
+      ...ignoradas.map(r => `${r.t}:${r.k}`),
+    ]);
     const aceptadas = [
       ...actsSuben.filter(a => !rechazadas.has(`a:${a.id}`)),
       ...catsSuben.filter(c => !rechazadas.has(`c:${c.id}`)),
@@ -518,12 +583,13 @@ export async function pushChanges(full = false): Promise<number> {
     await db.syncState.put({
       ...prev,
       id: '1',
-      lastPushAt: cursorPushTrasLote(aceptadas, cursor, Date.now(), truncado),
+      lastPushAt: cursorPushTrasLote(aceptadas, cursor, Date.now(), truncado, ignoradas.length),
       sesgoServidor: sesgoNuevo,
     });
     // Antes del setStatus: el detalle que avisa a los listeners ya
     // lleva el descarte.
     avisoDeDescarte(truncado);
+    avisoDeIgnorados(ignoradas.length);
     setStatus(pendingCount > 0 ? 'syncing' : 'synced');
     return res.pushed;
   } catch (err: any) {
@@ -587,23 +653,25 @@ export async function pullChanges(): Promise<{ applied: number }> {
     const res = await api<PullResponse>(`/api/sync?since=${since}`);
 
     let applied = 0;
-    // Dos relojes y una sola comparación: el desfase que el servidor acaba de
-    // decirnos y el techo del reloj local. La comparación LWW sigue usando la
-    // fecha CRUDA del servidor; lo que se acota es lo que queda almacenado.
+    // Dos relojes y una sola traducción: el desfase que el servidor acaba de
+    // decirnos. Lo que se GUARDA se acota al reloj local (acotarFechaRemota) y
+    // lo que se COMPARA se traduce con el mismo sesgo (remotaGana) — un lado
+    // por cada reloj es lo que hacía que un dispositivo con la hora adelantada
+    // descartara el primer cambio remoto y no lo pidiera nunca más.
     const sesgo = sesgoDe(res.serverTime, Date.now());
     const ahora = Date.now();
 
     await db.transaction('rw', db.activities, db.categories, db.settings, db.dayOverrides, db.syncState, async () => {
       for (const c of res.categories) {
         const local = await db.categories.get(c.id);
-        if (!local || local.updatedAt <= c.updatedAt) {
+        if (remotaGana(local, c, sesgo)) {
           await db.categories.put(acotarFechaRemota({ ...c } as Category, ahora, sesgo));
           applied++;
         }
       }
       for (const a of res.activities) {
         const local = await db.activities.get(a.id);
-        if (!local || local.updatedAt <= a.updatedAt) {
+        if (remotaGana(local, a, sesgo)) {
           const aPlano = await descifrarActividad(a);
           await db.activities.put(acotarFechaRemota({ ...aPlano } as Activity, ahora, sesgo));
           applied++;
@@ -611,14 +679,14 @@ export async function pullChanges(): Promise<{ applied: number }> {
       }
       for (const s of res.settings) {
         const local = await db.settings.get(s.id);
-        if (!local || local.updatedAt <= s.updatedAt) {
+        if (remotaGana(local, s, sesgo)) {
           await db.settings.put(acotarFechaRemota({ ...s } as AppSettings, ahora, sesgo));
           applied++;
         }
       }
       for (const o of res.dayOverrides) {
         const local = await db.dayOverrides.get(o.day);
-        if (!local || local.updatedAt <= o.updatedAt) {
+        if (remotaGana(local, o, sesgo)) {
           const oPlano = await descifrarOverride(o);
           await db.dayOverrides.put(acotarFechaRemota({ ...oPlano } as DayOverride, ahora, sesgo));
           applied++;

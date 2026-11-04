@@ -4,6 +4,7 @@
   import { t } from '../lib/i18n';
   import { atraparTab, enfocarDialogo, recordarFoco } from '../lib/focus';
   import { capturarEscape } from '../lib/dialogStack';
+  import { srcImagen } from '../lib/crypto';
   import type { Activity } from '../lib/types';
 
   interface Props {
@@ -80,7 +81,7 @@
        barra ni con el panel. Clic en el fondo o en la imagen (por burbuja)
        cierra. -->
   <div class="lightbox-stage" onclick={() => onClose()}>
-    <img class="lightbox-img" src={activity.image} alt={activity.name} />
+    <img class="lightbox-img" src={srcImagen(activity.image)} alt={activity.name} />
   </div>
 
   <!-- Panel de pasos: fila fija al final (ya no flota sobre la imagen) -->

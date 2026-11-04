@@ -59,6 +59,22 @@ export function esCifrado(valor: unknown): valor is string {
 }
 
 /**
+ * El `src` PINTABLE de una imagen: solo un valor que el navegador pueda
+ * cargar como tal.
+ *
+ * Un `image` que quedó cifrado (fila leída en un dispositivo con sesión por
+ * cookie, sin la clave en memoria) no es una ruta: pasarlo a `<img src>`
+ * dibuja un icono roto en la miniatura, en el popover y en el lightbox.
+ * Devuelve null para ese caso, y para cualquier cosa que no sea texto: quien
+ * pinta decide con `{#if srcImagen(...)}` y quien no, conserva el blob tal
+ * cual para no perderlo en el siguiente push.
+ */
+export function srcImagen(valor: unknown): string | null {
+  if (typeof valor !== 'string' || !valor) return null;
+  return esCifrado(valor) ? null : valor;
+}
+
+/**
  * Deriva la clave AES-GCM del password + email (el email como sal de
  * contexto: dos cuentas con el mismo password derivan claves distintas).
  * Se llama al iniciar sesión (login Y registro) con el password en claro

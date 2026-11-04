@@ -56,6 +56,7 @@ const es: Catalogo = {
   'sync.retry': 'Reintentar',
   'sync.retrying': 'Reintentando…',
   'sync.truncado': 'El servidor descartó {n} cambios al subir (supera el límite por envío). Se reintentarán.',
+  'sync.ignorados': 'El servidor no pudo validar {n} cambios al subir: siguen pendientes en este dispositivo.',
 
   // ── Días ──
   'day.0': 'Lunes',
@@ -386,6 +387,7 @@ const en: Catalogo = {
   'sync.retry': 'Retry',
   'sync.retrying': 'Retrying…',
   'sync.truncado': 'The server discarded {n} changes while pushing (per-upload limit). They will be retried.',
+  'sync.ignorados': 'The server could not validate {n} changes while pushing: they remain pending on this device.',
 
   'day.0': 'Monday',
   'day.1': 'Tuesday',

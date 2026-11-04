@@ -14,6 +14,7 @@
   import { portal } from '../lib/portal';
   import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
   import { t, tNow } from '../lib/i18n';
+  import { srcImagen } from '../lib/crypto';
 
   interface Props {
     activities: Activity[];
@@ -1162,7 +1163,9 @@
 
   const activityHasImage = $derived(
     contextMenu.activityId !== null &&
-    !!activities.find(a => a.id === contextMenu.activityId)?.image
+    // srcImagen: un image cifrado (dispositivo sin clave) no es pintable, y
+    // "Ver imagen" abría el lightbox con un src que el navegador no carga.
+    !!srcImagen(activities.find(a => a.id === contextMenu.activityId)?.image)
   );
 
   function handleContextMenu(e: MouseEvent, activityId: string) {
@@ -1429,7 +1432,7 @@
                  entra dentro, así que la miniatura era inalcanzable con Tab.
                  Se posiciona con la MISMA geometría que el bloque (mismos
                  strings de left/width), pegada a su borde derecho. -->
-            {#if activity.image && numSlots > 1}
+            {#if srcImagen(activity.image) && numSlots > 1}
               <button
                 type="button"
                 class="grid-image-thumb"
@@ -1445,7 +1448,7 @@
                 onfocus={(e) => mostrarImgPopover(e, activity)}
                 onblur={() => ocultarImgPopover(true)}
               >
-                <img src={activity.image} alt="" loading="lazy" />
+                <img src={srcImagen(activity.image)} alt="" loading="lazy" />
               </button>
             {/if}
           {/each}
@@ -1482,7 +1485,7 @@
          demás overlays (overflow de tarjeta/columna no lo recorta). -->
     <div class="img-popover" id="img-popover" role="tooltip" use:portal
       style="left: {imgPopover.x}px; top: {imgPopover.y}px">
-      <img src={imgPopover.activity.image} alt="" />
+      <img src={srcImagen(imgPopover.activity.image)} alt="" />
       <span class="img-popover-name">{imgPopover.activity.name}</span>
     </div>
   {/if}

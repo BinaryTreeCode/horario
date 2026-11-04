@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'bun:test';
 import {
   esSemilla, seleccionables, cursorPushTras, cursorPushTrasLote, cursorPull,
-  acotarFechaRemota, sesgoDe, sellarParaServidor, reestampar,
+  acotarFechaRemota, sesgoDe, sellarParaServidor, reestampar, remotaGana,
+  descifrarActividad,
 } from './sync';
+import { cifrarCampo, establecerClave, olvidarClave, srcImagen } from './crypto';
 
 // La sincronización entre dispositivos se decide en tres cálculos puros: qué
 // filas viajan, hasta dónde avanza el cursor del push y dónde queda el del
@@ -289,5 +291,145 @@ describe('invariantes del push contra el esquema del servidor', () => {
     // quita, este test falla antes de que el push vuelva a reventar en producción.
     expect(dayOverrides.day).toBeDefined();
     expect(dayOverrides.day.name).toBe('day');
+  });
+});
+
+// Bug de la auditoría: el pull comparaba `local.updatedAt` (reloj del
+// dispositivo) con `remota.updatedAt` (reloj del servidor) — dos relojes
+// distintos en una sola desigualdad. Con el local adelantado por más que el
+// solape de pull (5 s), el único pull que traía el cambio lo descartaba, y el
+// cursor ya no lo volvía a pedir: cambio perdido para siempre, sin error.
+describe('remotaGana: la comparación LWW en un solo reloj', () => {
+  it('aplica la fila cuando no hay copia local', () => {
+    expect(remotaGana(undefined, { updatedAt: 1_000 }, 0)).toBe(true);
+    expect(remotaGana(undefined, { updatedAt: 1_000 }, 120_000)).toBe(true);
+  });
+
+  it('el bug: con el reloj local 2 min adelantado, el cambio remoto GANA', () => {
+    // Dispositivo 2 min por delante del servidor: sesgo = serverTime - ahora.
+    const sesgo = sesgoDe(1_000_000, 1_120_000);
+    expect(sesgo).toBe(-120_000);
+    // Copia local de una lectura anterior: traía el servidor 990_000, y
+    // acotarFechaRemota la guardó en NUESTRO reloj (990_000 + 120_000 + 1).
+    const local = acotarFechaRemota({ id: 'x', updatedAt: 990_000 }, 1_120_000, sesgo);
+    expect(local.updatedAt, 'la copia local vive en el reloj del dispositivo').toBe(1_110_001);
+    // El otro dispositivo cambió la fila hace 3 s: el servidor la fecha en
+    // 997_000 (traducido: 1_117_000 en nuestro reloj), más nueva que lo que
+    // tenemos. ANTES: 1_110_001 <= 997_000 era falso → se descartaba en el
+    // único pull que la traía y el cursor de 5 s ya no la volvía a pedir.
+    expect(remotaGana(local, { updatedAt: 997_000 }, sesgo),
+      'el cambio remoto se pierde para siempre en este dispositivo').toBe(true);
+    // Y la traducción es la correcta: recién llegada, en nuestro reloj.
+    expect(997_000 - sesgo).toBe(1_117_000);
+  });
+
+  it('no reaplica la misma fila que ya está sellada localmente', () => {
+    // Servidor 60 s por delante: la fila remota es 1_600_001 allí y ya está
+    // guardada local un ms por encima (1_540_002 en nuestro reloj).
+    const sesgo = 60_000;
+    const guardada = acotarFechaRemota({ id: 'x', updatedAt: 1_600_001 }, 1_550_000, sesgo);
+    expect(guardada.updatedAt).toBe(1_540_002);
+    expect(remotaGana(guardada, { updatedAt: 1_600_001 }, sesgo),
+      'reaplicar la misma fila dispara un bucle de escrituras sin cambio').toBe(false);
+  });
+
+  it('no pisa un cambio local más nuevo que lo que trae la nube', () => {
+    const sesgo = 0;
+    const local = { id: 'x', updatedAt: 5_000 };
+    expect(remotaGana(local, { updatedAt: 4_000 }, sesgo)).toBe(false);
+    expect(remotaGana(local, { updatedAt: 6_000 }, sesgo)).toBe(true);
+  });
+
+  it('un sesgo no numérico (respuesta vieja sin serverTime) no deja el pull muerto', () => {
+    const local = { id: 'x', updatedAt: 5_000 };
+    expect(remotaGana(local, { updatedAt: 6_000 }, NaN)).toBe(true);
+    expect(remotaGana(local, { updatedAt: 4_000 }, NaN)).toBe(false);
+  });
+});
+
+// Bug de la auditoría: lo que la normalización del servidor descartó no estaba
+// ni en `pushed` ni en `rechazos`, así que el cliente lo contaba como subido y
+// avanzaba el cursor por encima: fila muerta, sin aviso. Es el mismo contrato
+// que ya existía para `truncado`.
+describe('cursorPushTrasLote con filas ignoradas por normalización', () => {
+  const lote = [{ id: 'ok', updatedAt: 2_000 }, { id: 'rota', updatedAt: 3_000 }];
+
+  it('con todo validado el cursor avanza hasta lo enviado', () => {
+    expect(cursorPushTrasLote(lote, 1_000, 4_000, 0, 0)).toBe(3_000);
+  });
+
+  it('una fila ignorada frena el cursor: no se da por subida', () => {
+    expect(cursorPushTrasLote([lote[0]], 1_000, 4_000, 0, 1)).toBe(1_000);
+  });
+
+  it('el mismo efecto que el truncado (los dos significan "no llegó")', () => {
+    expect(cursorPushTrasLote([], 1_000, 4_000, 2, 0)).toBe(1_000);
+    expect(cursorPushTrasLote([], 1_000, 4_000, 0, 2)).toBe(1_000);
+  });
+
+  it('el conteo combinado tampoco avanza', () => {
+    expect(cursorPushTrasLote(lote, 1_000, 4_000, 1, 1)).toBe(1_000);
+  });
+});
+
+// Subir y bajar fotos: el pull de un dispositivo SIN la clave en memoria no
+// tiene que borrar la foto. Antes devolvía `image: null`, la fila se guardaba
+// local con fecha fresca y el siguiente push subía ese null: la foto
+// desaparecía de la nube y de todos los demás dispositivos.
+describe('descifrarActividad sin clave: la foto no se pierde', () => {
+  const url = 'https://abc.public.blob.vercel-storage.com/users/u/1-foto.webp';
+
+  it('sin clave, un campo cifrado se conserva en vez de volverse null', async () => {
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    const cifrada = await cifrarCampo(url);
+    await olvidarClave(); // sesión por cookie: sin clave en memoria
+
+    const fila = { id: 'a1', name: 'Rutina', description: null, image: cifrada, steps: null };
+    const result = await descifrarActividad(fila);
+    expect(result.image, 'null en local sería un push que borra la foto').toBe(cifrada);
+    // Y la UI no intenta pintar el ciphertext como si fuera una ruta.
+    expect(srcImagen(result.image)).toBeNull();
+    // Con clave, la misma fila baja legible.
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    expect((await descifrarActividad(fila)).image).toBe(url);
+    expect(srcImagen((await descifrarActividad(fila)).image)).toBe(url);
+    await olvidarClave();
+  });
+
+  it('una foto plana (URL de Blob) pasa intacta por el pull', async () => {
+    await olvidarClave();
+    const result = await descifrarActividad({ id: 'a2', image: url, description: null, steps: null });
+    expect(result.image).toBe(url);
+    expect(srcImagen(result.image)).toBe(url);
+  });
+
+  it('srcImagen no pinta texto cifrado ni valores vacíos', () => {
+    expect(srcImagen('data:image/webp;base64,AAA')).toBe('data:image/webp;base64,AAA');
+    expect(srcImagen('np1:0:iv:datos')).toBeNull();
+    expect(srcImagen(null)).toBeNull();
+    expect(srcImagen(undefined)).toBeNull();
+    expect(srcImagen('')).toBeNull();
+  });
+});
+
+describe('clasificarEscritura: contrato de rechazos y escrituras LWW', () => {
+  it('fila escrita con éxito (enNube === incoming) se cuenta como escrita, NO como rechazo', async () => {
+    const { clasificarEscritura } = await import('../pages/api/sync');
+    expect(clasificarEscritura(1_000, 1_000)).toBe('escrita');
+  });
+
+  it('fila más nueva que la nube (enNube < incoming) se cuenta como escrita', async () => {
+    const { clasificarEscritura } = await import('../pages/api/sync');
+    expect(clasificarEscritura(500, 1_000)).toBe('escrita');
+  });
+
+  it('fila nueva sin registro previo en la nube (undefined) se cuenta como escrita', async () => {
+    const { clasificarEscritura } = await import('../pages/api/sync');
+    expect(clasificarEscritura(undefined, 1_000)).toBe('escrita');
+  });
+
+  it('fila rechazada por el guard LWW (enNube > incoming) se reporta como rechazo', async () => {
+    const { clasificarEscritura } = await import('../pages/api/sync');
+    expect(clasificarEscritura(1_500, 1_000)).toBe('rechazada');
   });
 });
