@@ -24,6 +24,8 @@ type Catalogo = Record<string, string>;
 const es: Catalogo = {
   // ── Header / shell ──
   'app.name': 'Nature Planner',
+  'app.loading': 'Loading…',
+  'app.loadingSettings': 'Loading settings…',
   'header.week': 'Semana',
   'header.day': 'Día',
   'header.adjustUp': 'Ajustar Arriba',
@@ -251,6 +253,8 @@ const es: Catalogo = {
   'settings.useColor': 'Usar el color {color}',
   'settings.colorOf': 'Color de {name}',
   'settings.categoryName': 'Nombre de la categoría',
+  'settings.categoryFallback': 'Categoría',
+  'settings.hexCode': 'Código Hexadecimal',
   'settings.removeCategory': 'Quitar la categoría {name}',
   'settings.newCategory': 'Nueva Categoría',
   'settings.colorMixer': 'Mezclador de color',
@@ -411,6 +415,8 @@ const es: Catalogo = {
 
 const en: Catalogo = {
   'app.name': 'Nature Planner',
+  'app.loading': 'Loading…',
+  'app.loadingSettings': 'Loading settings…',
   'header.week': 'Week',
   'header.day': 'Day',
   'header.adjustUp': 'Adjust Up',
@@ -615,6 +621,8 @@ const en: Catalogo = {
   'settings.useColor': 'Use color {color}',
   'settings.colorOf': 'Color for {name}',
   'settings.categoryName': 'Category name',
+  'settings.categoryFallback': 'Category',
+  'settings.hexCode': 'Hex code',
   'settings.removeCategory': 'Remove category {name}',
   'settings.newCategory': 'New Category',
   'settings.colorMixer': 'Color mixer',

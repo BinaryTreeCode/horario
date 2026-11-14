@@ -882,7 +882,7 @@
   <!-- Modals -->
   {#if showSettings}
     {#await loadSettingsPanel()}
-      <div class="modal-loading" role="status">Cargando ajustes…</div>
+      <div class="modal-loading" role="status">{$t('app.loadingSettings')}</div>
     {:then}
       {#if SettingsPanelComp}
         <SettingsPanelComp
@@ -896,7 +896,7 @@
 
   {#if showActivityModal}
     {#await loadActivityModal()}
-      <div class="modal-loading" role="status">Cargando…</div>
+      <div class="modal-loading" role="status">{$t('app.loading')}</div>
     {:then}
       {#if ActivityModalComp}
         <ActivityModalComp
@@ -1445,7 +1445,7 @@
   .daily-error-msg {
     margin: 0;
     max-width: 34rem;
-    color: var(--text-primary, rgb(var(--texto)));
+    color: rgb(var(--texto));
     font-size: 1rem;
     line-height: 1.5;
   }
@@ -1456,7 +1456,7 @@
     padding: 0.65rem 1.5rem;
     border-radius: 999px;
     border: 1px solid rgb(var(--verde-borde));
-    background: var(--color-green-dark, rgb(var(--verde-fuerte)));
+    background: var(--color-green-dark);
     color: rgb(var(--sobre-color));
     font-size: 0.95rem;
     font-weight: 600;
