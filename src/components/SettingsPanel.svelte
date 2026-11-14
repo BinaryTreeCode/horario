@@ -12,7 +12,7 @@
   import SettingsHoursRangeSection from './settings/SettingsHoursRangeSection.svelte';
   import SettingsTransparencySection from './settings/SettingsTransparencySection.svelte';
   import { t } from '../lib/i18n';
-  import { dndzone } from 'svelte-dnd-action';
+  import { dragHandleZone, dragHandle } from 'svelte-dnd-action';
   import { flip } from 'svelte/animate';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr } from '../lib/toast';
@@ -771,14 +771,14 @@
         </header>
         <div 
           class="categories-list" 
-          use:dndzone={{items: localCategories, flipDurationMs, type: 'categories', delayTouchStart: 200}}
+          use:dragHandleZone={{items: localCategories, flipDurationMs, type: 'categories', delayTouchStart: 200}}
           onconsider={handleDndConsider} 
           onfinalize={handleDndFinalize}
         >
           {#each localCategories as cat (cat.id)}
             <div class="category-edit-item" animate:flip={{duration: flipDurationMs}}>
-              <div class="grip-handle">
-                <GripVertical size={16} />
+              <div class="grip-handle" use:dragHandle aria-label={$t('settings.reorderCategory', { name: cat.label })}>
+                <GripVertical size={16} aria-hidden="true" />
               </div>
               <input type="color" value={cat.color} aria-label={$t('settings.colorOf', { name: cat.label })} oninput={e => { updateCategory(cat.id, 'color', e.currentTarget.value); if (cat.id === catNuevaId) catNuevaId = null; }} />
               <button
@@ -1001,6 +1001,7 @@
     justify-content: flex-end; /* Aside style */
     z-index: 100;
     backdrop-filter: blur(4px);
+    overscroll-behavior: contain;
   }
 
   .modal-content {
@@ -1048,6 +1049,7 @@
   .settings-sections {
     flex: 1;
     overflow-y: auto;
+    overscroll-behavior: contain;
     display: flex;
     flex-direction: column;
     gap: 2rem;
@@ -1502,7 +1504,7 @@
     flex: 1;
     font-size: 0.82rem;
     font-weight: 600;
-    color: var(--text-main);
+    color: rgb(var(--texto));
     min-width: 0;
   }
 
@@ -1619,7 +1621,7 @@
     input[type="email"],
     input[type="password"],
     select,
-    .form-group-compact select,
+
     .auth-form input,
     .category-edit-item input[type="text"] {
       min-height: 44px;
@@ -1636,6 +1638,11 @@
     .remove-cat {
       min-width: 44px;
       min-height: 44px;
+    }
+    .btn-sync-refresh,
+    .btn-sync-logout {
+      min-height: 44px;
+      min-width: 44px;
     }
     .btn-backup,
     .import-btn {

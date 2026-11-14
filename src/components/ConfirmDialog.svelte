@@ -71,7 +71,7 @@
   <!-- Portal a body: un ancestro con backdrop-filter crea containing block y ancla este overlay fixed a la sección scrolleada en vez del viewport -->
   <div
     use:portal
-    class="confirm-overlay"
+    class="confirm-overlay modal-overlay"
     role="presentation"
     onclick={(e) => e.target === e.currentTarget && close('cancel')}
   >
@@ -112,6 +112,7 @@
     display: grid;
     place-items: center;
     padding: 20px;
+    overscroll-behavior: contain;
     animation: fade-in 0.15s ease;
   }
   .confirm-box {

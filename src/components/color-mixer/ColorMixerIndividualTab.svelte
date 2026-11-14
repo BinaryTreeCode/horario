@@ -391,6 +391,14 @@
     transform: scale(1.1);
   }
 
+  @media (max-width: 768px) {
+    .form-select,
+    .hex-input {
+      min-height: 44px;
+      font-size: 16px;
+    }
+  }
+
   .swatch-action.active {
     box-shadow: 0 0 0 2px rgb(var(--texto));
   }

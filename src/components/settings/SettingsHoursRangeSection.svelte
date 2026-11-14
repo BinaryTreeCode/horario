@@ -319,6 +319,28 @@
     text-align: center;
   }
 
+  @media (max-width: 768px) {
+    .form-group-compact select {
+      min-height: 44px;
+      font-size: 16px;
+    }
+    .range-slider {
+      height: 36px;
+    }
+    .range-handle {
+      height: 36px;
+    }
+    .range-handle::-webkit-slider-thumb {
+      width: 28px;
+      height: 28px;
+      margin-top: -10px;
+    }
+    .range-handle::-moz-range-thumb {
+      width: 28px;
+      height: 28px;
+    }
+  }
+
   @media (max-width: 480px) {
     .range-selector {
       padding: 0.75rem;

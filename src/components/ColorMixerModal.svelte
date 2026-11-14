@@ -195,6 +195,7 @@
     justify-content: center;
     z-index: 1100;
     padding: 1rem;
+    overscroll-behavior: contain;
   }
 
   .modal-content {
@@ -345,6 +346,7 @@
   @media (max-width: 600px) {
     .modal-content {
       max-height: 96vh;
+      max-height: 96dvh;
     }
     .modal-footer {
       flex-direction: column-reverse;

@@ -869,7 +869,7 @@
 
       <footer class="modal-footer">
         {#if id !== null}
-          <button type="button" class="btn btn-danger" onclick={() => confirmDuplicate = true}>
+          <button type="button" class="btn btn-secondary" onclick={() => confirmDuplicate = true}>
             <Copy size={18} /> {$t('modal.duplicate')}
           </button>
           <button id="btn-delete-activity" type="button" class="btn btn-danger" onclick={() => confirmRemove = true}>
@@ -1241,7 +1241,7 @@
     background: transparent;
     font-size: 0.85rem;
     padding: 0.2rem 0.4rem;
-    color: var(--text-main);
+    color: rgb(var(--texto));
   }
 
   .step-text-input:focus {
@@ -1655,7 +1655,8 @@
       flex: 1;
       justify-content: center;
     }
-    .btn-danger {
+    .btn-danger,
+    .modal-footer > .btn {
       width: 100%;
       justify-content: center;
     }
@@ -1666,6 +1667,23 @@
   /* A11y táctil (regla dura #5): en móvil todo control del modal mide ≥44px.
      Último bloque del archivo: gana el cascade sobre las queries de 640/540. */
   @media (max-width: 768px) {
+    input,
+    select,
+    textarea,
+    .input-large,
+    .step-input,
+    .step-text-input,
+    .image-url-row input,
+    .time-select-modern {
+      font-size: 16px;
+    }
+    .image-btn,
+    .image-btn-danger {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.45rem 0.75rem;
+      min-height: 44px;
+    }
     .close-btn {
       width: 44px;
       height: 44px;
