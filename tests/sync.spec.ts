@@ -558,4 +558,43 @@ test.describe('Sincronización entre dispositivos', () => {
     await expect(page.locator('html')).toHaveAttribute('lang', 'en', { timeout: 10_000 });
     await expect(page.locator('#set-start')).toHaveValue('9', { timeout: 10_000 });
   });
+  test('bajar de la nube con divergencia local ofrece reemplazar o combinar y limpia el solapamiento', async ({ page }) => {
+    const nube = await conNube(page, [remota('Actividad de la nube', '08:00', '09:00')]);
+    await conSesion(page);
+    await page.goto('/');
+    await esperarSemana(page);
+
+    // Creamos una actividad local no semilla que NO está en la nube
+    await page.evaluate(async () => {
+      const db = (globalThis as any).__npDb;
+      await db.activities.put({
+        id: 'act-solo-local',
+        categoryId: 'rutina',
+        name: 'Actividad solo local',
+        startTime: '08:00',
+        endTime: '09:00',
+        daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+        updatedAt: Date.now(),
+      });
+    });
+    await expect(page.locator('.activity-item[title="Actividad solo local"]').first()).toBeVisible();
+
+    // Abrimos el menú Datos y pulsamos "Bajar de la nube"
+    await abrirMenuDatos(page);
+    await page.locator('.menu-datos button', { hasText: TEXTO_BAJAR }).click();
+
+    // Debe aparecer el diálogo ofreciendo Reemplazar vs Combinar
+    const modal = page.locator('.confirm-box');
+    await expect(modal).toBeVisible({ timeout: 10_000 });
+    await expect(modal.locator('.btn-confirm-ok')).toHaveText(/Reemplazar local|Replace local/i);
+    await expect(modal.locator('.btn-confirm-secondary')).toHaveText(/Combinar ambos|Merge both/i);
+
+    // Elegimos Reemplazar local
+    await modal.locator('.btn-confirm-ok').click();
+
+    // La actividad local ya no existe y sólo queda la de la nube (sin solapamiento)
+    await expect(page.locator('.activity-item[title="Actividad solo local"]')).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.locator('.activity-item[title="Actividad de la nube"]').first()).toBeVisible();
+  });
 });
+

@@ -1,4 +1,6 @@
-import { db, now } from './db';
+import { db, now, INITIAL_CATEGORIES } from './db';
+import { clearUndo } from './undo';
+import { notifyDataChange } from './dataBus';
 import type { Table } from 'dexie';
 import type { Activity, Category, AppSettings, DayOverride, SyncState, SyncStatus } from './types';
 import { cifrarCampo, descifrarCampo, esCifrado, tieneClave, restaurarClave, olvidarClave } from './crypto';
@@ -1306,10 +1308,16 @@ export async function subirAhora(): Promise<ResultadoSubida> {
  * filas viejas no tiene efecto. NO es un "restaurar desde la nube": para que
  * la nube mande sobre lo local por completo está el botón de borrar todo.
  */
-export async function bajarAhora(): Promise<ResultadoBajada> {
+export async function bajarAhora(
+  modo: 'auto' | 'combinar' | 'reemplazar' = 'auto',
+): Promise<ResultadoBajada> {
   if (!(await haySesionOperativa())) throw new Error(SIN_SESION);
+  await restaurarClave();
+  if (modo === 'reemplazar') {
+    const snap = await descargarSnapshotNube();
+    return aplicarSnapshotReemplazando(snap);
+  }
   return conLockSync(async () => {
-    await restaurarClave();
     // pullChanges cuenta 'applied' y este contrato pide 'aplicados': sin el mapa,
     // la UI recibía undefined y el toast decía SIEMPRE "ya tenías todo", que era
     // una mentira incluso bajando de verdad.
@@ -1317,6 +1325,394 @@ export async function bajarAhora(): Promise<ResultadoBajada> {
     return { aplicados: applied };
   });
 }
+
+// ── Snapshot e Inspección de bajada (Reemplazo vs Combinar) ──────────────────
+
+export interface SnapshotNube {
+  categories: Category[];
+  activities: Activity[];
+  settings: AppSettings[];
+  dayOverrides: DayOverride[];
+  serverTime: number;
+  primerServerTime: number;
+  tieneBloqueados: boolean;
+}
+
+export interface DivergenciaPull {
+  soloLocalesActs: number;
+  soloLocalesCats: number;
+  soloLocalesOvrs: number;
+  totalSoloLocales: number;
+  remotasActs: number;
+  remotasCats: number;
+  remotasOvrs: number;
+  bloqueadoSinClave: boolean;
+}
+
+/**
+ * Función pura que calcula diferencias entre datos locales y remotos para
+ * advertir al usuario si pulsar "Bajar" provocaría solapamiento de actividades.
+ */
+export function detectarDivergenciaPull(
+  locales: {
+    activities: Activity[];
+    categories: Category[];
+    dayOverrides: DayOverride[];
+  },
+  remotos: {
+    activities: { id: string; deletedAt?: number | null }[];
+    categories: { id: string; deletedAt?: number | null }[];
+    dayOverrides: { day: number; deletedAt?: number | null }[];
+    tieneBloqueados?: boolean;
+  },
+): DivergenciaPull {
+  const idsRemotosActs = new Set(
+    remotos.activities.filter(a => !a.deletedAt).map(a => a.id)
+  );
+  const idsRemotosCats = new Set(
+    remotos.categories.filter(c => !c.deletedAt).map(c => c.id)
+  );
+  const daysRemotosOvrs = new Set(
+    remotos.dayOverrides.filter(o => !o.deletedAt).map(o => o.day)
+  );
+
+  const soloLocalesActs = locales.activities.filter(
+    a => !a.deletedAt && !esSemilla(a) && !idsRemotosActs.has(a.id)
+  ).length;
+
+  const soloLocalesCats = locales.categories.filter(
+    c => !c.deletedAt && !idsRemotosCats.has(c.id)
+  ).length;
+
+  const soloLocalesOvrs = locales.dayOverrides.filter(
+    o => !o.deletedAt && !daysRemotosOvrs.has(o.day)
+  ).length;
+
+  const remotasActs = idsRemotosActs.size;
+  const remotasCats = idsRemotosCats.size;
+  const remotasOvrs = daysRemotosOvrs.size;
+
+  return {
+    soloLocalesActs,
+    soloLocalesCats,
+    soloLocalesOvrs,
+    totalSoloLocales: soloLocalesActs + soloLocalesCats + soloLocalesOvrs,
+    remotasActs,
+    remotasCats,
+    remotasOvrs,
+    bloqueadoSinClave: !!remotos.tieneBloqueados,
+  };
+}
+
+/**
+ * Descarga todo el contenido de la nube (since = 0) y descifra los campos en memoria
+ * sin tocar IndexedDB.
+ */
+export async function descargarSnapshotNube(): Promise<SnapshotNube> {
+  let cursors: PullCursors | undefined;
+  let primerServerTime: number | undefined;
+  let ultimoServerTime = Date.now();
+  let ultimaFirma = '';
+
+  const mapCats = new Map<string, Category>();
+  const mapActs = new Map<string, any>();
+  const mapSets = new Map<string, AppSettings>();
+  const mapOvrs = new Map<number, any>();
+
+  for (let page = 0; page < MAX_PULL_PAGES; page++) {
+    const params = new URLSearchParams({ since: '0' });
+    if (cursors?.c) params.set('cCursor', cursors.c);
+    if (cursors?.a) params.set('aCursor', cursors.a);
+    if (cursors?.s) params.set('sCursor', cursors.s);
+    if (cursors?.o) params.set('oCursor', cursors.o);
+
+    const res = await api<PullResponse>(`/api/sync?${params.toString()}`);
+    if (primerServerTime === undefined && Number.isFinite(res.serverTime)) {
+      primerServerTime = res.serverTime;
+    }
+    ultimoServerTime = res.serverTime;
+
+    for (const c of res.categories) mapCats.set(c.id, c);
+    for (const a of res.activities) mapActs.set(a.id, a);
+    for (const s of res.settings) mapSets.set(s.id, s);
+    for (const o of res.dayOverrides) mapOvrs.set(o.day, o);
+
+    const hayMas = Boolean(res.hasMore && res.cursors);
+    const nuevaFirma = hayMas ? JSON.stringify(res.cursors) : '';
+    const esUltimaPagina =
+      !hayMas || (nuevaFirma !== '' && nuevaFirma === ultimaFirma) || page === MAX_PULL_PAGES - 1;
+
+    if (esUltimaPagina) break;
+    ultimaFirma = nuevaFirma;
+    cursors = res.cursors;
+  }
+
+  if (!tieneClave()) await restaurarClave();
+
+  const rawActs = Array.from(mapActs.values());
+  const rawOvrs = Array.from(mapOvrs.values());
+
+  const descActs = await Promise.all(rawActs.map(a => descifrarActividad(a)));
+  const descOvrs = await Promise.all(rawOvrs.map(o => descifrarOverride(o)));
+
+  let tieneBloqueados = false;
+  for (const a of descActs) {
+    if (tieneContenidoBloqueado(a)) {
+      tieneBloqueados = true;
+      break;
+    }
+  }
+  if (!tieneBloqueados) {
+    for (const o of descOvrs) {
+      if (tieneContenidoBloqueado(o)) {
+        tieneBloqueados = true;
+        break;
+      }
+    }
+  }
+
+  return {
+    categories: Array.from(mapCats.values()),
+    activities: descActs,
+    settings: Array.from(mapSets.values()),
+    dayOverrides: descOvrs,
+    serverTime: ultimoServerTime,
+    primerServerTime: primerServerTime ?? ultimoServerTime,
+    tieneBloqueados,
+  };
+}
+
+/**
+ * Inspecciona lo que hay en la nube y lo compara con lo local para determinar
+ * si el usuario tiene actividades locales que se solaparían.
+ */
+export async function inspeccionarBajada(): Promise<{
+  snapshot: SnapshotNube;
+  divergencia: DivergenciaPull;
+}> {
+  if (!(await haySesionOperativa())) throw new Error(SIN_SESION);
+  await restaurarClave();
+  const [snapshot, localesActs, localesCats, localesOvrs] = await Promise.all([
+    descargarSnapshotNube(),
+    db.activities.toArray(),
+    db.categories.toArray(),
+    db.dayOverrides.toArray(),
+  ]);
+
+  const divergencia = detectarDivergenciaPull(
+    {
+      activities: localesActs,
+      categories: localesCats,
+      dayOverrides: localesOvrs,
+    },
+    {
+      activities: snapshot.activities,
+      categories: snapshot.categories,
+      dayOverrides: snapshot.dayOverrides,
+      tieneBloqueados: snapshot.tieneBloqueados,
+    },
+  );
+
+  return { snapshot, divergencia };
+}
+
+/**
+ * Reemplaza los datos locales con el snapshot de la nube limpiando las tablas
+ * en una transacción atómica (sin emitir tombstones a la nube).
+ */
+export async function aplicarSnapshotReemplazando(snapshotInput: SnapshotNube): Promise<{ aplicados: number }> {
+  const snapshot: SnapshotNube = JSON.parse(JSON.stringify(snapshotInput));
+  if (snapshot.tieneBloqueados && !tieneClave()) {
+    throw new Error('🔒 Contenido cifrado — inicia sesión con contraseña antes de reemplazar tus datos locales');
+  }
+
+  return conLockSync(async () => {
+    setStatus('syncing');
+    escrituraNubeProfundidad++;
+    try {
+      const ahora = Date.now();
+      const sesgo = sesgoDe(snapshot.serverTime, ahora);
+
+      const actsVivas = snapshot.activities.filter(a => !a.deletedAt);
+      const catsVivas = snapshot.categories.filter(c => !c.deletedAt);
+      const setsVivos = snapshot.settings.filter(s => !s.deletedAt);
+      const ovrsVivos = snapshot.dayOverrides.filter(o => !o.deletedAt);
+
+      await db.transaction(
+        'rw',
+        db.activities,
+        db.categories,
+        db.settings,
+        db.dayOverrides,
+        db.syncState,
+        async () => {
+          // Limpieza directa sin deletedAt (no borra en la nube)
+          await db.activities.clear();
+          await db.categories.clear();
+          await db.settings.clear();
+          await db.dayOverrides.clear();
+
+          if (catsVivas.length > 0) {
+            await db.categories.bulkPut(catsVivas.map(c => acotarFechaRemota(c, ahora, sesgo)));
+          } else {
+            await db.categories.bulkPut(INITIAL_CATEGORIES);
+          }
+
+          if (actsVivas.length > 0) {
+            await db.activities.bulkPut(actsVivas.map(a => acotarFechaRemota(a, ahora, sesgo)));
+          }
+
+          if (setsVivos.length > 0) {
+            await db.settings.bulkPut(setsVivos.map(s => acotarFechaRemota(s, ahora, sesgo)));
+          }
+          const hasStart = setsVivos.some(s => s.id === 'startHour');
+          const hasEnd = setsVivos.some(s => s.id === 'endHour');
+          if (!hasStart) await db.settings.put({ id: 'startHour', key: 'startHour', value: 7, updatedAt: ahora });
+          if (!hasEnd) await db.settings.put({ id: 'endHour', key: 'endHour', value: 23, updatedAt: ahora });
+
+          if (ovrsVivos.length > 0) {
+            await db.dayOverrides.bulkPut(ovrsVivos.map(o => acotarFechaRemota(o, ahora, sesgo)));
+          }
+
+          await db.syncState.put({
+            id: '1',
+            lastServerPullAt: cursorPull(snapshot.primerServerTime),
+            lastPullAt: ahora,
+            lastPushAt: ahora,
+            sesgoServidor: sesgo,
+            pendingPushPaused: false,
+          });
+        },
+      );
+
+      pushPaused = false;
+      clearUndo();
+      notifyDataChange(['activities', 'categories', 'settings', 'dayOverrides']);
+
+      lastSyncAt = ahora;
+      pendingCount = 0;
+      setStatus('synced');
+      return { aplicados: actsVivas.length };
+    } finally {
+      escrituraNubeProfundidad = Math.max(0, escrituraNubeProfundidad - 1);
+    }
+  });
+}
+
+// ── Detección y limpieza de actividades duplicadas (Fase 3) ──────────────────
+
+function parsearMinutos(hora: string): number {
+  if (!hora || typeof hora !== 'string') return 0;
+  const [h, m] = hora.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+function normalizarTexto(txt: string): string {
+  return (txt || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[.\-_,;:\u2026]+/g, '')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+export interface GrupoDuplicados {
+  conservar: Activity;
+  borrar: Activity[];
+}
+
+function puntuarCompletitud(a: Activity): number {
+  let score = 0;
+  if (a.image && !esCifrado(a.image) && a.image.length > 0) score += 1000;
+  if (Array.isArray(a.steps) && a.steps.length > 0) score += 200 + a.steps.length * 10;
+  if (a.description && !esCifrado(a.description) && a.description !== CONTENIDO_BLOQUEADO) {
+    score += 100 + Math.min(50, a.description.length);
+  }
+  score += (a.daysOfWeek?.length ?? 0) * 5;
+  if (!esSemilla(a)) score += 50;
+  score += Math.min(20, (a.updatedAt || 0) / 1e11);
+  return score;
+}
+
+/**
+ * Detecta pares o grupos de actividades vivas que duplican una misma franja horaria
+ * en los mismos días (ej. copia importada + copia de la nube, o copia con foto vs sin foto).
+ */
+export function detectarDuplicadosActividades(activities: Activity[]): {
+  grupos: GrupoDuplicados[];
+  idsABorrar: string[];
+} {
+  const vivas = activities.filter(a => !a.deletedAt);
+  const visitadas = new Set<string>();
+  const grupos: GrupoDuplicados[] = [];
+  const idsABorrar: string[] = [];
+
+  for (let i = 0; i < vivas.length; i++) {
+    const a = vivas[i];
+    if (visitadas.has(a.id)) continue;
+    const dupes: Activity[] = [a];
+
+    const startA = parsearMinutos(a.startTime);
+    const endA = parsearMinutos(a.endTime);
+    const nomA = normalizarTexto(a.name);
+
+    for (let j = i + 1; j < vivas.length; j++) {
+      const b = vivas[j];
+      if (visitadas.has(b.id)) continue;
+
+      const diasComunes = (a.daysOfWeek || []).filter(d => (b.daysOfWeek || []).includes(d));
+      if (diasComunes.length === 0) continue;
+
+      const startB = parsearMinutos(b.startTime);
+      const endB = parsearMinutos(b.endTime);
+      const nomB = normalizarTexto(b.name);
+
+      const solapadas = Math.max(startA, startB) < Math.min(endA, endB);
+      const mismoHorario = startA === startB && endA === endB;
+      const mismoNombre = nomA === nomB || (nomA.length >= 2 && nomB.length >= 2 && (nomA.startsWith(nomB) || nomB.startsWith(nomA)));
+
+      if ((mismoHorario && solapadas) || (mismoNombre && solapadas)) {
+        dupes.push(b);
+        visitadas.add(b.id);
+      }
+    }
+
+    if (dupes.length > 1) {
+      visitadas.add(a.id);
+      dupes.sort((x, y) => puntuarCompletitud(y) - puntuarCompletitud(x));
+      const conservar = dupes[0];
+      const borrar = dupes.slice(1);
+      grupos.push({ conservar, borrar });
+      for (const b of borrar) idsABorrar.push(b.id);
+    }
+  }
+
+  return { grupos, idsABorrar };
+}
+
+/**
+ * Borra en IndexedDB las actividades duplicadas marcando deletedAt (tombstone)
+ * y sincroniza la eliminación inmediatamente con la nube para que también se borren en Postgres.
+ */
+export async function limpiarDuplicadosNube(idsABorrar: string[]): Promise<number> {
+  if (idsABorrar.length === 0) return 0;
+  const stamp = Date.now();
+  await db.transaction('rw', db.activities, async () => {
+    for (const id of idsABorrar) {
+      const act = await db.activities.get(id);
+      if (act && !act.deletedAt) {
+        await db.activities.put({ ...act, deletedAt: stamp, updatedAt: stamp });
+      }
+    }
+  });
+  notifyDataChange(['activities']);
+  if (sesionActiva && !pushPaused) {
+    void pushChanges(false).catch(() => {});
+  }
+  return idsABorrar.length;
+}
+
 
 export async function isLoggedIn(): Promise<boolean> {
   try {

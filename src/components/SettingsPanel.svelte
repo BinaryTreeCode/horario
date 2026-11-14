@@ -1,12 +1,12 @@
 <script lang="ts">
   import { db, descargarRespaldo, exportarRespaldoBinario, estimarRespaldo, exportData, validateImport, importValidatedData, type StatsRespaldo, type ValidationResult } from '../lib/db';
   import { leerRespaldo } from '../lib/backupFile';
-  import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync, subirAhora, bajarAhora, SIN_SESION } from '../lib/sync';
+  import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync, subirAhora, bajarAhora, inspeccionarBajada, aplicarSnapshotReemplazando, detectarDuplicadosActividades, limpiarDuplicadosNube, SIN_SESION } from '../lib/sync';
   import { establecerClave, olvidarClave } from '../lib/crypto';
   import type { SyncStatus } from '../lib/types';
   import { Cloud, CloudUpload, CloudDownload, LogIn, LogOut, RefreshCw, UserPlus, TriangleAlert, Eye, EyeOff } from '@lucide/svelte';
   import type { Category } from '../lib/types';
-  import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck, Languages } from '@lucide/svelte';
+  import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck, Languages, Layers } from '@lucide/svelte';
   import { idioma, cambiarIdioma, t, IDIOMAS_DISPONIBLES } from '../lib/i18n';
   import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
   import { tema, elegirTema, TEMAS, type Tema } from '../lib/tema';
@@ -181,17 +181,83 @@
     }
   }
 
+  let confirmBajar = $state(false);
+  let pendingSnapshot: any = null;
+  let divergenciaBajar = $state<any>(null);
+
+  let confirmLimpiarDuplicados = $state(false);
+  let duplicadosDetectados = $state<string[]>([]);
+  let listaDuplicadosResumen = $state('');
+
   async function handleBajar() {
     if (nubeOcupada) return;
     nubeOcupada = 'bajar';
     try {
-      const { aplicados } = await bajarAhora();
-      await refrescarDesdeBD();
-      syncMessage = aplicados > 0 ? tNow('cloud.bajado', { n: aplicados }) : tNow('cloud.bajadoNada');
+      const { snapshot, divergencia } = await inspeccionarBajada();
+      if (divergencia.soloLocalesActs === 0) {
+        const { aplicados } = await bajarAhora('combinar');
+        await refrescarDesdeBD();
+        syncMessage = aplicados > 0 ? tNow('cloud.bajado', { n: aplicados }) : tNow('cloud.bajadoNada');
+      } else {
+        pendingSnapshot = snapshot;
+        divergenciaBajar = divergencia;
+        confirmBajar = true;
+      }
     } catch (err: any) {
       syncMessage = tNow('cloud.error', { msg: msgDe(err) });
     } finally {
       nubeOcupada = null;
+    }
+  }
+
+  async function ejecutarBajarConfirmado(modo: 'reemplazar' | 'combinar') {
+    confirmBajar = false;
+    nubeOcupada = 'bajar';
+    try {
+      if (modo === 'reemplazar' && pendingSnapshot) {
+        const { aplicados } = await aplicarSnapshotReemplazando(pendingSnapshot);
+        await refrescarDesdeBD();
+        syncMessage = tNow('cloud.reemplazado', { n: aplicados });
+      } else {
+        const { aplicados } = await bajarAhora('combinar');
+        await refrescarDesdeBD();
+        syncMessage = aplicados > 0 ? tNow('cloud.bajado', { n: aplicados }) : tNow('cloud.bajadoNada');
+      }
+    } catch (err: any) {
+      syncMessage = tNow('cloud.error', { msg: msgDe(err) });
+    } finally {
+      nubeOcupada = null;
+      pendingSnapshot = null;
+      divergenciaBajar = null;
+    }
+  }
+
+  async function handleRevisarDuplicados() {
+    const acts = await db.activities.toArray();
+    const { grupos, idsABorrar } = detectarDuplicadosActividades(acts);
+    if (idsABorrar.length === 0) {
+      toastOk(tNow('settings.cleanDuplicatesNone'));
+      return;
+    }
+    duplicadosDetectados = idsABorrar;
+    listaDuplicadosResumen = grupos
+      .map(g => `• ${g.conservar.name} (${g.conservar.startTime}–${g.conservar.endTime}) [conservada] ↔ ${g.borrar.map(b => b.name).join(', ')} [a eliminar]`)
+      .slice(0, 5)
+      .join('\n');
+    confirmLimpiarDuplicados = true;
+  }
+
+  async function ejecutarLimpiarDuplicados() {
+    confirmLimpiarDuplicados = false;
+    try {
+      const n = await limpiarDuplicadosNube(duplicadosDetectados);
+      await refrescarDesdeBD();
+      toastOk(tNow('settings.cleanDuplicatesDone', { n }));
+    } catch (err: any) {
+      toastErr(msgDe(err));
+    } finally {
+      duplicadosDetectados = [];
+      listaDuplicadosResumen = '';
     }
   }
 
@@ -924,6 +990,16 @@
               </button>
             </div>
           {/if}
+          <div class="dupes-zone">
+            <button
+              type="button"
+              class="btn btn-secondary btn-dupes"
+              onclick={handleRevisarDuplicados}
+              title={$t('settings.cleanDuplicatesDesc')}
+            >
+              <Layers size={18} /> {$t('settings.cleanDuplicates')}
+            </button>
+          </div>
           <div class="danger-zone">
             <button
               class="btn btn-danger btn-backup"
@@ -1003,6 +1079,36 @@
   confirmText={$t('settings.wipeAll')}
   danger
   onconfirm={wipeAll}
+/>
+
+<ConfirmDialog
+  bind:open={confirmBajar}
+  title={$t('cloud.bajarOpcionesTitle')}
+  message={$t('cloud.bajarOpcionesMsg', {
+    n: divergenciaBajar?.soloLocalesActs ?? 0,
+    total: divergenciaBajar?.remotasActs ?? 0,
+  })}
+  confirmText={$t('cloud.reemplazarBtn')}
+  secondaryText={$t('cloud.combinarBtn')}
+  cancelText={$t('settings.cancel')}
+  danger={true}
+  onconfirm={() => ejecutarBajarConfirmado('reemplazar')}
+  onsecondary={() => ejecutarBajarConfirmado('combinar')}
+  oncancel={() => { pendingSnapshot = null; divergenciaBajar = null; }}
+/>
+
+<ConfirmDialog
+  bind:open={confirmLimpiarDuplicados}
+  title={$t('settings.cleanDuplicatesConfirmTitle', { n: duplicadosDetectados.length })}
+  message={$t('settings.cleanDuplicatesConfirmMsg', {
+    n: duplicadosDetectados.length,
+    list: listaDuplicadosResumen,
+  })}
+  confirmText={$t('settings.cleanDuplicates')}
+  cancelText={$t('settings.cancel')}
+  danger={true}
+  onconfirm={ejecutarLimpiarDuplicados}
+  oncancel={() => { duplicadosDetectados = []; listaDuplicadosResumen = ''; }}
 />
 
 <Toasts />

@@ -5,6 +5,8 @@ import {
   descifrarActividad, CONTENIDO_BLOQUEADO, tieneContenidoBloqueado,
   debeAplicarEnPull, desbloquearCamposActividad, desbloquearCamposOverride,
   cursorPushTrasPull,
+  detectarDivergenciaPull,
+  detectarDuplicadosActividades,
 } from './sync';
 import { cifrarCampo, establecerClave, olvidarClave, srcImagen } from './crypto';
 
@@ -691,3 +693,154 @@ describe('parsePullCursor: paginación keyset de GET /api/sync', () => {
     expect(parsePullCursor('100|3.5', true)).toBeNull();
   });
 });
+
+describe('detectarDivergenciaPull: aviso previo a reemplazo vs combinación', () => {
+  it('semilla local no cuenta como divergencia (no hay peligro de solapar)', () => {
+    const locales = {
+      activities: [{ id: 'seed-1', updatedAt: 0 } as any],
+      categories: [],
+      dayOverrides: [],
+    };
+    const remotos = {
+      activities: [{ id: 'rem-1', updatedAt: 5000 }],
+      categories: [],
+      dayOverrides: [],
+    };
+    const res = detectarDivergenciaPull(locales, remotos);
+    expect(res.soloLocalesActs).toBe(0);
+    expect(res.totalSoloLocales).toBe(0);
+    expect(res.remotasActs).toBe(1);
+  });
+
+  it('detecta actividades locales creadas que no están en la nube', () => {
+    const locales = {
+      activities: [
+        { id: 'local-1', updatedAt: 1000 } as any,
+        { id: 'local-2', updatedAt: 2000 } as any,
+      ],
+      categories: [{ id: 'cat-local', updatedAt: 1000 } as any],
+      dayOverrides: [],
+    };
+    const remotos = {
+      activities: [{ id: 'rem-1', updatedAt: 5000 }],
+      categories: [],
+      dayOverrides: [],
+    };
+    const res = detectarDivergenciaPull(locales, remotos);
+    expect(res.soloLocalesActs).toBe(2);
+    expect(res.soloLocalesCats).toBe(1);
+    expect(res.totalSoloLocales).toBe(3);
+    expect(res.remotasActs).toBe(1);
+  });
+
+  it('no cuenta filas locales o remotas que tengan deletedAt', () => {
+    const locales = {
+      activities: [
+        { id: 'local-1', updatedAt: 1000, deletedAt: 1500 } as any,
+      ],
+      categories: [],
+      dayOverrides: [],
+    };
+    const remotos = {
+      activities: [
+        { id: 'rem-borrada', updatedAt: 5000, deletedAt: 6000 },
+        { id: 'rem-viva', updatedAt: 5000 },
+      ],
+      categories: [],
+      dayOverrides: [],
+    };
+    const res = detectarDivergenciaPull(locales, remotos);
+    expect(res.soloLocalesActs).toBe(0);
+    expect(res.remotasActs).toBe(1);
+  });
+});
+
+describe('detectarDuplicadosActividades: saneamiento de actividades duplicadas', () => {
+  it('detecta dos actividades en la misma franja y conserva la que tiene imagen', () => {
+    const acts = [
+      {
+        id: 'sin-foto',
+        name: 'Rutina',
+        startTime: '07:00',
+        endTime: '08:30',
+        daysOfWeek: [1, 2, 3],
+        image: null,
+        updatedAt: 1000,
+      } as any,
+      {
+        id: 'con-foto',
+        name: 'Rutina',
+        startTime: '07:00',
+        endTime: '08:30',
+        daysOfWeek: [1, 2, 3],
+        image: 'https://blob.vercel/foto.webp',
+        updatedAt: 2000,
+      } as any,
+    ];
+
+    const { grupos, idsABorrar } = detectarDuplicadosActividades(acts);
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0].conservar.id).toBe('con-foto');
+    expect(grupos[0].borrar.map(b => b.id)).toEqual(['sin-foto']);
+    expect(idsABorrar).toEqual(['sin-foto']);
+  });
+
+  it('detecta duplicado solapado por prefijo de nombre ("Ru..." vs "Rutina")', () => {
+    const acts = [
+      {
+        id: 'corta',
+        name: 'Ru...',
+        startTime: '07:00',
+        endTime: '08:30',
+        daysOfWeek: [1, 2, 3],
+        image: 'https://blob.vercel/foto.webp',
+        updatedAt: 3000,
+      } as any,
+      {
+        id: 'larga-sin-foto',
+        name: 'Rutina',
+        startTime: '06:45',
+        endTime: '07:45',
+        daysOfWeek: [1, 2, 3],
+        image: null,
+        updatedAt: 1000,
+      } as any,
+    ];
+
+    const { grupos, idsABorrar } = detectarDuplicadosActividades(acts);
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0].conservar.id).toBe('corta');
+    expect(idsABorrar).toEqual(['larga-sin-foto']);
+  });
+
+  it('no genera duplicados para actividades en franjas distintas o días distintos', () => {
+    const acts = [
+      {
+        id: 'manana',
+        name: 'Rutina',
+        startTime: '07:00',
+        endTime: '08:00',
+        daysOfWeek: [1, 2, 3],
+      } as any,
+      {
+        id: 'noche',
+        name: 'Rutina',
+        startTime: '20:00',
+        endTime: '21:00',
+        daysOfWeek: [1, 2, 3],
+      } as any,
+      {
+        id: 'finde',
+        name: 'Rutina',
+        startTime: '07:00',
+        endTime: '08:00',
+        daysOfWeek: [0, 6],
+      } as any,
+    ];
+
+    const { grupos, idsABorrar } = detectarDuplicadosActividades(acts);
+    expect(grupos).toHaveLength(0);
+    expect(idsABorrar).toHaveLength(0);
+  });
+});
+

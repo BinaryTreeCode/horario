@@ -16,7 +16,8 @@
   import { undoStack, redoStack } from '../lib/undo';
   import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Cloud, CloudOff, CloudUpload, CloudDownload, LogIn, RefreshCw, Info, TriangleAlert } from '@lucide/svelte';
   import { portal } from '../lib/portal';
-  import { onSyncChange, syncNow, subirAhora, bajarAhora, SIN_SESION } from '../lib/sync';
+  import { onSyncChange, syncNow, subirAhora, bajarAhora, inspeccionarBajada, aplicarSnapshotReemplazando, SIN_SESION } from '../lib/sync';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import { t, tNow, idioma } from '../lib/i18n';
   import { modoPrivacidad } from '../lib/privacy';
   import type { SyncStatus } from '../lib/types';
@@ -133,19 +134,52 @@
     }
   }
 
+  let confirmBajar = $state(false);
+  let pendingSnapshot: any = null;
+  let divergenciaBajar = $state<any>(null);
+
   async function bajarDeNube() {
     if (nubeOcupada) return;
     if (!syncDetail.sesion) { abrirSesion(); return; }
     nubeOcupada = 'bajar';
     try {
-      const { aplicados } = await bajarAhora();
-      if (aplicados > 0) toastOk(tNow('cloud.bajado', { n: aplicados }));
-      else toastOk(tNow('cloud.bajadoNada'));
-      menuDatos = false;
+      const { snapshot, divergencia } = await inspeccionarBajada();
+      if (divergencia.soloLocalesActs === 0) {
+        const { aplicados } = await bajarAhora('combinar');
+        if (aplicados > 0) toastOk(tNow('cloud.bajado', { n: aplicados }));
+        else toastOk(tNow('cloud.bajadoNada'));
+        menuDatos = false;
+      } else {
+        pendingSnapshot = snapshot;
+        divergenciaBajar = divergencia;
+        confirmBajar = true;
+        menuDatos = false;
+      }
     } catch (err: any) {
       toastErr(tNow('cloud.error', { msg: err?.message === SIN_SESION ? tNow('cloud.sinSesion') : (err?.message ?? tNow('settings.networkError')) }));
     } finally {
       nubeOcupada = null;
+    }
+  }
+
+  async function ejecutarBajarConfirmado(modo: 'reemplazar' | 'combinar') {
+    confirmBajar = false;
+    nubeOcupada = 'bajar';
+    try {
+      if (modo === 'reemplazar' && pendingSnapshot) {
+        const { aplicados } = await aplicarSnapshotReemplazando(pendingSnapshot);
+        toastOk(tNow('cloud.reemplazado', { n: aplicados }));
+      } else {
+        const { aplicados } = await bajarAhora('combinar');
+        if (aplicados > 0) toastOk(tNow('cloud.bajado', { n: aplicados }));
+        else toastOk(tNow('cloud.bajadoNada'));
+      }
+    } catch (err: any) {
+      toastErr(tNow('cloud.error', { msg: err?.message === SIN_SESION ? tNow('cloud.sinSesion') : (err?.message ?? tNow('settings.networkError')) }));
+    } finally {
+      nubeOcupada = null;
+      pendingSnapshot = null;
+      divergenciaBajar = null;
     }
   }
 
@@ -938,6 +972,22 @@
            en el bloque de privacidad.) -->
     </div>
   {/if}
+
+  <ConfirmDialog
+    bind:open={confirmBajar}
+    title={$t('cloud.bajarOpcionesTitle')}
+    message={$t('cloud.bajarOpcionesMsg', {
+      n: divergenciaBajar?.soloLocalesActs ?? 0,
+      total: divergenciaBajar?.remotasActs ?? 0,
+    })}
+    confirmText={$t('cloud.reemplazarBtn')}
+    secondaryText={$t('cloud.combinarBtn')}
+    cancelText={$t('settings.cancel')}
+    danger={true}
+    onconfirm={() => ejecutarBajarConfirmado('reemplazar')}
+    onsecondary={() => ejecutarBajarConfirmado('combinar')}
+    oncancel={() => { pendingSnapshot = null; divergenciaBajar = null; }}
+  />
 
   <Toasts />
 </div>

@@ -6,22 +6,26 @@
     message?: string;
     confirmText?: string;
     cancelText?: string;
+    secondaryText?: string;
     /** true → botón de confirmación rojo (acciones destructivas) */
     danger?: boolean;
     onconfirm?: () => void;
+    onsecondary?: () => void;
     oncancel?: () => void;
   }
 
   // Los valores por defecto salen de i18n: antes eran literales en español y
-// quedaban en español aunque el usuario estuviera en inglés.
+  // quedaban en español aunque el usuario estuviera en inglés.
   let {
     open = $bindable(false),
     title = tNow('confirm.defaultTitle'),
     message = '',
     confirmText = tNow('confirm.defaultOk'),
     cancelText = tNow('confirm.defaultCancel'),
+    secondaryText,
     danger = false,
     onconfirm,
+    onsecondary,
     oncancel,
   }: Props = $props();
 
@@ -40,18 +44,19 @@
 
   // Escape en fase de captura: el modal de debajo lo consulta y lo deja pasar,
   // así que Esc cierra solo este diálogo (antes cerraba los dos).
-  $effect(() => capturarEscape(() => open, () => close(false)));
+  $effect(() => capturarEscape(() => open, () => close('cancel')));
 
-  function close(confirmed: boolean) {
+  function close(accion: 'confirm' | 'secondary' | 'cancel') {
     open = false;
-    if (confirmed) onconfirm?.();
+    if (accion === 'confirm') onconfirm?.();
+    else if (accion === 'secondary') onsecondary?.();
     else oncancel?.();
   }
 
   function onKeydown(e: KeyboardEvent) {
     if (!open) return;
     // El Escape ya lo gestionó el listener de captura de arriba.
-    if (e.key === 'Enter') { e.stopPropagation(); close(true); }
+    if (e.key === 'Enter') { e.stopPropagation(); close('confirm'); }
   }
   import { portal } from '../lib/portal';
   import { atraparTab, enfocarDialogo, recordarFoco } from '../lib/focus';
@@ -68,7 +73,7 @@
     use:portal
     class="confirm-overlay"
     role="presentation"
-    onclick={(e) => e.target === e.currentTarget && close(false)}
+    onclick={(e) => e.target === e.currentTarget && close('cancel')}
   >
     <div
       class="confirm-box glass-panel"
@@ -82,12 +87,15 @@
       <h3>{title}</h3>
       <p>{message}</p>
       <div class="confirm-actions">
-        <button class="btn-confirm-cancel" onclick={() => close(false)}>{cancelText}</button>
+        <button class="btn-confirm-cancel" onclick={() => close('cancel')}>{cancelText}</button>
+        {#if secondaryText}
+          <button class="btn-confirm-secondary" onclick={() => close('secondary')}>{secondaryText}</button>
+        {/if}
         <button
           class="btn-confirm-ok"
           class:danger
           bind:this={confirmBtnEl}
-          onclick={() => close(true)}
+          onclick={() => close('confirm')}
         >{confirmText}</button>
       </div>
     </div>
@@ -140,9 +148,16 @@
   }
   .confirm-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     justify-content: flex-end;
   }
+  .btn-confirm-secondary {
+    background: rgb(var(--lavado) / 0.12);
+    color: rgb(var(--texto));
+    border: 1px solid rgb(var(--borde-blanco) / 0.16);
+  }
+  .btn-confirm-secondary:hover { background: rgb(var(--lavado) / 0.2); }
   button {
     min-height: 44px;
     min-width: 96px;
