@@ -8,6 +8,7 @@
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import { Copy, Trash2, ListChecks, ImageIcon, Plus } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
+  import ActivityContextMenu from './ActivityContextMenu.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr, toastErrRepetido } from '../lib/toast';
   import { cloneAct, pushUndo } from '../lib/undo';
@@ -1507,30 +1508,23 @@
   {/if}
 
   {#if emptySlotMenu.show}
-    <!-- Menú de hueco (click derecho en espacio vacío de un día): portal por el
-         mismo motivo que el menú de actividad (containing block de glass-panel). -->
-    <div class="custom-context-menu glass-panel" use:portal style="top: {emptySlotMenu.y}px; left: {emptySlotMenu.x}px">
-      <button onclick={createAtEmptySlotWeekly} aria-label={$t('menu.createHere', { time: format12h(horasAHoraReloj(emptySlotMenu.hour)) })}>
-        <Plus size={16} /> {$t('menu.createHere', { time: format12h(horasAHoraReloj(emptySlotMenu.hour)) })}
-      </button>
-    </div>
+    <ActivityContextMenu
+      x={emptySlotMenu.x}
+      y={emptySlotMenu.y}
+      emptyTimeLabel={format12h(horasAHoraReloj(emptySlotMenu.hour))}
+      onCreateAtEmpty={createAtEmptySlotWeekly}
+    />
   {/if}
 
   {#if contextMenu.show}
-    <!-- Portal a body: backdrop-filter de .glass-panel ancestro crea containing block y rompe el position:fixed -->
-    <div class="custom-context-menu glass-panel" use:portal style="top: {contextMenu.y}px; left: {contextMenu.x}px">
-      <button onclick={duplicateActivity} aria-label={$t('menu.duplicate')}>
-        <Copy size={16} /> {$t('menu.duplicate')}
-      </button>
-      {#if viewingImageActivity === null && activityHasImage}
-        <button onclick={() => { viewingImageActivity = activities.find(a => a.id === contextMenu.activityId) || null; }}>
-          <ImageIcon size={16} /> {$t('menu.viewImage')}
-        </button>
-      {/if}
-      <button class="delete-btn" onclick={askDeleteActivity}>
-        <Trash2 size={16} /> {$t('menu.delete')}
-      </button>
-    </div>
+    <ActivityContextMenu
+      x={contextMenu.x}
+      y={contextMenu.y}
+      hasImage={viewingImageActivity === null && activityHasImage}
+      onViewImage={() => { viewingImageActivity = activities.find(a => a.id === contextMenu.activityId) || null; }}
+      onDuplicate={duplicateActivity}
+      onDelete={askDeleteActivity}
+    />
   {/if}
 
   <ConfirmDialog
@@ -2573,52 +2567,7 @@
     white-space: nowrap;
   }
 
-  .custom-context-menu {
-    position: fixed;
-    z-index: 1000;
-    display: flex;
-    flex-direction: column;
-    padding: 0.5rem;
-    min-width: 200px;
-    background: rgb(var(--sup));
-    border-radius: 12px;
-    box-shadow: 0 10px 25px rgb(var(--sombra) / 0.15);
-    border: 1px solid rgb(var(--linea) / 0.05);
-  }
 
-  .custom-context-menu button {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
-    min-height: 44px; /* regla dura #5: medido 39px antes */
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: rgb(var(--tinta));
-    border-radius: 8px;
-    transition: all 0.2s;
-    text-align: left;
-  }
-
-  .custom-context-menu button:hover {
-    background: rgb(var(--tinta) / 0.05);
-    color: rgb(var(--verde-texto));
-  }
-
-  .custom-context-menu button.delete-btn {
-    color: rgb(var(--rojo-texto));
-    border-top: 1px solid rgb(var(--linea) / 0.05);
-    margin-top: 0.25rem;
-    padding-top: 0.75rem;
-    border-radius: 0 0 8px 8px;
-  }
-
-  .custom-context-menu button.delete-btn:hover {
-    background: rgb(var(--rojo-lavado));
-  }
 
   /* Desktop grande / ultrawide (≥1536px): la cabecera de día gana aire y la
      tipografía de bloques sube medio punto — en 21:9 la grilla es el elemento

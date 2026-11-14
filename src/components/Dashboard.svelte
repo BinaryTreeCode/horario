@@ -5,10 +5,9 @@
     activitiesStore, 
     categoriesStore, 
     settingsStore,
-    dayOverridesStore,
-    parseTime,
-    formatTime
+    dayOverridesStore
   } from '../lib/stores';
+  import { compactarDia, planearCompactacionSemanal } from '../lib/scheduleCompaction';
   import WeeklyGrid from './WeeklyGrid.svelte';
 
   import Toasts from './Toasts.svelte';
@@ -476,31 +475,18 @@
     irAVistaDia();
   }
 
-  async function coverGapsAbove() {
-    const startH = settingsObj.startHour;
+  async function compactarHorario(direccion: 'arriba' | 'abajo') {
+    const limiteH = direccion === 'arriba' ? settingsObj.startHour : settingsObj.endHour;
 
     if (currentView === 'day') {
       const overrides = $state.snapshot($dayOverridesStore) || [];
       const currentOverride = overrides.find(o => o.day === selectedDay);
 
       if (currentOverride && currentOverride.activities?.length > 0) {
-        const dayActs = currentOverride.activities.map(a => ({ ...a }));
-        dayActs.sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
-
-        let prevEnd = startH;
-        for (const act of dayActs) {
-          const actStart = parseTime(act.startTime);
-          if (actStart > prevEnd) {
-            const duration = parseTime(act.endTime) - actStart;
-            act.startTime = formatTime(prevEnd);
-            act.endTime = formatTime(prevEnd + duration);
-          }
-          prevEnd = parseTime(act.endTime);
-        }
-
+        const compactadas = compactarDia(currentOverride.activities, limiteH, direccion);
         await db.dayOverrides.put({
           day: selectedDay,
-          activities: dayActs,
+          activities: compactadas,
           updatedAt: Date.now()
         });
         return;
@@ -510,125 +496,35 @@
     const list = $state.snapshot($activitiesStore) || [];
     if (list.length === 0) return;
 
-    // Copy the activities to work with them
-    const updatedActivities = list.map(a => ({ 
-      ...a, 
-      daysOfWeek: [...a.daysOfWeek] 
-    }));
+    const cambios = planearCompactacionSemanal(list, limiteH, direccion);
+    if (cambios.length === 0) return;
 
-    // For each day, shift activities upwards to cover gaps above (preserving duration)
-    for (let day = 0; day < 7; day++) {
-      const dayActs = updatedActivities.filter(a => a.daysOfWeek.includes(day));
-      dayActs.sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
-
-      let prevEnd = startH;
-      for (const act of dayActs) {
-        const actStart = parseTime(act.startTime);
-        if (actStart > prevEnd) {
-          const duration = parseTime(act.endTime) - actStart;
-          act.startTime = formatTime(prevEnd);
-          act.endTime = formatTime(prevEnd + duration);
-        }
-        prevEnd = parseTime(act.endTime);
-      }
-    }
-
-    // Save changes to database
     try {
       await db.transaction('rw', db.activities, async () => {
-        for (const act of updatedActivities) {
-          const original = list.find(o => o.id === act.id);
-          if (original && (original.startTime !== act.startTime || original.endTime !== act.endTime)) {
-            await db.activities.update(act.id!, { 
-              startTime: act.startTime,
-              endTime: act.endTime,
-              updatedAt: Date.now()
-            });
-          }
+        for (const cambio of cambios) {
+          await db.activities.update(cambio.id, {
+            startTime: cambio.startTime,
+            endTime: cambio.endTime,
+            updatedAt: Date.now()
+          });
         }
       });
     } catch (err: any) {
       console.error('Failed to adjust activities:', err);
       toastErr(tNow('toast.couldNotMove') + ': ' + (err.message || err));
     }
+  }
+
+  function coverGapsAbove() {
+    return compactarHorario('arriba');
   }
 
   /** Espejo de coverGapsAbove: empuja todo hacia endHour preservando los
    *  huecos ENTRE actividades (elimina solo el espacio libre inferior). */
-  async function coverGapsBelow() {
-    const endH = settingsObj.endHour;
-
-    if (currentView === 'day') {
-      const overrides = $state.snapshot($dayOverridesStore) || [];
-      const currentOverride = overrides.find(o => o.day === selectedDay);
-
-      if (currentOverride && currentOverride.activities?.length > 0) {
-        const dayActs = currentOverride.activities.map(a => ({ ...a }));
-        dayActs.sort((a, b) => parseTime(b.endTime) - parseTime(a.endTime)); // desde la última
-
-        let nextStart = endH;
-        for (const act of dayActs) {
-          const actEnd = parseTime(act.endTime);
-          if (actEnd < nextStart) {
-            const duration = actEnd - parseTime(act.startTime);
-            act.startTime = formatTime(nextStart - duration);
-            act.endTime = formatTime(nextStart);
-          }
-          nextStart = parseTime(act.startTime);
-        }
-
-        await db.dayOverrides.put({
-          day: selectedDay,
-          activities: dayActs,
-          updatedAt: Date.now()
-        });
-        return;
-      }
-    }
-
-    const list = $state.snapshot($activitiesStore) || [];
-    if (list.length === 0) return;
-
-    const updatedActivities = list.map(a => ({
-      ...a,
-      daysOfWeek: [...a.daysOfWeek]
-    }));
-
-    // Por día: desde la última actividad hacia atrás, pegada al final del día.
-    for (let day = 0; day < 7; day++) {
-      const dayActs = updatedActivities.filter(a => a.daysOfWeek.includes(day));
-      dayActs.sort((a, b) => parseTime(b.endTime) - parseTime(a.endTime));
-
-      let nextStart = endH;
-      for (const act of dayActs) {
-        const actEnd = parseTime(act.endTime);
-        if (actEnd < nextStart) {
-          const duration = actEnd - parseTime(act.startTime);
-          act.startTime = formatTime(nextStart - duration);
-          act.endTime = formatTime(nextStart);
-        }
-        nextStart = parseTime(act.startTime);
-      }
-    }
-
-    try {
-      await db.transaction('rw', db.activities, async () => {
-        for (const act of updatedActivities) {
-          const original = list.find(o => o.id === act.id);
-          if (original && (original.startTime !== act.startTime || original.endTime !== act.endTime)) {
-            await db.activities.update(act.id!, {
-              startTime: act.startTime,
-              endTime: act.endTime,
-              updatedAt: Date.now()
-            });
-          }
-        }
-      });
-    } catch (err: any) {
-      console.error('Failed to adjust activities:', err);
-      toastErr(tNow('toast.couldNotMove') + ': ' + (err.message || err));
-    }
+  function coverGapsBelow() {
+    return compactarHorario('abajo');
   }
+
 
   /* (Subir/Bajar Todo retirado a pedido del usuario: los botones ↑↓ del
      header y de la sidebar de Día se eliminaron. La lógica shiftAll quedó

@@ -4,14 +4,14 @@
   import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync, subirAhora, bajarAhora, inspeccionarBajada, aplicarSnapshotReemplazando, detectarDuplicadosActividades, limpiarDuplicadosNube, SIN_SESION } from '../lib/sync';
   import { establecerClave, olvidarClave } from '../lib/crypto';
   import type { SyncStatus } from '../lib/types';
-  import { Cloud, CloudUpload, CloudDownload, LogIn, LogOut, RefreshCw, UserPlus, TriangleAlert, Eye, EyeOff } from '@lucide/svelte';
+  import { Cloud, CloudUpload, CloudDownload, LogIn, LogOut, RefreshCw, UserPlus, TriangleAlert } from '@lucide/svelte';
   import type { Category } from '../lib/types';
-  import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck, Languages, Layers, Palette } from '@lucide/svelte';
+  import { X, Save, Plus, Trash2, Download, Upload, GripVertical, Layers, Palette } from '@lucide/svelte';
   import ColorMixerModal from './ColorMixerModal.svelte';
-  import { idioma, cambiarIdioma, t, IDIOMAS_DISPONIBLES } from '../lib/i18n';
-  import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
-  import { tema, elegirTema, TEMAS, type Tema } from '../lib/tema';
-  import { formatTime as horaReloj } from '../lib/timeUtils';
+  import SettingsPreferencesSection from './settings/SettingsPreferencesSection.svelte';
+  import SettingsHoursRangeSection from './settings/SettingsHoursRangeSection.svelte';
+  import SettingsTransparencySection from './settings/SettingsTransparencySection.svelte';
+  import { t } from '../lib/i18n';
   import { dndzone } from 'svelte-dnd-action';
   import { flip } from 'svelte/animate';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -292,15 +292,6 @@
     localCategories = e.detail.items.map((item: any, index: number) => ({ ...item, order: index, updatedAt: Date.now() }));
   }
 
-  /** Opciones cada 30 min: el slider de asas puede dejar valores intermedios
-   *  (paso 0.25h) y el select SIEMPRE debe poder mostrar la hora actual. */
-  const startOptions = $derived(
-    Array.from({ length: 48 }, (_, i) => {
-      const v = i * 0.5;
-      const h = Math.floor(v), m = v % 1 ? '30' : '00';
-      return { value: v, label: `${h % 12 || 12}:${m} ${h < 12 ? 'AM' : 'PM'}${h === 12 ? ' (Mediodía)' : ''}` };
-    })
-  );
 
   const endOptions = $derived(
     Array.from({ length: 49 }, (_, i) => {
@@ -668,35 +659,7 @@
     }
   }
 
-  /**
-   * Barra de rango ARRASTRABLE (pedido del usuario): dos asas directamente
-   * sobre la barra verde. Dos <input type="range"> nativos superpuestos:
-   * teclado (flechas, Home/End), táctil y lector de pantalla gratis — sin
-   * reinventar el gesto. Los selects de arriba quedan sincronizados (dos
-   * caminos al mismo estado, el que toque el usuario).
-   */
-  const PASO_SLIDER = 0.25; // 15 min
-  let asaActiva = $state<'inicio' | 'fin' | null>(null);
-
-  function alArrastrarInicio(e: Event) {
-    const v = Number((e.currentTarget as HTMLInputElement).value);
-    // Empujar el fin SOLO si el inicio lo alcanza (mínimo 1h de rango).
-    if (v > endHour - 1) endHour = Math.min(24, v + 1);
-    startHour = Math.min(v, endHour - 1);
-  }
-
-  function alArrastrarFin(e: Event) {
-    const v = Number((e.currentTarget as HTMLInputElement).value);
-    // Empujar el inicio SOLO si el fin lo alcanza (mínimo 1h de rango).
-    if (v < startHour + 1) startHour = Math.max(0, v - 1);
-    endHour = Math.max(v, startHour + 1);
-  }
 </script>
-
-<svelte:window
-  onpointerup={() => { asaActiva = null; }}
-  onpointercancel={() => { asaActiva = null; }}
-/>
 
 <div class="modal-overlay" onclick={onClose}>
   <div
@@ -789,116 +752,9 @@
         {/if}
       </section>
 
-      <!-- ── Idioma / Language ── -->
-      <section class="settings-section">
-        <h3><Languages size={16} /> {$t('settings.language')}</h3>
-        <div class="lang-selector" role="radiogroup" aria-label="{$t('settings.language')}">
-          {#each IDIOMAS_DISPONIBLES as opt}
-            <button
-              class="lang-option"
-              class:active={$idioma === opt.codigo}
-              role="radio"
-              aria-checked={$idioma === opt.codigo}
-              onclick={() => cambiarIdioma(opt.codigo)}
-            >
-              {opt.nombre}
-            </button>
-          {/each}
-        </div>
-        <p class="lang-hint">{$t('settings.languageHint')}</p>
-      </section>
+      <SettingsPreferencesSection />
 
-      <!-- ── Tema / Theme ── -->
-      <section class="settings-section">
-        <h3>{$t('settings.theme')}</h3>
-        <div class="lang-selector" role="radiogroup" aria-label={$t('settings.theme')}>
-          {#each TEMAS as opt}
-            <button
-              class="lang-option"
-              class:active={$tema === opt.valor}
-              role="radio"
-              aria-checked={$tema === opt.valor}
-              data-tema-opcion={opt.valor}
-              onclick={() => elegirTema(opt.valor)}
-            >
-              {$t(opt.clave)}
-            </button>
-          {/each}
-        </div>
-        <p class="lang-hint">{$t('settings.themeHint')}</p>
-      </section>
-
-      <section class="settings-section">
-        <h3>{$t('settings.hoursRange')}</h3>
-        <div class="range-selector">
-          <div class="range-inputs-horizontal">
-            <div class="form-group-compact">
-              <label for="set-start">{$t('settings.startsAt')}</label>
-              <select id="set-start" bind:value={startHour}>
-                {#each startOptions as opt}
-                  <option value={opt.value}>{opt.label}</option>
-                {/each}
-              </select>
-            </div>
-            
-            <div class="to-text">{$t('settings.to')}</div>
-
-            <div class="form-group-compact">
-              <label for="set-end">{$t('settings.endsAt')}</label>
-              <select id="set-end" bind:value={endHour}>
-                {#each endOptions as opt}
-                  <option value={opt.value}>{opt.label}</option>
-                {/each}
-              </select>
-            </div>
-          </div>
-          
-          <div class="range-visual">
-            <div class="range-slider">
-              <div class="range-bar-total" class:arrastrando={asaActiva !== null}>
-                <div class="range-bar-active" style="left: {(startHour / 24) * 100}%; width: {((endHour - startHour) / 24) * 100}%"></div>
-              </div>
-              <!-- Asas superpuestas: cada input cubre la barra completa; el
-                   z-index dinámico hace pasar arriba al asa cercana al cruce. -->
-              <input
-                type="range"
-                class="range-handle asa-inicio"
-                min={0}
-                max={24}
-                step={PASO_SLIDER}
-                value={startHour}
-                aria-label={$t('settings.startsAt')}
-                aria-valuetext={horaReloj(startHour)}
-                oninput={alArrastrarInicio}
-                onpointerdown={() => { asaActiva = 'inicio'; }}
-                style="z-index: {startHour > (startHour + endHour) / 2 - 1 ? 4 : 5}"
-              />
-              <input
-                type="range"
-                class="range-handle asa-fin"
-                min={0}
-                max={24}
-                step={PASO_SLIDER}
-                value={endHour}
-                aria-label={$t('settings.endsAt')}
-                aria-valuetext={horaReloj(endHour)}
-                oninput={alArrastrarFin}
-                onpointerdown={() => { asaActiva = 'fin'; }}
-                style="z-index: {startHour > (startHour + endHour) / 2 - 1 ? 5 : 4}"
-              />
-              <div class="range-burbuja" class:visible={asaActiva !== null} style="left: {(asaActiva === 'fin' ? endHour : startHour) / 24 * 100}%">
-                {horaReloj(asaActiva === 'fin' ? endHour : startHour)}
-              </div>
-            </div>
-            <div class="range-labels">
-              <span>0h</span>
-              <span>12h</span>
-              <span>24h</span>
-            </div>
-            <p class="range-summary">{$t('settings.daySummary', { hours: endHour - startHour })}</p>
-          </div>
-        </div>
-      </section>
+      <SettingsHoursRangeSection bind:startHour bind:endHour />
 
       <section class="settings-section">
         <header class="section-header categories-header">
@@ -1047,30 +903,7 @@
         </div>
       </section>
 
-      <!-- ── Tus datos: transparencia sobre el tratamiento (pedido del usuario) ── -->
-      <section class="settings-section data-transparency">
-        <h3><ShieldCheck size={16} /> {$t('settings.dataTitle')}</h3>
-        <!-- Modo privacidad: vivía en el menú Datos, pero no es cosa de la
-             nube — con el resto de la configuración es donde se buscaba. -->
-        <button
-          type="button"
-          class="privacy-toggle"
-          role="switch"
-          aria-checked={$modoPrivacidad}
-          onclick={alternarPrivacidad}
-        >
-          {#if $modoPrivacidad}<EyeOff size={16} aria-hidden="true" />{:else}<Eye size={16} aria-hidden="true" />{/if}
-          <span class="menu-item-flex">{$t('header.privacy')}</span>
-          <span class="privacy-estado" aria-hidden="true">{$modoPrivacidad ? '✓' : ''}</span>
-        </button>
-        <ul class="data-points">
-          <li>{@html $t('privacy.noAccount')}</li>
-          <li>{@html $t('privacy.withAccount')}</li>
-          <li>{@html $t('privacy.whatWeStore')}</li>
-          <li>{@html $t('privacy.youControl')}</li>
-          <li>{@html $t('privacy.noFinePrint')}</li>
-        </ul>
-      </section>
+      <SettingsTransparencySection />
     </div>
 
     <footer class="modal-footer">
@@ -1226,183 +1059,6 @@
     color: rgb(var(--tinta));
     border-bottom: 1px solid rgb(var(--linea) / 0.05);
     padding-bottom: 0.5rem;
-  }
-
-  .range-selector {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    padding: 1rem;
-    background: rgb(var(--tinta) / 0.03);
-    border-radius: 12px;
-    border: 1px solid rgb(var(--linea) / 0.05);
-  }
-
-  .range-inputs-horizontal {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-  }
-
-  .form-group-compact {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    min-width: 0;
-  }
-
-  .form-group-compact select {
-    width: 100%;
-    padding: 0.5rem;
-    min-height: 42px;
-    font-size: 0.85rem;
-  }
-
-  .to-text {
-    padding-top: 1.25rem;
-    font-size: 0.85rem;
-    color: rgb(var(--texto-2)); /* AA sobre #f5f5f5 (antes #999 = 2.8:1) */
-    font-weight: 600;
-  }
-
-  .range-visual {
-    padding-top: 1rem;
-    border-top: 1px solid rgb(var(--linea) / 0.03);
-    margin-top: 0.5rem;
-  }
-
-  /* Contenedor del gesto: barra + asas + burbuja comparten anclaje, así el
-     thumb SIEMPRE cae sobre la pista. */
-  .range-slider {
-    position: relative;
-    height: 28px;
-    display: flex;
-    align-items: center;
-  }
-
-  .range-bar-total {
-    height: 8px;
-    background: rgb(var(--lavado) / 0.1);
-    border-radius: 4px;
-    position: relative;
-    overflow: hidden;
-    width: 100%;
-  }
-
-  .range-handle {
-    /* Input crudo invisible: queda SOLO el thumb nativo (asa redonda). */
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 100%;
-    height: 28px;
-    margin: 0;
-    appearance: none;
-    -webkit-appearance: none;
-    background: transparent;
-    pointer-events: none; /* el track no roba el gesto */
-  }
-  .range-handle:focus {
-    outline: none;
-  }
-  /* Pista del navegador declarada: 8px centrada en los 28px del input —
-     sin esto Chromium ancla el thumb a SU track por defecto y el círculo
-     se pinta desalineado de la barra visual. */
-  .range-handle::-webkit-slider-runnable-track {
-    height: 8px;
-    background: transparent;
-  }
-  /* El thumb SÍ recibe el gesto (target táctil ≥28px de alto). */
-  .range-handle::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    pointer-events: auto;
-    width: 22px;
-    height: 22px;
-    margin-top: -7px; /* centra el thumb en el track declarado de 8px */
-    border-radius: 50%;
-    background: var(--color-green-dark);
-    border: 3px solid rgb(var(--borde-blanco));
-    box-shadow: 0 1px 4px rgb(var(--sombra) / 0.3);
-    cursor: grab;
-    transition: transform 0.15s;
-  }
-  .range-handle::-moz-range-track {
-    height: 8px;
-    background: transparent;
-  }
-  .range-handle::-moz-range-thumb {
-    pointer-events: auto;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--color-green-dark);
-    border: 3px solid rgb(var(--borde-blanco));
-    box-shadow: 0 1px 4px rgb(var(--sombra) / 0.3);
-    cursor: grab;
-  }
-  .range-handle:active::-webkit-slider-thumb {
-    cursor: grabbing;
-    transform: scale(1.15);
-  }
-  .range-handle:focus-visible::-webkit-slider-thumb {
-    outline: 3px solid rgb(var(--verde-texto));
-    outline-offset: 2px;
-  }
-  /* Cerca del cruce, la asa que se acerca pasa arriba (elegido en markup). */
-  .asa-inicio { z-index: 5; }
-  .asa-fin { z-index: 4; }
-
-  /* Burbuja de hora durante el arrastre: sobre el asa activa. */
-  .range-burbuja {
-    position: absolute;
-    top: -18px;
-    transform: translateX(-50%);
-    background: var(--color-brown-bark);
-    color: rgb(var(--sobre-color));
-    font-size: 0.72rem;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: 6px;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.15s, left 0.1s linear;
-    white-space: nowrap;
-    z-index: 6;
-  }
-  .range-burbuja.visible {
-    opacity: 1;
-  }
-
-  /* Barra con gesto activo: leve realce de la pista. */
-  .range-bar-total.arrastrando .range-bar-active {
-    filter: brightness(1.08);
-  }
-
-  .range-bar-active {
-    position: absolute;
-    height: 100%;
-    background: var(--color-green-dark);
-    border-radius: 4px;
-    transition: all 0.3s ease;
-  }
-
-  .range-labels {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.7rem;
-    color: rgb(var(--texto-2)); /* AA (antes #999) */
-    margin-top: 0.5rem;
-  }
-
-  .range-summary {
-    text-align: center;
-    font-size: 0.9rem;
-    color: rgb(var(--tinta));
-    margin-top: 1rem;
-    opacity: 0.8;
   }
 
   .form-group {
@@ -1728,107 +1384,6 @@
     background: rgb(var(--rojo-solido) / 0.16);
   }
 
-  /* ── Tus datos, en claro: transparencia sobre el tratamiento ── */
-  .data-transparency {
-    background: rgb(var(--verde-lavado) / 0.04);
-    border: 1px solid rgb(var(--verde-borde) / 0.15);
-    border-radius: 10px;
-    padding: 0.85rem 1rem;
-  }
-  .data-transparency h3 {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    color: rgb(var(--verde-texto));
-  }
-  /* Modo privacidad: fila completa con estado visible (✓) y target de 44px.
-     Antes vivía en el menú Datos; con su configuración es donde se buscaba. */
-  .privacy-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    min-height: 44px;
-    margin: 0.6rem 0 0;
-    padding: 0.55rem 0.75rem;
-    border-radius: 8px;
-    border: 1px solid rgb(var(--linea) / 0.4);
-    background: rgb(var(--sup) / 0.5);
-    color: rgb(var(--tinta));
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    text-align: left;
-  }
-  .privacy-toggle svg { flex-shrink: 0; }
-  .privacy-toggle:hover { border-color: rgb(var(--verde-borde) / 0.5); }
-  .privacy-estado { margin-left: auto; color: rgb(var(--verde-fuerte)); font-weight: 700; }
-  .data-points {
-    margin: 0.5rem 0 0;
-    padding: 0;
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-  }
-  .data-points li {
-    position: relative;
-    padding-left: 1.1rem;
-    font-size: 0.82rem;
-    line-height: 1.45;
-    color: rgb(var(--tinta));
-  }
-  .data-points li::before {
-    content: '✓';
-    position: absolute;
-    left: 0;
-    color: rgb(var(--verde-texto));
-    font-weight: 700;
-  }
-  .data-points strong {
-    color: rgb(var(--verde-texto));
-  }
-  @media (max-width: 480px) {
-    .data-transparency {
-      padding: 0.7rem 0.75rem;
-    }
-    .data-points li {
-      font-size: 0.78rem;
-    }
-  }
-
-  /* ── Selector de idioma: pills gemelas al estilo mode-toggle de Día ── */
-  .lang-selector {
-    display: flex;
-    background: rgb(var(--lavado) / 0.04);
-    border-radius: 10px;
-    padding: 3px;
-    gap: 2px;
-    width: fit-content;
-  }
-  .lang-option {
-    padding: 0.5rem 1.1rem;
-    min-height: 44px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: rgb(var(--texto-2)); /* AA (antes #888 = 3.5:1) */
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  .lang-option.active {
-    background: rgb(var(--sup));
-    color: rgb(var(--verde-texto));
-    box-shadow: 0 1px 4px rgb(var(--sombra) / 0.08);
-  }
-  .lang-hint {
-    margin: 0.4rem 0 0;
-    font-size: 0.75rem;
-    color: rgb(var(--texto-2)); /* AA (antes #999) */
-  }
-
   .danger-zone .btn-danger:disabled {
     opacity: 0.6;
     cursor: wait;
@@ -2098,10 +1653,6 @@
     }
     .settings-sections {
       gap: 1.25rem;
-    }
-    .range-selector {
-      padding: 0.75rem;
-      gap: 1rem;
     }
     .backup-actions {
       flex-direction: column;

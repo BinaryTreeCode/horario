@@ -8,6 +8,7 @@
   import { db, newId } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
   import ImageLightbox from './ImageLightbox.svelte';
+  import ActivityContextMenu from './ActivityContextMenu.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastOk, toastErr, toastErrRepetido } from '../lib/toast';
   import { portal } from '../lib/portal';
@@ -1056,28 +1057,16 @@
   </div>
 
   {#if contextMenu.show}
-    <!-- Portal a body: el backdrop-filter de .glass-panel ancestro crea containing block
-         y ancla el position:fixed al PANEL (menú lejos del cursor). Mismo fix que Semana. -->
-    <div class="custom-context-menu glass-panel" use:portal style="top: {contextMenu.y}px; left: {contextMenu.x}px">
-      {#if contextMenu.emptyMenuHour !== null}
-        <!-- Menú de hueco: crear con la hora del punto del click derecho -->
-        <button onclick={createAtEmptySlot} aria-label={$t('menu.createHere', { time: format12h(horasAHoraReloj(contextMenu.emptyMenuHour)) })}>
-          <Plus size={16} /> {$t('menu.createHere', { time: format12h(horasAHoraReloj(contextMenu.emptyMenuHour)) })}
-        </button>
-      {:else}
-      <button onclick={duplicateActivity}>
-        <Copy size={16} /> {$t('menu.duplicate')}
-      </button>
-      {#if srcImagen(contextMenuActivity?.image)}
-        <button onclick={() => { viewingImageActivity = contextMenuActivity; }}>
-          <ImageIcon size={16} /> {$t('menu.viewImage')}
-        </button>
-      {/if}
-      <button class="delete-btn" onclick={askDeleteActivity}>
-        <Trash2 size={16} /> {$t('menu.delete')}
-      </button>
-      {/if}
-    </div>
+    <ActivityContextMenu
+      x={contextMenu.x}
+      y={contextMenu.y}
+      emptyTimeLabel={contextMenu.emptyMenuHour !== null ? format12h(horasAHoraReloj(contextMenu.emptyMenuHour)) : null}
+      onCreateAtEmpty={createAtEmptySlot}
+      hasImage={Boolean(srcImagen(contextMenuActivity?.image))}
+      onViewImage={() => { viewingImageActivity = contextMenuActivity; }}
+      onDuplicate={duplicateActivity}
+      onDelete={askDeleteActivity}
+    />
   {/if}
 
   <ConfirmDialog
@@ -1836,57 +1825,7 @@
     opacity: 0.5;
   }
 
-  .custom-context-menu {
-    position: fixed;
-    z-index: 1000;
-    display: flex;
-    flex-direction: column;
-    padding: 0.5rem;
-    min-width: 200px;
-    background: rgb(var(--sup));
-    border-radius: 12px;
-    box-shadow: 0 10px 25px rgb(var(--sombra) / 0.15);
-    border: 1px solid rgb(var(--linea) / 0.05);
-    animation: fadeIn 0.1s ease-out;
-  }
 
-  @keyframes fadeIn {
-    from { opacity: 0; transform: scale(0.95); }
-    to { opacity: 1; transform: scale(1); }
-  }
-
-  .custom-context-menu button {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: rgb(var(--tinta));
-    border-radius: 8px;
-    transition: all 0.2s;
-    text-align: left;
-  }
-
-  .custom-context-menu button:hover {
-    background: rgb(var(--tinta) / 0.05);
-    color: rgb(var(--verde-texto));
-  }
-
-  .custom-context-menu button.delete-btn {
-    color: rgb(var(--rojo-texto));
-    border-top: 1px solid rgb(var(--linea) / 0.05);
-    margin-top: 0.25rem;
-    padding-top: 0.75rem;
-    border-radius: 0 0 8px 8px;
-  }
-
-  .custom-context-menu button.delete-btn:hover {
-    background: rgb(var(--rojo-lavado));
-  }
 
   /* ── Cobertura móvil escalonada (misma escala que la grilla Semana) ──
      768px: header/banner compactos y track con menos margen.
