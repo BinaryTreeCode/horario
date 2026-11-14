@@ -1654,9 +1654,12 @@
     .modal-content {
       max-width: 100%;
       padding: 1.25rem;
+      padding-left: max(1.25rem, env(safe-area-inset-left, 0px));
+      padding-right: max(1.25rem, env(safe-area-inset-right, 0px));
     }
     .modal-header {
       margin-bottom: 1.25rem;
+      padding-top: max(1rem, env(safe-area-inset-top, 0px));
     }
     .settings-sections {
       gap: 1.25rem;
@@ -1666,6 +1669,15 @@
     }
     .import-filename {
       max-width: 100%;
+    }
+    .modal-footer {
+      padding-bottom: max(1rem, calc(0.75rem + env(safe-area-inset-bottom, 0px)));
+      gap: 0.75rem;
+    }
+    .modal-footer .btn {
+      min-height: 44px;
+      flex: 1;
+      justify-content: center;
     }
   }
 </style>

@@ -344,12 +344,21 @@
   }
 
   @media (max-width: 600px) {
+    .modal-overlay {
+      align-items: flex-end;
+      padding: 0;
+    }
     .modal-content {
-      max-height: 96vh;
-      max-height: 96dvh;
+      width: 100%;
+      max-width: 100%;
+      border-radius: 20px 20px 0 0;
+      border-bottom: none;
+      max-height: 94vh;
+      max-height: 94dvh;
     }
     .modal-footer {
       flex-direction: column-reverse;
+      padding-bottom: max(1rem, calc(0.75rem + env(safe-area-inset-bottom, 0px)));
     }
     .modal-footer .btn {
       width: 100%;

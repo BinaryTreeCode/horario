@@ -1615,6 +1615,23 @@
     gap: 0.5rem;
   }
 
+  @media (max-width: 640px) {
+    .modal-overlay {
+      align-items: flex-end;
+      padding: 0;
+    }
+    .modal-content {
+      width: 100%;
+      max-width: 100%;
+      max-height: 92vh;
+      max-height: 92dvh;
+      border-radius: 20px 20px 0 0;
+    }
+    .modal-footer {
+      padding-bottom: max(1rem, calc(0.75rem + env(safe-area-inset-bottom, 0px)));
+    }
+  }
+
   @media (max-width: 540px) {
     .modal-header, form, .modal-footer {
       padding: 1rem 1.25rem;
@@ -1644,6 +1661,7 @@
       font-size: 0.8rem;
     }
     .modal-footer {
+      padding-bottom: max(1rem, calc(0.75rem + env(safe-area-inset-bottom, 0px)));
       flex-direction: column-reverse;
       gap: 0.75rem;
     }

@@ -33,6 +33,11 @@ body:has(.modal-overlay) {
   overflow: hidden;
 }
 
+html,
+body {
+  overscroll-behavior-y: contain;
+}
+
 body {
   margin: 0;
   padding: 0;

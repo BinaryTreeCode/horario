@@ -901,10 +901,14 @@
     width: 100%;
     margin: 0 auto;
     padding: 1.5rem;
+    padding-left: max(1.5rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1.5rem, env(safe-area-inset-right, 0px));
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
     min-height: 100vh;
+    min-height: 100dvh;
   }
 
   /* 3 zonas de verdad: logo (izq) · pestañas (centro EXACTO) · acciones (der).
@@ -979,6 +983,13 @@
      se ajustan solo los paddings. Los botones de acción no se tocan: 44px es
      el piso duro de zona táctil y ya lo cumplen justos. */
   @media (max-height: 480px) and (min-width: 700px) {
+    .dashboard {
+      padding: 0.5rem;
+      padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+      padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
+      padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+      gap: 0.5rem;
+    }
     .dashboard-header {
       display: grid;
       /* 1fr auto auto y no 1fr auto 1fr: con la derecha en 1fr el navegador
@@ -1685,6 +1696,9 @@
   @media (max-width: 768px) {
     .dashboard {
       padding: 0.75rem;
+      padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+      padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+      padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
       gap: 1rem;
     }
     .dashboard-header {
@@ -1710,6 +1724,13 @@
        que left/right compartan una sola fila (los width:100% fuerzan 2 filas).
        Va DESPUÉS de las reglas base: misma especificidad, gana el orden. */
     @media (orientation: landscape) and (max-height: 420px) {
+      .dashboard {
+        padding: 0.4rem;
+        padding-left: max(0.4rem, env(safe-area-inset-left, 0px));
+        padding-right: max(0.4rem, env(safe-area-inset-right, 0px));
+        padding-bottom: max(0.4rem, env(safe-area-inset-bottom, 0px));
+        gap: 0.5rem;
+      }
       .dashboard-header {
         padding: 0.4rem 1rem;
         padding-top: calc(0.4rem + env(safe-area-inset-top, 0px));
@@ -1747,6 +1768,41 @@
     .btn-plus {
       padding-left: 0.5rem;
       padding-right: 0.5rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .dashboard {
+      padding: 0.4rem;
+      padding-left: max(0.4rem, env(safe-area-inset-left, 0px));
+      padding-right: max(0.4rem, env(safe-area-inset-right, 0px));
+      padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+      gap: 0.75rem;
+    }
+    .dashboard-header {
+      padding: 0.6rem 0.5rem;
+      padding-top: calc(0.6rem + env(safe-area-inset-top, 0px));
+      gap: 0.5rem;
+    }
+    .header-right {
+      gap: 3px;
+      justify-content: center;
+      justify-content: safe center;
+      max-width: 100%;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .header-right::-webkit-scrollbar {
+      display: none;
+    }
+    .header-actions {
+      gap: 3px;
+      flex-wrap: nowrap;
+    }
+    .header-right :global(.btn) {
+      min-width: 44px;
+      min-height: 44px;
+      padding: 0.45rem;
     }
   }
 
