@@ -2,20 +2,15 @@ import type { Activity } from './types';
 import { parseTime, formatTime } from './timeUtils';
 
 /**
- * Compacta las actividades de un día eliminando huecos hacia el límite indicado.
- * - 'arriba': desplaza las actividades hacia `limiteH` (inicio del día) conservando duraciones.
- * - 'abajo': desplaza las actividades hacia `limiteH` (fin del día) conservando duraciones.
- * No muta los objetos originales recibidos; retorna un nuevo arreglo ordenado cronológicamente.
+ * Aplica in-place la compactación sobre una lista de actividades de un mismo día.
+ * Ajusta los campos startTime y endTime desplazándolos hacia el límite indicado.
  */
-export function compactarDia(
-  acts: Activity[],
+function compactarTramo(
+  dayActs: Activity[],
   limiteH: number,
   direccion: 'arriba' | 'abajo'
-): Activity[] {
-  if (!acts || acts.length === 0) return [];
-
-  // Clonar actividades superficialmente para no mutar las de entrada
-  const dayActs = acts.map(a => ({ ...a }));
+): void {
+  if (dayActs.length === 0) return;
 
   if (direccion === 'arriba') {
     dayActs.sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
@@ -29,7 +24,6 @@ export function compactarDia(
       }
       prevEnd = parseTime(act.endTime);
     }
-    return dayActs;
   } else {
     // Desde la última hacia atrás
     dayActs.sort((a, b) => parseTime(b.endTime) - parseTime(a.endTime));
@@ -45,8 +39,26 @@ export function compactarDia(
     }
     // Devolver ordenadas cronológicamente
     dayActs.sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
-    return dayActs;
   }
+}
+
+/**
+ * Compacta las actividades de un día eliminando huecos hacia el límite indicado.
+ * - 'arriba': desplaza las actividades hacia `limiteH` (inicio del día) conservando duraciones.
+ * - 'abajo': desplaza las actividades hacia `limiteH` (fin del día) conservando duraciones.
+ * No muta los objetos originales recibidos; retorna un nuevo arreglo ordenado cronológicamente.
+ */
+export function compactarDia(
+  acts: Activity[],
+  limiteH: number,
+  direccion: 'arriba' | 'abajo'
+): Activity[] {
+  if (!acts || acts.length === 0) return [];
+
+  // Clonar actividades superficialmente para no mutar las de entrada
+  const dayActs = acts.map(a => ({ ...a }));
+  compactarTramo(dayActs, limiteH, direccion);
+  return dayActs;
 }
 
 /**
@@ -71,32 +83,7 @@ export function planearCompactacionSemanal(
 
   for (let day = 0; day < 7; day++) {
     const dayActs = updatedActivities.filter(a => a.daysOfWeek.includes(day));
-
-    if (direccion === 'arriba') {
-      dayActs.sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
-      let prevEnd = limiteH;
-      for (const act of dayActs) {
-        const actStart = parseTime(act.startTime);
-        if (actStart > prevEnd) {
-          const duration = parseTime(act.endTime) - actStart;
-          act.startTime = formatTime(prevEnd);
-          act.endTime = formatTime(prevEnd + duration);
-        }
-        prevEnd = parseTime(act.endTime);
-      }
-    } else {
-      dayActs.sort((a, b) => parseTime(b.endTime) - parseTime(a.endTime));
-      let nextStart = limiteH;
-      for (const act of dayActs) {
-        const actEnd = parseTime(act.endTime);
-        if (actEnd < nextStart) {
-          const duration = actEnd - parseTime(act.startTime);
-          act.startTime = formatTime(nextStart - duration);
-          act.endTime = formatTime(nextStart);
-        }
-        nextStart = parseTime(act.startTime);
-      }
-    }
+    compactarTramo(dayActs, limiteH, direccion);
   }
 
   const cambios: { id: string; startTime: string; endTime: string }[] = [];

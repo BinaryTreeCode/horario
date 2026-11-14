@@ -11,7 +11,7 @@
     categories: Category[];
     selectedMode: string;
     pivotColor: string;
-    categoriasArmonizadas: Category[];
+    categoriasArmonizadas: { id: string; color: string }[];
   }
 
   let {
