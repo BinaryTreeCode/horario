@@ -47,3 +47,9 @@ bunx drizzle-kit push  # migraciones → DATABASE_URL (requiere .env.local)
 - Push a `main` (dispara deploy Vercel) y espejo a `feat/cloud-sync`: `git push origin main:feat/cloud-sync`.
 - Tags semver (`v0.2.x`) en releases. PRs verificados por CI (`.github/workflows/ci.yml`).
 - OneDrive es lento: evitar operaciones masivas sobre `node_modules`.
+
+## Flujo de trabajo y delegación
+
+- **Agente principal (Manager y Arquitecto)**: analiza el código, diseña la arquitectura, redacta planes de desarrollo detallados y ejecuta cambios puntuales o críticos (especialmente en migraciones/pérdida de datos, auth/credenciales o integridad del sync LWW). Revisa los cambios de los subagentes y valida el resultado final antes de reportar.
+- **Subagente `flash` (Código)**: implementa features, refactors y tests siguiendo el plan y las especificaciones del agente principal, respetando todas las reglas de este `AGENTS.md`. Si se paralelizan ediciones, usar workspace aislado (`share` tipo worktree) para evitar conflictos y sin duplicar `node_modules`.
+- **Subagente `flash_lite` (Operaciones ligeras)**: ejecuta tareas mecánicas y rápidas como `bun install`, chequeos simples, commits atómicos en español y `push` a `main` + espejo `feat/cloud-sync`.
