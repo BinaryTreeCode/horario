@@ -122,6 +122,7 @@
       authPassword = '';
       syncMessage = tNow('settings.syncingMsg');
       await initialSyncAfterLogin();
+      await refrescarDesdeBD();
       syncMessage = tNow('settings.syncedE2E');
     } catch (err: any) {
       authError = err?.message ?? tNow('settings.networkError');
@@ -139,10 +140,23 @@
     syncMessage = '';
   }
 
+  async function refrescarDesdeBD() {
+    const [sh, eh, cats] = await Promise.all([
+      db.settings.get('startHour'),
+      db.settings.get('endHour'),
+      db.categories.toArray(),
+    ]);
+    if (typeof sh?.value === 'number') startHour = sh.value;
+    if (typeof eh?.value === 'number') endHour = eh.value;
+    const vivas = cats.filter(c => !c.deletedAt).sort((a, b) => a.order - b.order);
+    if (vivas.length > 0) localCategories = vivas;
+  }
+
   async function handleManualSync() {
     syncMessage = tNow('settings.syncingMsg');
     try {
       await syncNow(true);
+      await refrescarDesdeBD();
       syncMessage = tNow('settings.syncedMsg');
     } catch (err: any) {
       syncMessage = tNow('settings.syncFail', { msg: err?.message ?? tNow('settings.syncFailGeneric') });
@@ -158,6 +172,7 @@
     nubeOcupada = 'subir';
     try {
       const { enviados } = await subirAhora();
+      await refrescarDesdeBD();
       syncMessage = enviados > 0 ? tNow('cloud.subido', { n: enviados }) : tNow('cloud.subidoNada');
     } catch (err: any) {
       syncMessage = tNow('cloud.error', { msg: msgDe(err) });
@@ -171,6 +186,7 @@
     nubeOcupada = 'bajar';
     try {
       const { aplicados } = await bajarAhora();
+      await refrescarDesdeBD();
       syncMessage = aplicados > 0 ? tNow('cloud.bajado', { n: aplicados }) : tNow('cloud.bajadoNada');
     } catch (err: any) {
       syncMessage = tNow('cloud.error', { msg: msgDe(err) });

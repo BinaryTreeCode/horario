@@ -27,6 +27,8 @@ interface NubeFalsa {
   pulls: number;
   /** Cambia lo que hay en la nube en caliente (para probar un pull manual). */
   setRemotas: (filas: any[]) => void;
+  /** Cambia los settings en la nube en caliente (para probar sync de preferencias). */
+  setSettings: (filas: any[]) => void;
   /** Lo que el servidor tiene DE VERDAD de una fila (guard LWW incluido). */
   enNube: (id: string) => any;
   /** Peticiones que han llegado a /api/sync, push y pull juntos. */
@@ -78,6 +80,7 @@ const SKEW_MS = 60_000;
 
 async function conNube(page: import('@playwright/test').Page, iniciales: any[] = []): Promise<NubeFalsa> {
   const remotas = [...iniciales];
+  const remotasSettings: any[] = [];
   const almacen = new Map<string, any>();
   const claveDe = (tipo: string, fila: any) => (tipo === 'o' ? `o:${fila.day}` : `${tipo}:${fila.id}`);
   for (const f of iniciales) almacen.set(`a:${f.id}`, f);
@@ -87,6 +90,7 @@ async function conNube(page: import('@playwright/test').Page, iniciales: any[] =
     pulls: 0,
     peticiones: 0,
     setRemotas: filas => { remotas.length = 0; remotas.push(...filas); },
+    setSettings: filas => { remotasSettings.length = 0; remotasSettings.push(...filas); },
     enNube: id => almacen.get(`a:${id}`),
   };
   const serverTime = () => Date.now() + SKEW_MS;
@@ -129,11 +133,12 @@ async function conNube(page: import('@playwright/test').Page, iniciales: any[] =
     estado.pulls++;
     const since = Number(new URL(req.url()).searchParams.get('since') ?? '0') || 0;
     const nuevas = remotas.filter(r => (r.updatedAt ?? 0) > since);
+    const nuevasSettings = remotasSettings.filter(s => (s.updatedAt ?? 0) > since);
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        categories: [], activities: nuevas, settings: [], dayOverrides: [],
+        categories: [], activities: nuevas, settings: nuevasSettings, dayOverrides: [],
         serverTime: serverTime(), hasMore: false,
       }),
     });
@@ -205,10 +210,15 @@ test.describe('Sincronización entre dispositivos', () => {
     await conSesion(page);
     await page.goto('/');
     await esperarSemana(page);
-    // El arranque sube lo que el pull trajo y con eso queda fijado el cursor
-    // del push. Si ese cursor se toma del reloj del servidor (adelantado 60s),
-    // el cambio de abajo ya nace "en el pasado" y no vuelve a subir nunca.
-    await expect.poll(() => nube.pushes.length, { timeout: 20_000 }).toBeGreaterThan(0);
+    // Esperar a que el arranque complete su pull inicial y fije `lastPushAt`
+    // cubriendo lo recién bajado (sin re-subirlo en eco) antes de mutar en local.
+    await expect
+      .poll(async () => {
+        const st = await page.evaluate(async () => (await (globalThis as any).__npDb.syncState.get('1')) ?? null);
+        return Boolean(st?.lastPullAt && nube.pulls > 0);
+      }, { timeout: 20_000 })
+      .toBe(true);
+    expect(nube.pushes.length, 'el arranque no debería re-subir en eco lo que acaba de bajar').toBe(0);
 
     await page.evaluate(async () => {
       await (globalThis as any).__npDb.activities.put({
@@ -417,5 +427,135 @@ test.describe('Sincronización entre dispositivos', () => {
     // Un botón que lleva a error cada vez que se pulsa es peor que no tenerlo: en
     // su lugar hay UNO que abre Ajustes para entrar.
     await expect(page.locator('.menu-datos button', { hasText: TEXTO_NUBE })).toHaveCount(1);
+  });
+
+  test('bajar filas cifradas E2E no rompe IndexedDB y las descifra tras iniciar sesión', async ({ page }) => {
+    const errores: string[] = [];
+    page.on('pageerror', err => errores.push(String(err)));
+
+    await page.goto('/');
+    // Generar ciphertext real AES-GCM idéntico al cliente (np-sal:<email>, PBKDF2 210k).
+    const cifrada = await page.evaluate(async () => {
+      const enc = new TextEncoder();
+      const mat = await crypto.subtle.importKey('raw', enc.encode('e2e@test.dev::clave-e2e-123'), 'PBKDF2', false, ['deriveKey']);
+      const key = await crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt: enc.encode('np-sal:e2e@test.dev'), iterations: 210_000, hash: 'SHA-256' },
+        mat,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt'],
+      );
+      async function cif(texto: string): Promise<string> {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(texto));
+        const b64 = (buf: ArrayBuffer | Uint8Array) => {
+          const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+          let bin = '';
+          for (let i = 0; i < u.length; i++) bin += String.fromCharCode(u[i]);
+          return btoa(bin);
+        };
+        return `np1:0:${b64(iv)}:${b64(ct)}`;
+      }
+      const imgData = 'data:image/webp;base64,UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA=';
+      return {
+        id: 'act-e2e',
+        categoryId: 'rutina',
+        name: 'Actividad Cifrada',
+        startTime: '08:00',
+        endTime: '09:00',
+        daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+        description: await cif('Secreto real E2E'),
+        steps: await cif(JSON.stringify([{ id: 's1', title: 'Paso E2E', completed: false }])),
+        image: await cif(imgData),
+        updatedAt: Date.now() + 60_000,
+      };
+    });
+
+    // Fase 1: cookie vigente SIN clave E2E en memoria. El pull no debe explotar
+    // ni re-subir el placeholder bloqueado a la nube.
+    const nube = await conNube(page, [cifrada]);
+    await conSesion(page);
+    await page.evaluate(() => {
+      localStorage.removeItem('np_e2e_key');
+      sessionStorage.removeItem('np_e2e_key');
+    });
+    await page.reload();
+    await esperarSemana(page);
+    await expect.poll(() => nube.pulls, { timeout: 20_000 }).toBeGreaterThan(0);
+    await expect(page.locator('.activity-item[title="Actividad Cifrada"]').first()).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const a = await page.evaluate(async () => (await (globalThis as any).__npDb.activities.get('act-e2e')) ?? null);
+        return a?.description ?? null;
+      }, { timeout: 10_000 })
+      .toContain('Contenido cifrado');
+    expect(nube.pushes.length, 'sin clave no debe sobrescribir la nube con el placeholder bloqueado').toBe(0);
+
+    // Fase 2: cerrar sesión local en Ajustes y entrar con contraseña.
+    // Aunque la copia local tenía el +1 de acotarFechaRemota (remotaGana === false),
+    // initialSyncAfterLogin debe descifrarla fuera de la transacción IDB sin errores.
+    let autenticado = true;
+    await page.unroute('**/api/auth?op=me');
+    await page.route('**/api/auth?op=me', route =>
+      route.fulfill({
+        status: autenticado ? 200 : 401,
+        contentType: 'application/json',
+        body: JSON.stringify(autenticado ? { user: { id: 'u1', email: 'e2e@test.dev', name: null } } : { error: 'No' }),
+      }),
+    );
+    await page.route('**/api/auth?op=logout', route => {
+      autenticado = false;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+    await page.route('**/api/auth?op=login', route => {
+      autenticado = true;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ user: { id: 'u1', email: 'e2e@test.dev', name: null } }),
+      });
+    });
+
+    await page.locator('button[aria-label="Abrir ajustes"], button[aria-label="Open settings"]').click();
+    await page.locator('.btn-sync-logout').waitFor({ state: 'visible', timeout: 10_000 });
+    await page.locator('.btn-sync-logout').click();
+
+    await page.locator('.auth-form input[type="email"]').fill('e2e@test.dev');
+    await page.locator('.auth-form input[type="password"]').fill('clave-e2e-123');
+    await page.locator('.auth-submit').click();
+
+    await expect
+      .poll(async () => {
+        const a = await page.evaluate(async () => (await (globalThis as any).__npDb.activities.get('act-e2e')) ?? null);
+        return a ? `${a.description}|${a.steps?.[0]?.title ?? ''}|${a.image ?? ''}` : '';
+      }, { timeout: 20_000 })
+      .toContain('Secreto real E2E|Paso E2E|data:image/webp;base64,');
+    expect(errores, `errores en página: ${errores.join('; ')}`).toEqual([]);
+  });
+
+  test('bajar preferencias desde Ajustes aplica tema, idioma y rango horario en vivo sin recargar', async ({ page }) => {
+    const nube = await conNube(page, [remota('Inicial')]);
+    await conSesion(page);
+    await page.goto('/');
+    await esperarSemana(page);
+    await expect.poll(() => nube.pulls, { timeout: 20_000 }).toBeGreaterThan(0);
+
+    // Abrir Ajustes y luego simular que otro dispositivo subió tema oscuro, inglés e inicio 9:00.
+    await page.locator('button[aria-label="Abrir ajustes"], button[aria-label="Open settings"]').click();
+    await expect(page.locator('#set-start')).toBeVisible({ timeout: 10_000 });
+
+    const futuro = Date.now() + 120_000;
+    nube.setSettings([
+      { id: 'tema', key: 'tema', value: 'oscuro', updatedAt: futuro },
+      { id: 'language', key: 'language', value: 'en', updatedAt: futuro },
+      { id: 'startHour', key: 'startHour', value: 9, updatedAt: futuro },
+    ]);
+
+    await page.locator('button.sync-accion', { hasText: /Bajar de la nube|Download from the cloud/i }).click();
+
+    await expect(page.locator('html')).toHaveAttribute('data-tema', 'oscuro', { timeout: 10_000 });
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en', { timeout: 10_000 });
+    await expect(page.locator('#set-start')).toHaveValue('9', { timeout: 10_000 });
   });
 });

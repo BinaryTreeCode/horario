@@ -18,6 +18,7 @@
 
 import { writable, derived, get } from 'svelte/store';
 import { db, now } from './db';
+import { onDataChanged } from './dataBus';
 
 export type Tema = 'claro' | 'oscuro' | 'sistema';
 export type TemaEfectivo = 'claro' | 'oscuro';
@@ -88,17 +89,29 @@ function espejo(pref: Tema): void {
  * del SO con la preferencia en "sistema" el atributo se repinta solo.
  */
 let suscripcion: (() => void) | null = null;
+let escuchandoCambios = false;
+let escribiendoTema = false;
+let versionLocal = 0;
 
-export async function iniciarTema(): Promise<void> {
-  let pref: Tema = 'sistema';
+async function leerTemaDesdeBD(): Promise<Tema> {
   try {
     const guardado = await db.settings.get(CLAVE_TEMA);
-    if (esTemaValido(guardado?.value)) pref = guardado.value;
-  } catch {
-    pref = 'sistema';
-  }
+    if (esTemaValido(guardado?.value)) return guardado.value;
+  } catch { /* sin BD: cae a sistema */ }
+  return 'sistema';
+}
+
+async function recargarTemaDesdeBD(): Promise<void> {
+  const v = versionLocal;
+  const pref = await leerTemaDesdeBD();
+  if (v !== versionLocal || escribiendoTema) return;
+  if (get(tema) !== pref) tema.set(pref);
+}
+
+export async function iniciarTema(): Promise<void> {
+  const pref = await leerTemaDesdeBD();
   // Una sola suscripcion repinta el DOM ante cualquier cambio del store
-  // (elegirTema desde Ajustes, o este arranque): no hay dos caminos.
+  // (elegirTema desde Ajustes, un pull remoto o este arranque): no hay dos caminos.
   if (!suscripcion) {
     suscripcion = tema.subscribe((p) => {
       espejo(p);
@@ -113,13 +126,22 @@ export async function iniciarTema(): Promise<void> {
   // pantalla y sirve de bandera al depurar el arranque.
   if (typeof document !== 'undefined') document.documentElement.dataset.temaListo = '1';
 
-  if (typeof window !== 'undefined' && window.matchMedia) {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const alCambiar = () => {
-      if (get(tema) === 'sistema') aplicarTema(get(temaEfectivo));
-    };
-    if (typeof mq.addEventListener === 'function') mq.addEventListener('change', alCambiar);
-    else if (typeof mq.addListener === 'function') mq.addListener(alCambiar);
+  if (!escuchandoCambios) {
+    escuchandoCambios = true;
+    onDataChanged((tablas) => {
+      if (tablas.has('settings') && !escribiendoTema) {
+        void recargarTemaDesdeBD();
+      }
+    });
+
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const alCambiar = () => {
+        if (get(tema) === 'sistema') aplicarTema(get(temaEfectivo));
+      };
+      if (typeof mq.addEventListener === 'function') mq.addEventListener('change', alCambiar);
+      else if (typeof mq.addListener === 'function') mq.addListener(alCambiar);
+    }
   }
 }
 
@@ -129,10 +151,16 @@ export async function elegirTema(nuevo: Tema): Promise<void> {
   // El store repinta el DOM (suscripcion de iniciarTema); el store se
   // actualiza aunque la escritura en la BD falle, para que el toggle nunca
   // parezca muerto.
+  versionLocal++;
   tema.set(nuevo);
+  escribiendoTema = true;
   try {
     await db.settings.put({ id: CLAVE_TEMA, key: CLAVE_TEMA, value: nuevo, updatedAt: now() });
-  } catch { /* sin BD: el tema queda solo en memoria esta sesión */ }
+  } catch {
+    /* sin BD: el tema queda solo en memoria esta sesión */
+  } finally {
+    escribiendoTema = false;
+  }
 }
 
 /**

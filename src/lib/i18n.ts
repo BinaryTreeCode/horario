@@ -15,6 +15,7 @@
 
 import { writable, derived, get } from 'svelte/store';
 import { db, now } from './db';
+import { onDataChanged } from './dataBus';
 
 export type Idioma = 'es' | 'en';
 
@@ -687,23 +688,52 @@ if (typeof document !== 'undefined') {
   });
 }
 
-/** Carga la preferencia guardada (settings de IndexedDB) y arranca el i18n. */
-export async function iniciarIdioma(): Promise<void> {
+let escuchandoCambios = false;
+let escribiendoIdioma = false;
+let versionLocal = 0;
+
+async function leerIdiomaDesdeBD(): Promise<Idioma> {
   try {
     const guardado = await db.settings.get('language');
     const valor = guardado?.value as Idioma | undefined;
-    idioma.set(valor === 'en' || valor === 'es' ? valor : idiomaInicial());
+    return valor === 'en' || valor === 'es' ? valor : idiomaInicial();
   } catch {
-    idioma.set(idiomaInicial());
+    return idiomaInicial();
+  }
+}
+
+async function recargarIdiomaDesdeBD(): Promise<void> {
+  const v = versionLocal;
+  const siguiente = await leerIdiomaDesdeBD();
+  if (v !== versionLocal || escribiendoIdioma) return;
+  if (get(idioma) !== siguiente) idioma.set(siguiente);
+}
+
+/** Carga la preferencia guardada (settings de IndexedDB) y arranca el i18n. */
+export async function iniciarIdioma(): Promise<void> {
+  idioma.set(await leerIdiomaDesdeBD());
+  if (!escuchandoCambios) {
+    escuchandoCambios = true;
+    onDataChanged((tablas) => {
+      if (tablas.has('settings') && !escribiendoIdioma) {
+        void recargarIdiomaDesdeBD();
+      }
+    });
   }
 }
 
 /** Cambia el idioma y persiste la preferencia (viaja con el sync como ajuste). */
 export async function cambiarIdioma(nuevo: Idioma): Promise<void> {
+  versionLocal++;
   idioma.set(nuevo);
+  escribiendoIdioma = true;
   try {
     await db.settings.put({ id: 'language', key: 'language', value: nuevo, updatedAt: now() });
-  } catch { /* sin BD (SSR/primer arranque): el idioma queda solo en memoria */ }
+  } catch {
+    /* sin BD (SSR/primer arranque): el idioma queda solo en memoria */
+  } finally {
+    escribiendoIdioma = false;
+  }
 }
 
 /** Interpolación: t('week.hoursToday') o t('toast.duplicated', { name, time }). */

@@ -16,26 +16,56 @@
 
 import { writable, get } from 'svelte/store';
 import { db, now } from './db';
+import { onDataChanged } from './dataBus';
 
 /** Estado del modo privacidad (off por defecto). */
 export const modoPrivacidad = writable<boolean>(false);
 
-/** Carga la preferencia guardada en IndexedDB (viaja con el sync como ajuste). */
-export async function iniciarPrivacidad(): Promise<void> {
+let escuchandoCambios = false;
+let escribiendoPrivacidad = false;
+let versionLocal = 0;
+
+async function leerPrivacidadDesdeBD(): Promise<boolean> {
   try {
     const guardado = await db.settings.get('privacyMode');
-    modoPrivacidad.set(guardado?.value === true);
+    return guardado?.value === true;
   } catch {
-    modoPrivacidad.set(false);
+    return false;
+  }
+}
+
+async function recargarPrivacidadDesdeBD(): Promise<void> {
+  const v = versionLocal;
+  const val = await leerPrivacidadDesdeBD();
+  if (v !== versionLocal || escribiendoPrivacidad) return;
+  if (get(modoPrivacidad) !== val) modoPrivacidad.set(val);
+}
+
+/** Carga la preferencia guardada en IndexedDB (viaja con el sync como ajuste). */
+export async function iniciarPrivacidad(): Promise<void> {
+  modoPrivacidad.set(await leerPrivacidadDesdeBD());
+  if (!escuchandoCambios) {
+    escuchandoCambios = true;
+    onDataChanged((tablas) => {
+      if (tablas.has('settings') && !escribiendoPrivacidad) {
+        void recargarPrivacidadDesdeBD();
+      }
+    });
   }
 }
 
 /** Alterna el modo y persiste la preferencia. */
 export async function alternarPrivacidad(): Promise<boolean> {
   const nuevo = !get(modoPrivacidad);
+  versionLocal++;
   modoPrivacidad.set(nuevo);
+  escribiendoPrivacidad = true;
   try {
     await db.settings.put({ id: 'privacyMode', key: 'privacyMode', value: nuevo, updatedAt: now() });
-  } catch { /* sin BD: el modo queda solo en memoria esta sesión */ }
+  } catch {
+    /* sin BD: el modo queda solo en memoria esta sesión */
+  } finally {
+    escribiendoPrivacidad = false;
+  }
   return nuevo;
 }
