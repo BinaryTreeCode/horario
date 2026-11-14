@@ -6,7 +6,8 @@
   import type { SyncStatus } from '../lib/types';
   import { Cloud, CloudUpload, CloudDownload, LogIn, LogOut, RefreshCw, UserPlus, TriangleAlert, Eye, EyeOff } from '@lucide/svelte';
   import type { Category } from '../lib/types';
-  import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck, Languages, Layers } from '@lucide/svelte';
+  import { X, Save, Plus, Trash2, Download, Upload, GripVertical, ShieldCheck, Languages, Layers, Palette } from '@lucide/svelte';
+  import ColorMixerModal from './ColorMixerModal.svelte';
   import { idioma, cambiarIdioma, t, IDIOMAS_DISPONIBLES } from '../lib/i18n';
   import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
   import { tema, elegirTema, TEMAS, type Tema } from '../lib/tema';
@@ -479,6 +480,35 @@
     );
   }
 
+  // ── Mezclador de colores y paletas armónicas ──
+  let colorMixerOpen = $state(false);
+  let colorMixerTargetCatId = $state<string | null>(null);
+  let colorMixerInitialTab = $state<'armonizar' | 'individual'>('armonizar');
+
+  function abrirMixerGlobal() {
+    colorMixerTargetCatId = null;
+    colorMixerInitialTab = 'armonizar';
+    colorMixerOpen = true;
+  }
+
+  function abrirMixerIndividual(catId: string) {
+    colorMixerTargetCatId = catId;
+    colorMixerInitialTab = 'individual';
+    colorMixerOpen = true;
+  }
+
+  function handleApplyAllHarmonies(nuevasCats: Category[]) {
+    localCategories = nuevasCats;
+    toastOk(tNow('settings.paletteAppliedAll'));
+  }
+
+  function handleApplySingleColor(catId: string, newColor: string) {
+    const cat = localCategories.find(c => c.id === catId);
+    updateCategory(catId, 'color', newColor);
+    if (catNuevaId === catId) catNuevaId = null;
+    toastOk(tNow('settings.paletteAppliedOne', { name: cat?.label ?? '' }));
+  }
+
   async function restoreDefaultsConfirm() {
     const { INITIAL_CATEGORIES } = await import('../lib/db');
     localCategories = [...INITIAL_CATEGORIES];
@@ -886,8 +916,17 @@
       </section>
 
       <section class="settings-section">
-        <header class="section-header">
+        <header class="section-header categories-header">
           <h3>{$t('settings.categories')}</h3>
+          <button
+            type="button"
+            class="btn-mixer-header"
+            onclick={abrirMixerGlobal}
+            aria-label={$t('settings.openColorMixer')}
+          >
+            <Palette size={16} />
+            <span>{$t('settings.harmonicPalettes')}</span>
+          </button>
         </header>
         <div 
           class="categories-list" 
@@ -901,6 +940,15 @@
                 <GripVertical size={16} />
               </div>
               <input type="color" value={cat.color} aria-label={$t('settings.colorOf', { name: cat.label })} oninput={e => { updateCategory(cat.id, 'color', e.currentTarget.value); if (cat.id === catNuevaId) catNuevaId = null; }} />
+              <button
+                type="button"
+                class="btn-cat-mixer"
+                onclick={() => abrirMixerIndividual(cat.id)}
+                aria-label={$t('settings.openColorMixer') + ' — ' + cat.label}
+                title={$t('settings.openColorMixer')}
+              >
+                <Palette size={16} />
+              </button>
               <input type="text" value={cat.label} aria-label={$t('settings.categoryName')} oninput={e => updateCategory(cat.id, 'label', e.currentTarget.value)} />
               <button class="remove-cat" onclick={() => removeCategory(cat.id)} aria-label={$t('settings.removeCategory', { name: cat.label })}>
                 <Trash2 size={16} />
@@ -1109,6 +1157,16 @@
   danger={true}
   onconfirm={ejecutarLimpiarDuplicados}
   oncancel={() => { duplicadosDetectados = []; listaDuplicadosResumen = ''; }}
+/>
+
+<ColorMixerModal
+  isOpen={colorMixerOpen}
+  categories={localCategories}
+  targetCategoryId={colorMixerTargetCatId}
+  initialTab={colorMixerInitialTab}
+  onClose={() => (colorMixerOpen = false)}
+  onApplyAll={handleApplyAllHarmonies}
+  onApplyCategory={handleApplySingleColor}
 />
 
 <Toasts />
@@ -1396,6 +1454,50 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1rem;
+  }
+
+  .btn-mixer-header {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 8px;
+    background: rgb(var(--verde-lavado) / 0.12);
+    border: 1px solid rgb(var(--verde-borde) / 0.3);
+    color: rgb(var(--verde-texto));
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    min-height: 44px;
+    transition: all 0.2s;
+  }
+
+  .btn-mixer-header:hover {
+    background: rgb(var(--verde-lavado) / 0.22);
+    border-color: rgb(var(--verde-fuerte));
+  }
+
+  .btn-cat-mixer {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 6px;
+    background: rgb(var(--sup));
+    border: 1px solid rgb(var(--linea) / 0.12);
+    color: rgb(var(--texto-2));
+    cursor: pointer;
+    padding: 0;
+    transition: all 0.2s;
+  }
+
+  .btn-cat-mixer:hover {
+    color: rgb(var(--verde-texto));
+    border-color: rgb(var(--verde-borde));
+    background: rgb(var(--verde-lavado) / 0.08);
   }
 
   .categories-list {
@@ -1984,6 +2086,10 @@
       font-size: 16px;
     }
     input[type="color"] {
+      width: 44px;
+      height: 44px;
+    }
+    .btn-cat-mixer {
       width: 44px;
       height: 44px;
     }

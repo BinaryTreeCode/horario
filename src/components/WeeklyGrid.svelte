@@ -1303,16 +1303,16 @@
         <!-- Nombre completo SIEMPRE accesible: en columna angosta el header muestra
              la abreviatura (Mié/Sáb) y el title lleva el nombre entero. Sin
              nombres cortados a medias jamás. -->
-        <button class="day-header" class:header-hoy={i === hoyIdx} class:header-temp={dayOverrides.some(o => o.day === i && o.activities?.length >= 0)} onclick={() => onSelectDay(i)} aria-label={$t('week.viewDay', { day })} title="{day}">
+        <button class="day-header" class:header-hoy={i === hoyIdx} class:header-temp={dayOverrides.some(o => o.day === i && o.activities?.length >= 0)} onclick={() => onSelectDay(i)} aria-label={i === hoyIdx ? `${day} ${$t('week.today')} — ${$t('week.viewDay', { day })}` : `${day} — ${$t('week.viewDay', { day })}`} title="{day}">
           <span class="day-name">
             <span class="day-name-completo">{day}</span>
             <span class="day-name-corto" aria-hidden="true">{day.slice(0, 3)}</span>
           </span>
           {#if i === hoyIdx}
-            <span class="hoy-badge">{$t('week.today')}</span>
+            <span class="hoy-badge" aria-hidden="true">{$t('week.today')}</span>
           {/if}
           {#if dayOverrides.some(o => o.day === i && o.activities?.length >= 0)}
-            <span class="day-temp-badge" title={$t('week.tempBadge')}>⚡</span>
+            <span class="day-temp-badge" aria-hidden="true" title={$t('week.tempBadge')}>⚡</span>
           {/if}
         </button>
         <div
