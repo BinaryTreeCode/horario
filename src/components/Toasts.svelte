@@ -111,8 +111,8 @@
     flex-shrink: 0;
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
+    min-width: 44px;
+    min-height: 44px;
     border: none;
     border-radius: 8px;
     background: rgb(var(--sobre-color) / 0.12);

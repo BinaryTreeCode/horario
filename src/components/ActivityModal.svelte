@@ -7,6 +7,7 @@
   import ImageLightbox from './ImageLightbox.svelte';
   import { t, tNow } from '../lib/i18n';
   import { fueConsumido } from '../lib/dialogStack';
+  import { atraparTab } from '../lib/focus';
   import { sembrarSinPisar } from '../lib/activitySeed';
   import { comprimirImagen, subirABlob, DIM_LOCAL, DIM_BLOB, MAX_BYTES_ENTRADA } from '../lib/routineImages';
   import { isLoggedIn } from '../lib/sync';
@@ -83,22 +84,6 @@
     if (modalEl) modalEl.focus({ preventScroll: true });
   });
 
-  function trapFocus(e: KeyboardEvent) {
-    if (e.key !== 'Tab' || !modalEl) return;
-    const focusables = modalEl.querySelectorAll<HTMLElement>(
-      'button:not([hidden]), input:not([hidden]), select, textarea, a[href], [tabindex]:not([tabindex="-1"])'
-    );
-    if (focusables.length === 0) return;
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
 
   // Time options (every 15 mins) within configured schedule limits
   const allTimes = $derived(() => {
@@ -656,7 +641,7 @@
 </script>
 
 <div class="modal-overlay" onclick={onClose}>
-  <div class="modal-content glass-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1" bind:this={modalEl} onkeydown={trapFocus} onclick={e => e.stopPropagation()}>
+  <div class="modal-content glass-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1" bind:this={modalEl} onkeydown={e => atraparTab(modalEl, e)} onclick={e => e.stopPropagation()}>
     <!-- div, no header: un <header> suelto dentro del modal se convierte en un
          segundo landmark banner (axe: landmark-no-duplicate-banner) -->
     <div class="modal-header">

@@ -24,8 +24,8 @@ type Catalogo = Record<string, string>;
 const es: Catalogo = {
   // ── Header / shell ──
   'app.name': 'Nature Planner',
-  'app.loading': 'Loading…',
-  'app.loadingSettings': 'Loading settings…',
+  'app.loading': 'Cargando…',
+  'app.loadingSettings': 'Cargando ajustes…',
   'header.week': 'Semana',
   'header.day': 'Día',
   'header.adjustUp': 'Ajustar Arriba',

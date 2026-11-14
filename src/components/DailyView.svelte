@@ -1482,8 +1482,8 @@
     animation: flash-commit 0.5s ease-out;
   }
   @keyframes flash-commit {
-    0% { box-shadow: 0 0 0 3px rgba(47, 107, 47, 0.55); }
-    100% { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05); }
+    0% { box-shadow: 0 0 0 3px rgb(var(--verde-fuerte) / 0.55); }
+    100% { box-shadow: 0 1px 3px rgb(var(--sombra) / 0.05); }
   }
 
   /* Micro-shake del fantasma inválido (respeta reduced-motion vía el bloque

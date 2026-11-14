@@ -2,6 +2,9 @@
   import type { Category } from '../lib/types';
   import { X, Check, Palette, SlidersHorizontal, Wand2 } from '@lucide/svelte';
   import { t } from '../lib/i18n';
+  import { capturarEscape } from '../lib/dialogStack';
+  import { atraparTab, enfocarDialogo, recordarFoco } from '../lib/focus';
+  import { textOn } from '../lib/timeUtils';
   import {
     hexAHsl,
     hslAHex,
@@ -32,6 +35,7 @@
     onApplyCategory
   }: Props = $props();
 
+  let modalEl = $state<HTMLElement | null>(null);
   let activeTab = $state<'armonizar' | 'individual'>('armonizar');
   let selectedMode = $state<string>('bosque');
   let pivotColor = $state<string>('#55854f');
@@ -86,13 +90,18 @@
   const categoriasArmonizadas = $derived(armonizarCategorias(categories, selectedMode, pivotColor));
 
   const selectedCatObj = $derived(categories.find(c => c.id === selectedCatId));
+  const contrasteInd = $derived(textOn(indColor));
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      onClose();
-    }
-  }
+  $effect(() => {
+    if (!isOpen) return;
+    const restaurarFoco = recordarFoco();
+    const limpiarEscape = capturarEscape(() => isOpen, () => onClose());
+    queueMicrotask(() => enfocarDialogo(modalEl));
+    return () => {
+      limpiarEscape();
+      restaurarFoco();
+    };
+  });
 
   function aplicarArmonizar() {
     const mapColor = new Map(categoriasArmonizadas.map(c => [c.id, c.color]));
@@ -112,8 +121,6 @@
   }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
 {#if isOpen}
   <div class="modal-overlay" onclick={onClose}>
     <div
@@ -122,6 +129,8 @@
       aria-modal="true"
       aria-labelledby="mixer-modal-title"
       tabindex="-1"
+      bind:this={modalEl}
+      onkeydown={e => atraparTab(modalEl, e)}
       onclick={e => e.stopPropagation()}
     >
       <!-- Header -->
@@ -256,7 +265,7 @@
                     <span class="cat-label-text">{catOrig?.label ?? catArm.id}</span>
                     <div class="cat-colors-diff">
                       <span class="diff-tag">{$t('settings.current')}</span>
-                      <span class="swatch-preview" style="background-color: {catOrig?.color ?? '#888'};"></span>
+                      <span class="swatch-preview" style="background-color: {catOrig?.color ?? 'rgb(var(--gris-medio))'};"></span>
                       <span class="arrow-diff">→</span>
                       <span class="diff-tag highlight">{$t('settings.proposed')}</span>
                       <span class="swatch-preview new-swatch" style="background-color: {catArm.color};"></span>
@@ -287,8 +296,11 @@
             <!-- Muestra del color actual y valores -->
             <div class="color-display-card">
               <div class="large-color-swatch" style="background-color: {indColor};">
-                <span class="swatch-text-preview" style="color: rgb(var(--sobre-color));">
-                  {selectedCatObj?.label ?? 'Categoría'}
+                <span
+                  class="swatch-text-preview"
+                  style="color: {contrasteInd.text}; text-shadow: 0 1px 2px {contrasteInd.shadow};"
+                >
+                  {selectedCatObj?.label ?? $t('settings.categoryFallback')}
                 </span>
               </div>
               <div class="color-text-inputs">
@@ -303,7 +315,7 @@
                   type="text"
                   value={indColor.toUpperCase()}
                   class="hex-input"
-                  aria-label="Código Hexadecimal"
+                  aria-label={$t('settings.hexCode')}
                   onchange={e => {
                     const val = e.currentTarget.value.trim();
                     if (/^#[0-9a-f]{6}$/i.test(val)) indColor = val.toLowerCase();
@@ -383,7 +395,7 @@
                         class:active={indColor === col}
                         style="background-color: {col};"
                         onclick={() => (indColor = col)}
-                        aria-label="Elegir color {col}"
+                        aria-label={$t('settings.useColor', { color: col })}
                       ></button>
                     {/each}
                   </div>
@@ -424,7 +436,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: 1100;
     padding: 1rem;
   }
 
@@ -679,8 +691,8 @@
   }
 
   .color-circle-input {
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     border: none;
     border-radius: 50%;
     cursor: pointer;
@@ -700,19 +712,28 @@
 
   .pivot-quick-swatches {
     display: flex;
-    gap: 0.35rem;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    align-items: center;
   }
 
   .swatch-mini {
-    width: 26px;
-    height: 26px;
+    width: 34px;
+    height: 34px;
     border-radius: 50%;
     border: 1.5px solid transparent;
     cursor: pointer;
     padding: 0;
     box-shadow: 0 1px 2px rgb(var(--sombra) / 0.15);
-    min-width: 26px;
-    min-height: 26px;
+    min-width: 34px;
+    min-height: 34px;
+    position: relative;
+  }
+
+  .swatch-mini::before {
+    content: '';
+    position: absolute;
+    inset: -5px;
   }
 
   .swatch-mini.selected {
@@ -910,13 +931,13 @@
   .slider-hue {
     background: linear-gradient(
       to right,
-      #ff0000 0%,
-      #ffff00 17%,
-      #00ff00 33%,
-      #00ffff 50%,
-      #0000ff 67%,
-      #ff00ff 83%,
-      #ff0000 100%
+      hsl(0 100% 50%) 0%,
+      hsl(60 100% 50%) 17%,
+      hsl(120 100% 50%) 33%,
+      hsl(180 100% 50%) 50%,
+      hsl(240 100% 50%) 67%,
+      hsl(300 100% 50%) 83%,
+      hsl(360 100% 50%) 100%
     );
   }
 
@@ -1022,6 +1043,22 @@
     }
     .modal-footer .btn {
       width: 100%;
+    }
+  }
+
+  @media (max-height: 520px) {
+    .modal-content {
+      max-height: 96dvh;
+    }
+    .modal-header {
+      padding: 0.5rem 1rem;
+    }
+    .modal-footer {
+      padding: 0.5rem 1rem;
+    }
+    .modal-body {
+      padding: 0.75rem 1rem;
+      gap: 0.75rem;
     }
   }
 </style>

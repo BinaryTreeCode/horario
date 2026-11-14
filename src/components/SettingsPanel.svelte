@@ -18,6 +18,7 @@
   import { toastOk, toastErr } from '../lib/toast';
   import { tNow } from '../lib/i18n';
   import { fueConsumido } from '../lib/dialogStack';
+  import { atraparTab } from '../lib/focus';
   import { clearUndo } from '../lib/undo';
   import { notifyDataChange } from '../lib/dataBus';
   import Toasts from './Toasts.svelte';
@@ -279,22 +280,6 @@
     return () => window.removeEventListener('keydown', handleKey);
   });
 
-  function trapFocus(e: KeyboardEvent) {
-    if (e.key !== 'Tab' || !panelEl) return;
-    const focusables = panelEl.querySelectorAll<HTMLElement>(
-      'button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])'
-    );
-    if (focusables.length === 0) return;
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
 
   // Drag and drop for categories
   const flipDurationMs = 300;
@@ -721,7 +706,7 @@
     aria-labelledby="settings-panel-title"
     tabindex="-1"
     bind:this={panelEl}
-    onkeydown={trapFocus}
+    onkeydown={e => atraparTab(panelEl, e)}
     onclick={e => e.stopPropagation()}
   >
     <!-- div, no header: evita un segundo landmark banner (axe) -->
@@ -1338,7 +1323,7 @@
     height: 22px;
     margin-top: -7px; /* centra el thumb en el track declarado de 8px */
     border-radius: 50%;
-    background: var(--color-green-dark, rgb(var(--verde-fuerte)));
+    background: var(--color-green-dark);
     border: 3px solid rgb(var(--borde-blanco));
     box-shadow: 0 1px 4px rgb(var(--sombra) / 0.3);
     cursor: grab;
@@ -1353,7 +1338,7 @@
     width: 14px;
     height: 14px;
     border-radius: 50%;
-    background: var(--color-green-dark, rgb(var(--verde-fuerte)));
+    background: var(--color-green-dark);
     border: 3px solid rgb(var(--borde-blanco));
     box-shadow: 0 1px 4px rgb(var(--sombra) / 0.3);
     cursor: grab;
@@ -1375,7 +1360,7 @@
     position: absolute;
     top: -18px;
     transform: translateX(-50%);
-    background: var(--color-brown-bark, rgb(var(--tinta-solida)));
+    background: var(--color-brown-bark);
     color: rgb(var(--sobre-color));
     font-size: 0.72rem;
     font-weight: 700;

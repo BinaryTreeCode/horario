@@ -186,7 +186,7 @@
     font-size: 1.1rem;
     font-family: var(--font-heading);
     color: rgb(var(--sobre-color));
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+    text-shadow: 0 1px 4px rgb(var(--sombra) / 0.6);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

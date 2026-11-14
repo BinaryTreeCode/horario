@@ -109,7 +109,7 @@ export function withFreeTime(
     {
       key: '__free__',
       label: '__free__',
-      color: 'var(--donut-free, #d8d5cd)',
+      color: 'var(--donut-free, rgb(216 213 205))',
       value: free
     }
   ];

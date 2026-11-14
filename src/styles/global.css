@@ -3,20 +3,21 @@
   --font-body: 'Inter-var', 'Inter-fallback', 'Inter', -apple-system, system-ui, sans-serif;
 
   /* Forest & Furry Palette */
-  --color-green-dark: #2d5a27;
-  --color-green-moss: #4a7c44;
-  --color-brown-bark: #5c4033;
-  --color-brown-soil: #8b5a2b;
-  --color-sky-day: #7fb3d5;
-  --color-sky-night: #1a2a44;
-  --color-fur-cream: #f4e9d9;
-  --color-fur-tan: #efd5b1;
+  --color-green-dark: rgb(45 90 39);
+  --color-green-moss: rgb(74 124 68);
+  --color-brown-bark: rgb(92 64 51);
+  --color-brown-soil: rgb(139 90 43);
+  --color-sky-day: rgb(127 179 213);
+  --color-sky-night: rgb(26 42 68);
+  --color-fur-cream: rgb(244 233 217);
+  --color-fur-tan: rgb(239 213 177);
 
   /* BG & UI */
-  --page-bg: #f8f9fa;
-  --panel-bg: rgba(255, 255, 255, 0.7);
-  --border-color: rgba(92, 64, 51, 0.2);
-  --text-main: #2d3436;
+  --page-bg: rgb(var(--sup-2));
+  --panel-bg: rgb(var(--sup) / 0.7);
+  --border-color: rgb(var(--tinta) / 0.2);
+  --text-main: rgb(var(--texto));
+  --donut-free: rgb(216 213 205);
 }
 
 *, *::before, *::after {
@@ -64,7 +65,7 @@ h1, h2, h3, h4 {
   border: none;
   cursor: pointer;
   background: var(--color-green-dark);
-  color: white;
+  color: rgb(var(--sobre-color));
   transition: all 0.2s;
 }
 
@@ -83,7 +84,7 @@ h1, h2, h3, h4 {
 
 /* Foco visible para navegación por teclado en toda la app */
 :focus-visible {
-  outline: 2px solid var(--color-green-dark, #2d5a27);
+  outline: 2px solid var(--color-green-dark);
   outline-offset: 2px;
 }
 
@@ -237,10 +238,12 @@ h1, h2, h3, h4 {
   --ambar-texto: 240 183 100;
   --ambar-solido: 219 160 62;
 
-  --page-bg: #14181a;
-  --panel-bg: rgba(30, 35, 33, 0.72);
-  --border-color: rgba(255, 255, 255, 0.14);
-  --text-main: #e5ebe7;
+  --color-green-dark: rgb(var(--verde-fuerte));
+  --page-bg: rgb(20 24 26);
+  --panel-bg: rgb(var(--sup) / 0.72);
+  --border-color: rgb(var(--linea) / 0.14);
+  --text-main: rgb(var(--texto));
+  --donut-free: rgb(var(--linea) / 0.14);
 }
 
 /* El foco de teclado necesita contraste propio: el verde de marca sobre

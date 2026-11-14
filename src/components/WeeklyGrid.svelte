@@ -1808,7 +1808,7 @@
   .day-header.header-hoy {
     background: rgb(var(--verde-lavado) / 0.1);
     color: rgb(var(--verde-texto));
-    box-shadow: inset 0 -2px 0 var(--color-green-dark, rgb(var(--sombra)));
+    box-shadow: inset 0 -2px 0 var(--color-green-dark);
   }
   .day-header.header-hoy:hover {
     background: rgb(var(--verde-lavado) / 0.16);
@@ -1818,7 +1818,7 @@
     font-weight: 700;
     margin-left: 0.3rem;
     color: rgb(var(--sobre-color));
-    background: var(--color-green-dark, rgb(var(--verde-fuerte)));
+    background: var(--color-green-dark);
     border-radius: 999px;
     padding: 1px 7px;
     line-height: 1.4;
@@ -1904,7 +1904,7 @@
      del límite; anclado junto al puntero. */
   .vres-float {
     transform: translate(14px, -50%);
-    background: var(--color-brown-bark, rgb(var(--tinta-solida)));
+    background: var(--color-brown-bark);
   }
 
   /* Rótulo flotante del hResize: acción + día + actividad, anclado al puntero.
@@ -1921,7 +1921,7 @@
     font-size: 0.78rem;
     font-weight: 700;
     color: rgb(var(--sobre-color));
-    background: var(--color-green-dark, rgb(var(--verde-fuerte)));
+    background: var(--color-green-dark);
     box-shadow: 0 4px 10px rgb(var(--sombra) / 0.18), 0 12px 28px rgb(var(--sombra) / 0.32);
     transform: translate(14px, -50%);
     will-change: transform, left, top;
@@ -2354,7 +2354,7 @@
     white-space: nowrap;
     overflow: visible;
     text-overflow: clip;
-    text-shadow: 0 1px 2px var(--fg-shadow, rgba(0, 0, 0, 0.55)), 0 0 3px var(--fg-shadow, rgba(0, 0, 0, 0.35));
+    text-shadow: 0 1px 2px var(--fg-shadow, rgb(var(--sombra) / 0.55)), 0 0 3px var(--fg-shadow, rgb(var(--sombra) / 0.35));
   }
   .activity-item.mini .grid-steps-icon {
     display: none;
