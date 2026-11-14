@@ -712,6 +712,7 @@
               dayOverrides={$dayOverridesStore || []}
               onEditActivity={(id, initialData) => openActivityModal(id, selectedDay, initialData)}
               onNavigateDay={(dir) => { selectedDay = Math.max(0, Math.min(6, selectedDay + dir)); }}
+              onSelectDay={(d) => { selectedDay = Math.max(0, Math.min(6, d)); }}
             />
           {:else if dailyError}
             <!-- Falló la carga del chunk tras los reintentos: un esqueleto

@@ -112,6 +112,7 @@ const es: Catalogo = {
   'dayView.summaryActs': '{n} actividades',
   'dayView.summaryPlanned': 'planificadas',
   'dayView.summaryFree': '{h} sin planificar',
+  'dayView.quickDays': 'Días de la semana',
 
   // ── Menú contextual ──
   'menu.createHere': 'Crear actividad a las {time}',
@@ -494,6 +495,7 @@ const en: Catalogo = {
   'dayView.summaryActs': '{n} activities',
   'dayView.summaryPlanned': 'planned',
   'dayView.summaryFree': '{h} unplanned',
+  'dayView.quickDays': 'Days of the week',
 
   'menu.createHere': 'Create activity at {time}',
   'menu.duplicate': 'Duplicate (Independent)',

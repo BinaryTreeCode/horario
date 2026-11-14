@@ -32,6 +32,50 @@
   // ── Menú de hueco: click derecho en espacio vacío de una columna ──
   let emptySlotMenu = $state({ show: false, x: 0, y: 0, day: -1, hour: 0 });
 
+  /** Calcula la hora decimal correspondiente a una posición clientY dentro del grid. */
+  function hourAtClientY(clientY: number, gridRect: DOMRect): number {
+    return Math.max(
+      startHour,
+      Math.min(Math.round(((clientY - gridRect.top) / gridRect.height * (endHour - startHour) + startHour) * 4) / 4, endHour - 0.25)
+    );
+  }
+
+  /** Construye un borrador de actividad para crear en el día y hora dados. */
+  function buildDraftAtWeekly(day: number, hour: number): Activity {
+    const h = Math.floor(hour);
+    const m = Math.round((hour - h) * 60);
+    const fmt = (v: number) => v.toString().padStart(2, '0');
+    const endTotal = h * 60 + m + 60;
+    return {
+      id: '',
+      categoryId: categories[0]?.id ?? 'rutina',
+      name: '',
+      description: '',
+      image: null,
+      startTime: `${fmt(h)}:${fmt(m)}`,
+      endTime: `${fmt(Math.floor(endTotal / 60) % 24)}:${fmt(endTotal % 60)}`,
+      daysOfWeek: [day],
+      steps: [],
+      updatedAt: 0,
+    } as unknown as Activity;
+  }
+
+  /** Toque o click en un hueco de la grilla semanal: abre el modal de creación. */
+  function handleGridTap(e: MouseEvent, day: number) {
+    if (emptySlotMenu.show) {
+      emptySlotMenu.show = false;
+      return;
+    }
+    if (draggedActivityId !== null || redimDiaOrigen !== null || hresPreview !== null) {
+      return;
+    }
+    if ((e.target as HTMLElement).closest('.activity-item, .resize-handle, .hres-ganar-banda, .hres-empuje-fantasma, .empty-state, .custom-context-menu, button')) {
+      return;
+    }
+    const hour = hourAtClientY(e.clientY, (e.currentTarget as HTMLElement).getBoundingClientRect());
+    onEditActivity(null, buildDraftAtWeekly(day, hour));
+  }
+
   /** Click derecho en un hueco de la grilla semanal: ofrece crear ahí. */
   function handleGridContextMenu(e: MouseEvent, day: number) {
     const target = e.target as HTMLElement;
@@ -40,10 +84,7 @@
     emptySlotMenu.show = false;
     const grid = e.currentTarget as HTMLElement;
     const rect = grid.getBoundingClientRect();
-    const hour = Math.max(
-      startHour,
-      Math.min(Math.round(((e.clientY - rect.top) / rect.height * (endHour - startHour) + startHour) * 4) / 4, endHour - 0.25)
-    );
+    const hour = hourAtClientY(e.clientY, rect);
     const MENU_W = 220;
     const MENU_H = 44;
     emptySlotMenu = {
@@ -60,22 +101,7 @@
     const { day, hour } = emptySlotMenu;
     emptySlotMenu.show = false;
     if (day < 0) return;
-    const h = Math.floor(hour);
-    const m = Math.round((hour - h) * 60);
-    const fmt = (v: number) => v.toString().padStart(2, '0');
-    const endTotal = h * 60 + m + 60;
-    onEditActivity(null, {
-      id: '',
-      categoryId: categories[0]?.id ?? 'rutina',
-      name: '',
-      description: '',
-      image: null,
-      startTime: `${fmt(h)}:${fmt(m)}`,
-      endTime: `${fmt(Math.floor(endTotal / 60) % 24)}:${fmt(endTotal % 60)}`,
-      daysOfWeek: [day],
-      steps: [],
-      updatedAt: 0,
-    } as unknown as Activity);
+    onEditActivity(null, buildDraftAtWeekly(day, hour));
   }
 
   /** Hora decimal → "HH:MM" para el label del menú de hueco. */
@@ -1318,6 +1344,8 @@
         </button>
         <div
           class="slots-grid"
+          role="presentation"
+          onclick={(e) => handleGridTap(e, i)}
           oncontextmenu={(e) => handleGridContextMenu(e, i)}
         >
           <!-- Preview del barrido que GANA un día: la banda marca SOLO la
@@ -1544,6 +1572,7 @@
 <style>
   .weekly-grid-container {
     overflow-x: auto;
+    overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
     max-width: 100%;
     padding-bottom: 1rem;
@@ -1584,7 +1613,7 @@
 
   .time-column {
     display: grid;
-    grid-template-rows: 40px repeat(var(--total-slots), var(--slot-height));
+    grid-template-rows: 44px repeat(var(--total-slots), var(--slot-height));
     width: 68px;
     padding-right: 0.5rem;
     border-right: 1px solid rgb(var(--linea) / 0.08);
@@ -1620,7 +1649,7 @@
   }
 
   .header-spacer {
-    height: 40px;
+    height: 44px;
   }
 
   .hour-label {
@@ -2250,6 +2279,16 @@
   .resize-handle.hres-der::after {
     left: auto;
     right: 4px;
+  }
+
+  @media (pointer: coarse) {
+    .activity-item:not(.mini) .resize-handle::after {
+      opacity: 0.72;
+    }
+    .activity-item .resize-handle.hres-izq::after,
+    .activity-item .resize-handle.hres-der::after {
+      opacity: 0.85;
+    }
   }
 
   .activity-item:hover {

@@ -25,9 +25,10 @@
     dayOverrides?: DayOverride[];
     onEditActivity: (id: string | null, initialData?: Activity) => void;
     onNavigateDay: (dir: -1 | 1) => void;
+    onSelectDay?: (day: number) => void;
   }
 
-  let { day, activities, categories, settings, dayOverrides = [], onEditActivity, onNavigateDay }: Props = $props();
+  let { day, activities, categories, settings, dayOverrides = [], onEditActivity, onNavigateDay, onSelectDay }: Props = $props();
 
   /**
    * Tap en un slot vacío del track (G4): abre el modal de creación con la hora
@@ -79,11 +80,11 @@
   const dayName = $derived(DAY_NAMES[day]);
   // Señalización: ¿el día mostrado es hoy? Mismo mapeo que WeeklyGrid:
   // la semana de la app arranca en Lunes (índice 0) y getDay() da Domingo=0.
-  const esHoy = $derived.by(() => {
+  const hoyIdx = $derived.by(() => {
     const d = new Date().getDay();
-    const hoy = d === 0 ? 6 : d - 1;
-    return day === hoy;
+    return d === 0 ? 6 : d - 1;
   });
+  const esHoy = $derived(day === hoyIdx);
   const startHour = $derived(settings.startHour);
   const endHour = $derived(settings.endHour);
   const totalHours = $derived(endHour - startHour);
@@ -888,6 +889,24 @@
       </div>
     </div>
 
+    <nav class="day-pills" aria-label={$t('dayView.quickDays')}>
+      {#each DAY_NAMES as name, i}
+        <button
+          type="button"
+          class="day-pill"
+          class:active={i === day}
+          aria-label={name}
+          aria-pressed={i === day}
+          onclick={() => onSelectDay?.(i)}
+        >
+          <span>{name.slice(0, 3)}</span>
+          {#if i === hoyIdx}
+            <span class="day-pill-dot" aria-hidden="true"></span>
+          {/if}
+        </button>
+      {/each}
+    </nav>
+
     <!-- Resumen del día: lo que la columna estrecha deja libre a lo ancho -->
     {#if layoutActivities.length > 0}
       <div class="day-summary">
@@ -986,7 +1005,7 @@
           onclick={() => onEditActivity(activity.id!, activity)}
           style="top: {activity.top}; height: {activity.height}; left: {activity.left}; width: {activity.width}; border-left-color: {getActivityColor(activity.categoryId, categories)}"
         >
-          <div class="activity-content" class:compact={activity.durationMins <= 20}>
+          <div class="activity-content" class:compact={activity.durationMins <= 20} class:mobile-span={activity.durationMins >= 45}>
             <div class="activity-title-group">
               <span class="activity-name">{activity.name}</span>
               {#if srcImagen(activity.image)}
@@ -1216,6 +1235,48 @@
     transform: translateY(-1px);
   }
 
+  /* Tira móvil de cambio rápido de día */
+  .day-pills {
+    display: none;
+  }
+  .day-pill {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 2px;
+    border-radius: 10px;
+    border: 1px solid rgb(var(--linea) / 0.14);
+    background: rgb(var(--sup));
+    color: rgb(var(--texto));
+    font-size: 0.74rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .day-pill.active {
+    background: var(--color-green-dark);
+    border-color: var(--color-green-dark);
+    color: rgb(var(--sobre-color));
+  }
+  .day-pill:focus-visible {
+    outline: 2px solid rgb(var(--verde-texto));
+    outline-offset: 2px;
+  }
+  .day-pill-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.75;
+  }
+
   .current-time-display {
     display: flex;
     align-items: center;
@@ -1330,6 +1391,7 @@
     width: 100%;
     max-width: var(--dia-ancho, 100%);
     overflow-y: auto;
+    overscroll-behavior-y: contain;
     min-height: 1600px; /* Scale so 15-min tasks have ~25px and don't crowd */
     /* Scrollbar invisible: el scroll queda (rueda del mouse + touch), pero sin
        la barra pegada al borde de las tarjetas. */
@@ -1454,6 +1516,13 @@
   }
   .daily-activity-card:hover .resize-handle::after {
     opacity: 1;
+  }
+
+  @media (pointer: coarse) {
+    .daily-activity-card:not(.is-short) .resize-handle::after {
+      opacity: 0.75;
+      background: rgb(var(--texto-2) / 0.45);
+    }
   }
 
   /* Asa superior: espejo de la inferior (resize bidireccional). */
@@ -1647,12 +1716,25 @@
     .activity-span {
       display: none;
     }
+    .activity-content.mobile-span {
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 0.12rem;
+      padding-right: 2.25rem;
+    }
+    .activity-content.mobile-span .activity-span {
+      display: block;
+      font-size: 0.72rem;
+      margin-right: 0;
+      color: rgb(var(--texto-2));
+    }
   }
 
   .activity-name {
     font-weight: 700;
     font-size: 1rem;
-    color: var(--text-main);
+    color: rgb(var(--texto));
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1835,6 +1917,11 @@
     .daily-header {
       padding: 1rem;
     }
+    .day-pills {
+      display: flex;
+      gap: 3px;
+      width: 100%;
+    }
     .daily-header h2 {
       font-size: 1.25rem;
     }
@@ -1892,6 +1979,9 @@
   }
 
   @media (max-width: 480px) {
+    .daily-header {
+      padding: 0.75rem 0.65rem;
+    }
     .daily-header h2 {
       font-size: 1.1rem;
     }
