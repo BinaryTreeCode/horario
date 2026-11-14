@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { and, eq, gt, inArray } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, or } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { db } from '../../server/db';
 import { categories, activities, userSettings, dayOverrides } from '../../server/schema';
@@ -418,6 +418,61 @@ export const POST: APIRoute = async ({ cookies, request }) => {
 
 // ── GET /api/sync?since=<ms> — pull incremental ──────────────────────────────
 
+export function parsePullCursor(
+  raw: string | null,
+  numericKey: boolean,
+): { done: true } | { ts: number; key: string | number } | null {
+  if (!raw) return null;
+  if (raw === 'done') return { done: true };
+  const sep = raw.indexOf('|');
+  if (sep <= 0) return null;
+  const ts = Number(raw.slice(0, sep));
+  const keyStr = raw.slice(sep + 1);
+  if (!Number.isFinite(ts) || ts < 0 || !keyStr) return null;
+  if (numericKey) {
+    const dayNum = Number(keyStr);
+    if (!Number.isInteger(dayNum)) return null;
+    return { ts, key: dayNum };
+  }
+  return { ts, key: keyStr };
+}
+
+async function pullPage<T extends { updatedAt: number }>(
+  table: any,
+  keyCol: any,
+  userId: string,
+  since: number,
+  rawCursor: string | null,
+  limit: number,
+  numericKey = false,
+): Promise<{ rows: T[]; nextCursor: string }> {
+  const cursor = parsePullCursor(rawCursor, numericKey);
+  if (cursor && 'done' in cursor) {
+    return { rows: [], nextCursor: 'done' };
+  }
+  const filter = cursor
+    ? or(
+        gt(table.updatedAt, cursor.ts),
+        and(eq(table.updatedAt, cursor.ts), gt(keyCol, cursor.key)),
+      )
+    : gt(table.updatedAt, since);
+
+  const fetched = (await db
+    .select()
+    .from(table)
+    .where(and(eq(table.userId, userId), filter))
+    .orderBy(asc(table.updatedAt), asc(keyCol))
+    .limit(limit + 1)) as T[];
+
+  if (fetched.length <= limit) {
+    return { rows: fetched, nextCursor: 'done' };
+  }
+  const rows = fetched.slice(0, limit);
+  const last = rows[rows.length - 1] as any;
+  const pkVal = numericKey ? last.day : last.id;
+  return { rows, nextCursor: `${last.updatedAt}|${pkVal}` };
+}
+
 export const GET: APIRoute = async ({ cookies, url }) => {
   try {
     const user = await getSessionUser(cookies);
@@ -426,22 +481,34 @@ export const GET: APIRoute = async ({ cookies, url }) => {
     const since = Math.max(0, Number(url.searchParams.get('since') ?? '0') || 0);
     const PULL_LIMIT = 2000;
 
-    const [cats, acts, setts, ovrs] = await Promise.all([
-      db.select().from(categories).where(and(eq(categories.userId, user.id), gt(categories.updatedAt, since))).limit(PULL_LIMIT),
-      db.select().from(activities).where(and(eq(activities.userId, user.id), gt(activities.updatedAt, since))).limit(PULL_LIMIT),
-      db.select().from(userSettings).where(and(eq(userSettings.userId, user.id), gt(userSettings.updatedAt, since))).limit(PULL_LIMIT),
-      db.select().from(dayOverrides).where(and(eq(dayOverrides.userId, user.id), gt(dayOverrides.updatedAt, since))).limit(PULL_LIMIT),
+    const [cPage, aPage, sPage, oPage] = await Promise.all([
+      pullPage(categories, categories.id, user.id, since, url.searchParams.get('cCursor'), PULL_LIMIT),
+      pullPage(activities, activities.id, user.id, since, url.searchParams.get('aCursor'), PULL_LIMIT),
+      pullPage(userSettings, userSettings.id, user.id, since, url.searchParams.get('sCursor'), PULL_LIMIT),
+      pullPage(dayOverrides, dayOverrides.day, user.id, since, url.searchParams.get('oCursor'), PULL_LIMIT, true),
     ]);
 
     const serverTime = Date.now();
+    const hasMore = [cPage.nextCursor, aPage.nextCursor, sPage.nextCursor, oPage.nextCursor]
+      .some(c => c !== 'done');
 
     return json({
-      categories: cats,
-      activities: acts,
-      settings: setts,
-      dayOverrides: ovrs,
+      categories: cPage.rows,
+      activities: aPage.rows,
+      settings: sPage.rows,
+      dayOverrides: oPage.rows,
       serverTime,
-      hasMore: false, // paginación futura si un usuario supera miles de filas
+      hasMore,
+      ...(hasMore
+        ? {
+            cursors: {
+              c: cPage.nextCursor,
+              a: aPage.nextCursor,
+              s: sPage.nextCursor,
+              o: oPage.nextCursor,
+            },
+          }
+        : {}),
     });
   } catch (err: any) {
     console.error('[sync/pull]', err);

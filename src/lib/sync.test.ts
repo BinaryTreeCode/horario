@@ -2,7 +2,9 @@ import { describe, it, expect } from 'bun:test';
 import {
   esSemilla, seleccionables, cursorPushTras, cursorPushTrasLote, cursorPull,
   acotarFechaRemota, sesgoDe, sellarParaServidor, reestampar, remotaGana,
-  descifrarActividad,
+  descifrarActividad, CONTENIDO_BLOQUEADO, tieneContenidoBloqueado,
+  debeAplicarEnPull, desbloquearCamposActividad, desbloquearCamposOverride,
+  cursorPushTrasPull,
 } from './sync';
 import { cifrarCampo, establecerClave, olvidarClave, srcImagen } from './crypto';
 
@@ -465,5 +467,227 @@ describe('clasificarEscritura: contrato de rechazos y escrituras LWW', () => {
   it('fila rechazada por el guard LWW (enNube > incoming) se reporta como rechazo', async () => {
     const { clasificarEscritura } = await import('../pages/api/sync');
     expect(clasificarEscritura(1_500, 1_000)).toBe('rechazada');
+  });
+});
+
+describe('cursorPushTrasPull: cobertura sin tragar ediciones offline previas', () => {
+  it('cubre las filas recién bajadas (incluido su +1) cuando no hay pendientes locales', () => {
+    const bajada = acotarFechaRemota({ id: 'a1', updatedAt: 1_800 }, 2_000, 0);
+    expect(bajada.updatedAt).toBe(1_801);
+    const cursor = cursorPushTrasPull(500, [bajada.updatedAt], [], 2_000);
+    expect(cursor).toBe(1_801);
+    expect(seleccionables([bajada], cursor)).toEqual([]);
+  });
+
+  it('no avanza más allá del reloj local actual si la nube traía reloj futuro', () => {
+    const cursor = cursorPushTrasPull(500, [1_999], [], 1_900);
+    expect(cursor).toBe(1_900);
+  });
+
+  it('frena por debajo de ediciones offline aún no subidas para no perderlas', () => {
+    // Dispositivo editó offline a las 1000 tras haber subido hasta 500;
+    // al reconectar el pull baja otra fila más nueva (1801).
+    const edicionOffline = { id: 'offline-1', updatedAt: 1_000 };
+    const cursor = cursorPushTrasPull(500, [1_801], [edicionOffline.updatedAt], 2_000);
+    expect(cursor).toBe(999);
+    expect(seleccionables([edicionOffline], cursor).map(f => f.id)).toEqual(['offline-1']);
+  });
+
+  it('sin filas aplicadas no mueve el cursor (incluso con sesgo distinto de 0)', () => {
+    expect(cursorPushTrasPull(500, [], [900], 2_000)).toBe(500);
+    expect(cursorPushTrasPull(0, [], [], 2_000)).toBe(0);
+  });
+});
+
+describe('recuperación de filas bajadas sin clave E2E', () => {
+  it('re-aplica una fila atascada con CONTENIDO_BLOQUEADO cuando ya hay clave aunque remotaGana sea false', async () => {
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    const descCif = await cifrarCampo('Nota privada');
+    const stepsCif = await cifrarCampo(JSON.stringify([{ id: 's1', title: 'Leer', completed: false }]));
+    const imgCif = await cifrarCampo('data:image/webp;base64,AAA');
+    const remota = {
+      id: 'a1',
+      name: 'Rutina',
+      categoryId: 'rutina',
+      startTime: '08:00',
+      endTime: '09:00',
+      daysOfWeek: [1],
+      description: descCif,
+      steps: stepsCif,
+      image: imgCif,
+      updatedAt: 10_000,
+    };
+
+    // Primer pull en dispositivo SIN clave → guarda CONTENIDO_BLOQUEADO e imagen np1:..., sellada +1.
+    await olvidarClave();
+    const locked = acotarFechaRemota(await descifrarActividad(remota), 20_000, 0);
+    expect(locked.description).toBe(CONTENIDO_BLOQUEADO);
+    expect(locked.steps).toEqual([]);
+    expect(locked.updatedAt).toBe(10_001);
+    expect(tieneContenidoBloqueado(locked)).toBe(true);
+
+    // Tras re-login (`establecerClave`), remotaGana aún dice false por el +1...
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    expect(remotaGana(locked, remota, 0)).toBe(false);
+    // ...pero debeAplicarEnPull permite rescatar la fila.
+    expect(debeAplicarEnPull(locked, remota, 0, true)).toBe(true);
+
+    const remotaPlana = await descifrarActividad(remota, locked);
+    const { fila, cambio } = desbloquearCamposActividad(locked, remotaPlana);
+    expect(cambio).toBe(true);
+    expect(fila.description).toBe('Nota privada');
+    expect(fila.image).toBe('data:image/webp;base64,AAA');
+    expect(fila.steps).toEqual([{ id: 's1', title: 'Leer', completed: false }]);
+    await olvidarClave();
+  });
+
+  it('recupera también una fila donde únicamente steps estaba cifrado', async () => {
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    const stepsCif = await cifrarCampo(JSON.stringify([{ id: 's1', title: 'Paso único', completed: true }]));
+    const remota = {
+      id: 'a2',
+      name: 'Solo pasos',
+      categoryId: 'rutina',
+      startTime: '09:00',
+      endTime: '09:30',
+      daysOfWeek: [2],
+      description: undefined,
+      steps: stepsCif,
+      image: null,
+      updatedAt: 5_000,
+    };
+
+    await olvidarClave();
+    const locked = acotarFechaRemota(await descifrarActividad(remota), 10_000, 0);
+    expect(locked.steps).toEqual([]);
+
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    expect(debeAplicarEnPull(locked, remota, 0, true)).toBe(true);
+    const remotaPlana = await descifrarActividad(remota, locked);
+    const { fila, cambio } = desbloquearCamposActividad(locked, remotaPlana, true, true);
+    expect(cambio).toBe(true);
+    expect(fila.steps).toEqual([{ id: 's1', title: 'Paso único', completed: true }]);
+    await olvidarClave();
+  });
+
+  it('si el usuario editó título localmente mientras estaba bloqueada, desbloquea E2E sin pisar su edición', async () => {
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    const descCif = await cifrarCampo('Secreto');
+    await olvidarClave();
+
+    const localEditada: any = {
+      id: 'a3',
+      name: 'Nombre editado offline',
+      categoryId: 'rutina',
+      startTime: '11:00',
+      endTime: '12:00',
+      daysOfWeek: [3],
+      description: CONTENIDO_BLOQUEADO,
+      steps: [],
+      image: null,
+      updatedAt: 50_000,
+    };
+    const remota = {
+      id: 'a3',
+      name: 'Nombre viejo',
+      categoryId: 'rutina',
+      startTime: '10:00',
+      endTime: '11:00',
+      daysOfWeek: [3],
+      description: descCif,
+      steps: null,
+      image: null,
+      updatedAt: 10_000,
+    };
+
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    expect(debeAplicarEnPull(localEditada, remota, 0, true)).toBe(true);
+    const remotaPlana = await descifrarActividad(remota, localEditada);
+    const { fila, cambio } = desbloquearCamposActividad(localEditada, remotaPlana, false, false);
+    expect(cambio).toBe(true);
+    expect(fila.name).toBe('Nombre editado offline');
+    expect(fila.startTime).toBe('11:00');
+    expect(fila.updatedAt).toBe(50_000);
+    expect(fila.description).toBe('Secreto');
+    await olvidarClave();
+  });
+
+  it('desbloquearCamposOverride rescata sub-actividades cifradas dentro de un dayOverride', async () => {
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    const descCif = await cifrarCampo('Detalle del día');
+    await olvidarClave();
+
+    const localOvr: any = {
+      day: 1,
+      updatedAt: 2_001,
+      activities: [
+        {
+          id: 'sub1',
+          name: 'Cita',
+          categoryId: 'rutina',
+          startTime: '08:00',
+          endTime: '09:00',
+          daysOfWeek: [1],
+          description: CONTENIDO_BLOQUEADO,
+          steps: [],
+          image: null,
+          updatedAt: 2_001,
+        },
+      ],
+    };
+    const remotaRaw = {
+      day: 1,
+      updatedAt: 2_000,
+      activities: [
+        {
+          id: 'sub1',
+          name: 'Cita',
+          categoryId: 'rutina',
+          startTime: '08:00',
+          endTime: '09:00',
+          daysOfWeek: [1],
+          description: descCif,
+          steps: null,
+          image: null,
+          updatedAt: 2_000,
+        },
+      ],
+    };
+
+    await establecerClave('ana@ejemplo.com', 'contraseña-larga-123');
+    const descifrada: any = {
+      ...remotaRaw,
+      activities: [await descifrarActividad(remotaRaw.activities[0], localOvr.activities[0])],
+    };
+    const { fila, cambio } = desbloquearCamposOverride(localOvr, descifrada, remotaRaw, 0);
+    expect(cambio).toBe(true);
+    expect(fila.activities[0].description).toBe('Detalle del día');
+    await olvidarClave();
+  });
+});
+
+describe('parsePullCursor: paginación keyset de GET /api/sync', () => {
+  it('interpreta done y cursores válidos (string e id numérico para overrides)', async () => {
+    const { parsePullCursor } = await import('../pages/api/sync');
+    expect(parsePullCursor(null, false)).toBeNull();
+    expect(parsePullCursor('done', false)).toEqual({ done: true });
+    expect(parsePullCursor('1700000000000|act-uuid-1', false)).toEqual({
+      ts: 1_700_000_000_000,
+      key: 'act-uuid-1',
+    });
+    expect(parsePullCursor('1700000000000|4', true)).toEqual({
+      ts: 1_700_000_000_000,
+      key: 4,
+    });
+  });
+
+  it('rechaza cursores malformados devolviendo null', async () => {
+    const { parsePullCursor } = await import('../pages/api/sync');
+    expect(parsePullCursor('basura', false)).toBeNull();
+    expect(parsePullCursor('|sin-ts', false)).toBeNull();
+    expect(parsePullCursor('nan|id1', false)).toBeNull();
+    expect(parsePullCursor('-5|id1', false)).toBeNull();
+    expect(parsePullCursor('100|', false)).toBeNull();
+    expect(parsePullCursor('100|3.5', true)).toBeNull();
   });
 });

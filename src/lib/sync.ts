@@ -13,6 +13,9 @@ import { esDataUrlImagen, subirABlob } from './routineImages';
 // hay clave, los datos existentes no se destruyen: se conserva lo que ya
 // estaba legible o el blob intacto para descifrar tras el próximo login.
 
+/** Marcador persistido cuando no hay clave E2E en memoria al bajar contenido cifrado. */
+export const CONTENIDO_BLOQUEADO = '🔒 Contenido cifrado — inicia sesión de nuevo';
+
 /** Campos de una actividad que viajan cifrados. */
 async function cifrarActividad(a: Activity): Promise<Activity> {
   if (!tieneClave()) await restaurarClave();
@@ -55,7 +58,7 @@ export async function descifrarActividad(a: any, localExistente?: Activity): Pro
       : (Array.isArray(a.steps) ? a.steps : []);
     const descPreservada = localExistente?.description && !esCifrado(localExistente.description)
       ? localExistente.description
-      : (esCifrado(a.description) ? '🔒 Contenido cifrado — inicia sesión de nuevo' : a.description);
+      : (esCifrado(a.description) ? CONTENIDO_BLOQUEADO : a.description);
 
     return {
       ...a,
@@ -152,12 +155,41 @@ export function tieneSesion(): boolean {
 // El pull ESCRIBE filas y esas escrituras disparan los hooks de Dexie. Sin este
 // freno, el pull programaba un push que volvía a escribir, que programaba otro
 // pull… un ciclo de sincronización cada 3 s para siempre, en cada dispositivo
-// con sesión. Solo se apaga durante la escritura del pull (ver pullChanges).
-let escribiendoNube = false;
+// con sesión. Es un contador de profundidad para tolerar operaciones anidadas.
+let escrituraNubeProfundidad = 0;
 
 /** ¿Hay una escritura de red en curso (los hooks no deben Encadenar) */
 function enEscrituraDeNube(): boolean {
-  return escribiendoNube;
+  return escrituraNubeProfundidad > 0;
+}
+
+// Cola FIFO que serializa push/pull/arranque para evitar carreras entre hooks
+// de Dexie, `syncState` y lecturas/descifrado fuera de transacción.
+let colaSync: Promise<void> = Promise.resolve();
+let syncActivo = 0;
+let syncPendiente = false;
+let fullPendiente = false;
+
+function conLockSync<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = colaSync;
+  let liberar!: () => void;
+  colaSync = new Promise<void>(r => { liberar = r; });
+  return prev.then(async () => {
+    syncActivo++;
+    try {
+      return await fn();
+    } finally {
+      syncActivo--;
+      liberar();
+      if (syncActivo === 0 && syncPendiente && sesionActiva) {
+        queueMicrotask(() => {
+          if (syncPendiente && syncActivo === 0 && sesionActiva) {
+            void syncNow(fullPendiente).catch(() => {});
+          }
+        });
+      }
+    }
+  });
 }
 
 // ── Pausa de push tras importación ──────────────────────────────────────────
@@ -465,6 +497,153 @@ export function remotaGana<T extends { updatedAt: number }>(
   return local.updatedAt <= remota.updatedAt - s;
 }
 
+/** ¿La fila conserva campos cifrados o el marcador bloqueado por falta de clave E2E? */
+export function tieneContenidoBloqueado(fila: unknown): boolean {
+  if (!fila || typeof fila !== 'object') return false;
+  const r = fila as Record<string, unknown>;
+  if (esCifrado(r.image) || esCifrado(r.description) || esCifrado(r.steps)) return true;
+  if (r.description === CONTENIDO_BLOQUEADO) return true;
+  if (Array.isArray(r.activities)) {
+    return r.activities.some(sub => tieneContenidoBloqueado(sub));
+  }
+  return false;
+}
+
+function fuePulledaSinEdicionPosterior(
+  local: { updatedAt: number },
+  remota: { updatedAt: number },
+  sesgo: number,
+): boolean {
+  const s = Number.isFinite(sesgo) ? sesgo : 0;
+  return local.updatedAt <= remota.updatedAt - s + 1;
+}
+
+/**
+ * ¿Debe aplicarse la fila remota durante el pull?
+ * Además del LWW normal (`remotaGana`), permite recuperar filas que quedaron
+ * guardadas con ciphertext / contenido bloqueado al bajarse sin clave E2E, sin
+ * pisar ediciones locales hechas después.
+ */
+export function debeAplicarEnPull<T extends { updatedAt: number }>(
+  local: T | undefined,
+  remota: { updatedAt: number; steps?: unknown; activities?: unknown },
+  sesgo: number,
+  conClave: boolean,
+): boolean {
+  if (remotaGana(local, remota, sesgo)) return true;
+  if (!conClave || !local) return false;
+  if (tieneContenidoBloqueado(local)) return true;
+
+  // Caso límite: solo `steps` estaba cifrado y al bajar sin clave quedó `steps: []`.
+  if (!fuePulledaSinEdicionPosterior(local, remota, sesgo)) return false;
+  const localRecord = local as unknown as Record<string, unknown>;
+  if (esCifrado(remota.steps) && (!Array.isArray(localRecord.steps) || localRecord.steps.length === 0)) {
+    return true;
+  }
+  if (Array.isArray(remota.activities) && Array.isArray(localRecord.activities)) {
+    const mapaLocal = new Map<string, Record<string, unknown>>();
+    for (const sub of localRecord.activities) {
+      if (sub && typeof sub === 'object' && typeof (sub as any).id === 'string') {
+        mapaLocal.set((sub as any).id, sub as Record<string, unknown>);
+      }
+    }
+    return remota.activities.some((subRem: any) => {
+      if (!subRem || typeof subRem !== 'object' || !esCifrado(subRem.steps)) return false;
+      const subLoc = mapaLocal.get(subRem.id);
+      return !subLoc || !Array.isArray(subLoc.steps) || subLoc.steps.length === 0;
+    });
+  }
+  return false;
+}
+
+/**
+ * Rellena únicamente los campos E2E que quedaron bloqueados en una copia local
+ * sin sobrescribir cambios no cifrados locales ni alterar `local.updatedAt`.
+ */
+export function desbloquearCamposActividad(
+  local: Activity,
+  remotaDescifrada: Activity,
+  remotaStepsCifrados = false,
+  pulledaSinEdicionLocal = true,
+): { fila: Activity; cambio: boolean } {
+  let next = local;
+  let cambio = false;
+
+  const descBloqueada = local.description === CONTENIDO_BLOQUEADO || esCifrado(local.description);
+  const descLista =
+    remotaDescifrada.description !== CONTENIDO_BLOQUEADO && !esCifrado(remotaDescifrada.description);
+  if (descBloqueada && descLista && local.description !== remotaDescifrada.description) {
+    next = { ...next, description: remotaDescifrada.description };
+    cambio = true;
+  }
+
+  const imgBloqueada = esCifrado(local.image);
+  if (imgBloqueada && !esCifrado(remotaDescifrada.image) && local.image !== remotaDescifrada.image) {
+    next = { ...next, image: remotaDescifrada.image };
+    cambio = true;
+  }
+
+  const stepsVaciosPorBloqueo =
+    (!Array.isArray(local.steps) || local.steps.length === 0) &&
+    (descBloqueada || imgBloqueada || (remotaStepsCifrados && pulledaSinEdicionLocal));
+  const stepsBloqueados = esCifrado(local.steps) || stepsVaciosPorBloqueo;
+  if (
+    stepsBloqueados &&
+    Array.isArray(remotaDescifrada.steps) &&
+    remotaDescifrada.steps.length > 0
+  ) {
+    next = { ...next, steps: remotaDescifrada.steps };
+    cambio = true;
+  }
+
+  return { fila: next, cambio };
+}
+
+/** Equivalente a `desbloquearCamposActividad` para actividades dentro de `DayOverride`. */
+export function desbloquearCamposOverride(
+  local: DayOverride,
+  remotaDescifrada: DayOverride,
+  remotaRaw?: { updatedAt: number; activities?: any[] },
+  sesgo = 0,
+): { fila: DayOverride; cambio: boolean } {
+  if (!Array.isArray(local.activities) || !Array.isArray(remotaDescifrada.activities)) {
+    return { fila: local, cambio: false };
+  }
+  const mapaRem = new Map(remotaDescifrada.activities.map(a => [a.id, a]));
+  const mapaRaw = new Map((remotaRaw?.activities ?? []).map((a: any) => [a.id, a]));
+  const sinEdicionLocal = remotaRaw ? fuePulledaSinEdicionPosterior(local, remotaRaw, sesgo) : true;
+  let cambio = false;
+  const nuevas = local.activities.map(sub => {
+    const rem = mapaRem.get(sub.id);
+    if (!rem) return sub;
+    const raw = mapaRaw.get(sub.id);
+    const res = desbloquearCamposActividad(sub, rem, esCifrado(raw?.steps), sinEdicionLocal);
+    if (res.cambio) cambio = true;
+    return res.fila;
+  });
+  return cambio ? { fila: { ...local, activities: nuevas }, cambio: true } : { fila: local, cambio: false };
+}
+
+/**
+ * Calcula `lastPushAt` tras aplicar un pull: cubre las filas recién escritas
+ * (incluyendo el `+1` de `acotarFechaRemota`) para no re-subirlas sin motivo,
+ * pero nunca salta por encima de ediciones locales previas aún pendientes.
+ */
+export function cursorPushTrasPull(
+  cursorActual: number,
+  fechasAplicadas: number[],
+  fechasLocalesPendientes: number[],
+  topeRelojLocal: number,
+): number {
+  if (fechasAplicadas.length === 0) return cursorActual;
+  const maxAplicada = Math.min(topeRelojLocal, Math.max(...fechasAplicadas));
+  const techoPendientes =
+    fechasLocalesPendientes.length > 0
+      ? Math.min(...fechasLocalesPendientes) - 1
+      : maxAplicada;
+  return Math.max(cursorActual, Math.min(maxAplicada, techoPendientes));
+}
+
 // ── Push: enviar cambios locales (LWW en el servidor) ────────────────────────
 
 /**
@@ -536,13 +715,20 @@ interface RespuestaPush {
 /** Una fila que el servidor no aceptó: colección, clave y su fecha en la nube. */
 interface Rechazo { t: 'a' | 'c' | 's' | 'o'; k: string; u: number }
 
-export async function pushChanges(full = false): Promise<number> {
+export function pushChanges(full = false): Promise<number> {
+  return conLockSync(() => ejecutarPush(full));
+}
+
+async function ejecutarPush(full = false): Promise<number> {
   const state = (await db.syncState.get('1')) ?? { id: '1' };
   const cursor = full ? 0 : (state.lastPushAt ?? 0);
   // Desfase aprendido de las respuestas anteriores (0 hasta la primera).
   const sesgo = state.sesgoServidor ?? 0;
 
   await migrarImagenesABlob();
+  if (!tieneClave()) await restaurarClave();
+  const claveActiva = tieneClave();
+  const puedeSubirSinClave = <T,>(fila: T) => claveActiva || !tieneContenidoBloqueado(fila);
 
   // Lectura por tabla + filtro por cursor y semilla (contrato explícito: lo
   // que puso la app no es del usuario y no viaja).
@@ -552,10 +738,10 @@ export async function pushChanges(full = false): Promise<number> {
     db.settings.toArray(),
     db.dayOverrides.toArray(),
   ]);
-  const actsSuben = seleccionables(activities, cursor);
+  const actsSuben = seleccionables(activities, cursor).filter(puedeSubirSinClave);
   const catsSuben = seleccionables(categories, cursor);
   const setsSuben = seleccionables(settings, cursor);
-  const ovsSuben = seleccionables(dayOverrides, cursor);
+  const ovsSuben = seleccionables(dayOverrides, cursor).filter(puedeSubirSinClave);
 
   // E2E: cifrar los campos sensibles ANTES de salir del dispositivo. Solo si
   // hay clave en memoria (login reciente). Con sesión restaurada por cookie,
@@ -674,99 +860,291 @@ async function resellarRechazados(rechazados: Rechazo[], sesgo: number): Promise
 
 // ── Pull: traer cambios del servidor y aplicarlos con LWW local ──────────────
 
+interface PullCursors {
+  c?: string;
+  a?: string;
+  s?: string;
+  o?: string;
+}
+
 interface PullResponse {
   categories: any[]; activities: any[]; settings: any[]; dayOverrides: any[];
   serverTime: number; hasMore: boolean;
+  cursors?: PullCursors;
 }
 
-export async function pullChanges(full = false): Promise<{ applied: number }> {
-  const state = (await db.syncState.get('1')) ?? { id: '1' };
-  const since = full ? 0 : (state.lastServerPullAt ?? 0);
+const MAX_PULL_PAGES = 100;
+
+interface Preparada<T> {
+  remota: { updatedAt: number };
+  filaDescifrada: T;
+}
+
+async function aplicarTablaSimple<T extends { id: string; updatedAt: number }>(
+  tabla: Table<T, string>,
+  prefijo: string,
+  filas: any[],
+  ahora: number,
+  sesgo: number,
+  fechasAplicadas: number[],
+  clavesAplicadas: Set<string>,
+): Promise<number> {
+  let count = 0;
+  for (const fila of filas) {
+    const local = await tabla.get(fila.id);
+    if (remotaGana(local, fila, sesgo)) {
+      const lista = acotarFechaRemota({ ...fila } as T, ahora, sesgo);
+      await tabla.put(lista);
+      fechasAplicadas.push(lista.updatedAt);
+      clavesAplicadas.add(`${prefijo}:${fila.id}`);
+      count++;
+    }
+  }
+  return count;
+}
+
+async function aplicarTablaDescifrada<
+  K extends string | number,
+  T extends { updatedAt: number },
+>(
+  tabla: Table<T, K>,
+  prefijo: string,
+  filas: any[],
+  claveDe: (fila: any) => K,
+  preparadas: Map<K, Preparada<T>>,
+  desbloquear: (local: T, dec: T, raw: any, sesgo: number) => { fila: T; cambio: boolean },
+  ahora: number,
+  sesgo: number,
+  conClave: boolean,
+  fechasAplicadas: number[],
+  clavesAplicadas: Set<string>,
+): Promise<number> {
+  let count = 0;
+  for (const raw of filas) {
+    const clave = claveDe(raw);
+    const prep = preparadas.get(clave);
+    if (!prep) continue;
+    const local = await tabla.get(clave);
+    if (remotaGana(local, raw, sesgo)) {
+      const lista = acotarFechaRemota({ ...prep.filaDescifrada }, ahora, sesgo);
+      await tabla.put(lista);
+      fechasAplicadas.push(lista.updatedAt);
+      clavesAplicadas.add(`${prefijo}:${clave}`);
+      count++;
+    } else if (conClave && local && debeAplicarEnPull(local, raw, sesgo, conClave)) {
+      const { fila, cambio } = desbloquear(local, prep.filaDescifrada, raw, sesgo);
+      if (cambio) {
+        await tabla.put(fila);
+        clavesAplicadas.add(`${prefijo}:${clave}`);
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+export function pullChanges(full = false): Promise<{ applied: number }> {
+  return conLockSync(() => ejecutarPull(full));
+}
+
+async function ejecutarPull(full = false): Promise<{ applied: number }> {
+  const initialState = (await db.syncState.get('1')) ?? { id: '1' };
+  const since = full ? 0 : (initialState.lastServerPullAt ?? 0);
 
   setStatus('syncing');
   // Freno de hooks: todo lo que se escriba abajo (incluido el syncState) es
   // una RESTITUCIÓN de lo que ya está en la nube. Sin este bloqueo, cada fila
   // aplicada programaba un push que volvía a escribir y a programar otro pull.
-  escribiendoNube = true;
+  escrituraNubeProfundidad++;
   try {
-    const res = await api<PullResponse>(`/api/sync?since=${since}`);
-
     let applied = 0;
-    // Dos relojes y una sola traducción: el desfase que el servidor acaba de
-    // decirnos. Lo que se GUARDA se acota al reloj local (acotarFechaRemota) y
-    // lo que se COMPARA se traduce con el mismo sesgo (remotaGana) — un lado
-    // por cada reloj es lo que hacía que un dispositivo con la hora adelantada
-    // descartara el primer cambio remoto y no lo pidiera nunca más.
-    const sesgo = sesgoDe(res.serverTime, Date.now());
-    const ahora = Date.now();
+    let cursors: PullCursors | undefined;
+    let primerServerTime: number | undefined;
+    let ultimoServerTime = Date.now();
+    let ultimaFirma = '';
+    let vioActividadesRemotas = false;
+    const idsActividadesRemotas = new Set<string>();
+    const clavesAplicadas = new Set<string>();
 
-    await db.transaction('rw', db.activities, db.categories, db.settings, db.dayOverrides, db.syncState, async () => {
-      // Si la nube nos devuelve actividades reales, limpiamos las actividades semilla
-      // por defecto (updatedAt === 0) que el usuario nunca tocó, para que no
-      // queden duplicadas o estorben su horario real.
-      if (res.activities.length > 0) {
-        const remoteIds = new Set(res.activities.map(a => a.id));
+    if (!tieneClave()) await restaurarClave();
+    const conClave = tieneClave();
+
+    for (let page = 0; page < MAX_PULL_PAGES; page++) {
+      const params = new URLSearchParams({ since: String(since) });
+      if (cursors?.c) params.set('cCursor', cursors.c);
+      if (cursors?.a) params.set('aCursor', cursors.a);
+      if (cursors?.s) params.set('sCursor', cursors.s);
+      if (cursors?.o) params.set('oCursor', cursors.o);
+
+      const res = await api<PullResponse>(`/api/sync?${params.toString()}`);
+      if (primerServerTime === undefined && Number.isFinite(res.serverTime)) {
+        primerServerTime = res.serverTime;
+      }
+      ultimoServerTime = res.serverTime;
+
+      // Dos relojes y una sola traducción: el desfase que el servidor acaba de
+      // decirnos. Lo que se GUARDA se acota al reloj local (acotarFechaRemota) y
+      // lo que se COMPARA se traduce con el mismo sesgo (remotaGana).
+      const sesgo = sesgoDe(res.serverTime, Date.now());
+      const ahora = Date.now();
+
+      for (const a of res.activities) idsActividadesRemotas.add(a.id);
+      if (res.activities.length > 0) vioActividadesRemotas = true;
+
+      // Lectura + descifrado E2E FUERA de la transacción de IndexedDB para no
+      // suspender una IDBTransaction con WebCrypto y disparar TransactionInactiveError.
+      const [localesActs, localesOvrs] = await Promise.all([
+        res.activities.length > 0 ? db.activities.toArray() : Promise.resolve([] as Activity[]),
+        res.dayOverrides.length > 0 ? db.dayOverrides.toArray() : Promise.resolve([] as DayOverride[]),
+      ]);
+      const mapaLocalActs = new Map(localesActs.map(a => [a.id, a]));
+      const mapaLocalOvrs = new Map(localesOvrs.map(o => [o.day, o]));
+
+      const actsPorDescifrar = res.activities.filter(a =>
+        debeAplicarEnPull(mapaLocalActs.get(a.id), a, sesgo, conClave),
+      );
+      const ovrsPorDescifrar = res.dayOverrides.filter(o =>
+        debeAplicarEnPull(mapaLocalOvrs.get(o.day), o, sesgo, conClave),
+      );
+
+      const [actsListas, ovrsListas] = await Promise.all([
+        Promise.all(
+          actsPorDescifrar.map(async a => ({
+            remota: a,
+            filaDescifrada: await descifrarActividad(a, mapaLocalActs.get(a.id)),
+          })),
+        ),
+        Promise.all(
+          ovrsPorDescifrar.map(async o => ({
+            remota: o,
+            filaDescifrada: await descifrarOverride(o, mapaLocalOvrs.get(o.day)),
+          })),
+        ),
+      ]);
+      const mapaActsListas = new Map<string, Preparada<Activity>>(
+        actsListas.map(p => [p.filaDescifrada.id, p]),
+      );
+      const mapaOvrsListas = new Map<number, Preparada<DayOverride>>(
+        ovrsListas.map(p => [p.filaDescifrada.day, p]),
+      );
+
+      const hayMas = Boolean(res.hasMore && res.cursors);
+      const nuevaFirma = hayMas ? JSON.stringify(res.cursors) : '';
+      const esUltimaPagina =
+        !hayMas || (nuevaFirma !== '' && nuevaFirma === ultimaFirma) || page === MAX_PULL_PAGES - 1;
+
+      await db.transaction(
+        'rw',
+        db.activities,
+        db.categories,
+        db.settings,
+        db.dayOverrides,
+        db.syncState,
+        async () => {
+          const fechasAplicadas: number[] = [];
+
+          applied += await aplicarTablaSimple(
+            db.categories, 'c', res.categories, ahora, sesgo, fechasAplicadas, clavesAplicadas,
+          );
+          applied += await aplicarTablaSimple(
+            db.settings, 's', res.settings, ahora, sesgo, fechasAplicadas, clavesAplicadas,
+          );
+          applied += await aplicarTablaDescifrada<string, Activity>(
+            db.activities,
+            'a',
+            res.activities,
+            a => a.id,
+            mapaActsListas,
+            (local, dec, raw, s) =>
+              desbloquearCamposActividad(
+                local,
+                dec,
+                esCifrado(raw?.steps),
+                fuePulledaSinEdicionPosterior(local, raw, s),
+              ),
+            ahora,
+            sesgo,
+            conClave,
+            fechasAplicadas,
+            clavesAplicadas,
+          );
+          applied += await aplicarTablaDescifrada<number, DayOverride>(
+            db.dayOverrides,
+            'o',
+            res.dayOverrides,
+            o => o.day,
+            mapaOvrsListas,
+            (local, dec, raw, s) => desbloquearCamposOverride(local, dec, raw, s),
+            ahora,
+            sesgo,
+            conClave,
+            fechasAplicadas,
+            clavesAplicadas,
+          );
+
+          // Preservar ediciones locales aún no subidas: no dejar que `lastPushAt`
+          // salte por encima de filas locales previas al pull que sigan pendientes.
+          const curState = (await db.syncState.get('1')) ?? { id: '1' };
+          const prevPushAt = curState.lastPushAt ?? 0;
+          const [todasCats, todasActs, todasSetts, todosOvrs] = await Promise.all([
+            db.categories.toArray(),
+            db.activities.toArray(),
+            db.settings.toArray(),
+            db.dayOverrides.toArray(),
+          ]);
+          const pendientes: number[] = [];
+          const registrarPendientes = <T extends { updatedAt: number }>(
+            lista: T[],
+            prefijo: string,
+            claveDe: (item: T) => string | number,
+          ) => {
+            for (const item of lista) {
+              if (!esSemilla(item) && item.updatedAt > prevPushAt && !clavesAplicadas.has(`${prefijo}:${claveDe(item)}`)) {
+                pendientes.push(item.updatedAt);
+              }
+            }
+          };
+          registrarPendientes(todasCats, 'c', c => c.id);
+          registrarPendientes(todasActs, 'a', a => a.id);
+          registrarPendientes(todasSetts, 's', s => s.id);
+          registrarPendientes(todosOvrs, 'o', o => o.day);
+
+          const nuevoPushAt = cursorPushTrasPull(prevPushAt, fechasAplicadas, pendientes, ahora);
+
+          // El cursor va con holgura hacia atrás (cursorPull): solapar lecturas
+          // permite que un cambio remoto escrito justo en la frontera llegue en el
+          // siguiente pull en vez de perderse entre los relojes de los dos equipos.
+          // Solo se avanza en la última página usando el primer `serverTime`.
+          await db.syncState.put({
+            ...curState,
+            id: '1',
+            lastServerPullAt: esUltimaPagina
+              ? cursorPull(primerServerTime ?? ultimoServerTime)
+              : curState.lastServerPullAt,
+            lastPullAt: Date.now(),
+            lastPushAt: nuevoPushAt,
+            sesgoServidor: sesgo,
+          });
+        },
+      );
+
+      if (esUltimaPagina) break;
+      ultimaFirma = nuevaFirma;
+      cursors = res.cursors;
+    }
+
+    // Si la nube nos devuelve actividades reales, limpiamos las actividades semilla
+    // por defecto (updatedAt === 0) que el usuario nunca tocó, tras leer todas las páginas.
+    if (vioActividadesRemotas) {
+      await db.transaction('rw', db.activities, async () => {
         const locales = await db.activities.toArray();
         for (const loc of locales) {
-          if (esSemilla(loc) && !remoteIds.has(loc.id)) {
+          if (esSemilla(loc) && !idsActividadesRemotas.has(loc.id)) {
             await db.activities.delete(loc.id);
           }
         }
-      }
-
-      for (const c of res.categories) {
-        const local = await db.categories.get(c.id);
-        if (remotaGana(local, c, sesgo)) {
-          await db.categories.put(acotarFechaRemota({ ...c } as Category, ahora, sesgo));
-          applied++;
-        }
-      }
-      for (const a of res.activities) {
-        const local = await db.activities.get(a.id);
-        if (remotaGana(local, a, sesgo)) {
-          const aPlano = await descifrarActividad(a, local);
-          await db.activities.put(acotarFechaRemota({ ...aPlano } as Activity, ahora, sesgo));
-          applied++;
-        }
-      }
-      for (const s of res.settings) {
-        const local = await db.settings.get(s.id);
-        if (remotaGana(local, s, sesgo)) {
-          await db.settings.put(acotarFechaRemota({ ...s } as AppSettings, ahora, sesgo));
-          applied++;
-        }
-      }
-      for (const o of res.dayOverrides) {
-        const local = await db.dayOverrides.get(o.day);
-        if (remotaGana(local, o, sesgo)) {
-          const oPlano = await descifrarOverride(o, local);
-          await db.dayOverrides.put(acotarFechaRemota({ ...oPlano } as DayOverride, ahora, sesgo));
-          applied++;
-        }
-      }
-
-      // El cursor de push debe cubrir lo que acabamos de recibir para que el push
-      // no considere erróneamente que las filas recién bajadas son ediciones locales.
-      const maxPulled = Math.max(
-        0,
-        ...res.activities.map(a => a.updatedAt || 0),
-        ...res.categories.map(c => c.updatedAt || 0),
-        ...res.settings.map(s => s.updatedAt || 0),
-        ...res.dayOverrides.map(o => o.updatedAt || 0),
-      );
-      const nuevoPushAt = Math.max(state.lastPushAt ?? 0, Math.min(ahora, maxPulled - sesgo));
-
-      // El cursor va con holgura hacia atrás (cursorPull): solapar lecturas
-      // permite que un cambio remoto escrito justo en la frontera llegue en el
-      // siguiente pull en vez de perderse entre los relojes de los dos equipos.
-      await db.syncState.put({
-        ...state, id: '1',
-        lastServerPullAt: cursorPull(res.serverTime),
-        lastPullAt: Date.now(),
-        lastPushAt: nuevoPushAt,
-        sesgoServidor: sesgo,
       });
-    });
+    }
 
     lastSyncAt = Date.now();
     setStatus(pendingCount > 0 ? 'syncing' : 'synced');
@@ -781,40 +1159,42 @@ export async function pullChanges(full = false): Promise<{ applied: number }> {
     setStatus(navigator.onLine ? 'error' : 'offline', err?.message ?? 'Error de red');
     throw err;
   } finally {
-    escribiendoNube = false;
+    escrituraNubeProfundidad = Math.max(0, escrituraNubeProfundidad - 1);
   }
 }
 
 // ── Ciclo completo ───────────────────────────────────────────────────────────
 
-let syncing = false;
-
 /** Push + pull con exclusión mutua. Es la función que invocan los triggers. */
 export async function syncNow(full = false): Promise<void> {
-  if (syncing) return;
-  // Push pausado tras import: solo pull (leer la nube no pisa lo importado,
-  // el LWW local gana con updatedAt fresco); nada local viaja arriba.
-  if (pushPaused && !full) {
-    try {
-      await pullChanges();
-    } catch { /* estado ya en error/offline */ }
+  if (syncActivo > 0) {
+    syncPendiente = true;
+    if (full) fullPendiente = true;
     return;
   }
-  if (pushPaused && full) {
-    return; // pausa explícita: ni push full (lo llama resumePushAndSync tras reactivar)
-  }
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    setStatus('offline');
-    return;
-  }
-  syncing = true;
-  try {
-    await pushChanges(full);
+  return conLockSync(async () => {
+    syncPendiente = false;
+    const usarFull = full || fullPendiente;
+    fullPendiente = false;
+    // Push pausado tras import: solo pull (leer la nube no pisa lo importado,
+    // el LWW local gana con updatedAt fresco); nada local viaja arriba.
+    if (pushPaused && !usarFull) {
+      try {
+        await ejecutarPull();
+      } catch { /* estado ya en error/offline */ }
+      return;
+    }
+    if (pushPaused && usarFull) {
+      return; // pausa explícita: ni push full (lo llama resumePushAndSync tras reactivar)
+    }
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setStatus('offline');
+      return;
+    }
+    await ejecutarPush(usarFull);
     if (!sesionActiva) return; // la cookie caducó: no encadenar otro 401
-    await pullChanges();
-  } finally {
-    syncing = false;
-  }
+    await ejecutarPull();
+  });
 }
 
 // ── Arranque con sesión restaurada ────────────────────────────────────────────
@@ -850,15 +1230,20 @@ export async function arrancarSync(): Promise<void> {
     setStatus('offline');
     return; // el pull al volver de la red lo dispara el listener 'online'
   }
-  try {
-    setStatus('syncing');
-    await pullChanges();
-    // Push incremental (no full): solo lo que el usuario tocó en este
-    // dispositivo. La semilla tiene updatedAt 0 y se queda en casa.
-    if (!pushPaused) await pushChanges(false);
-  } catch {
-    /* el estado ya quedó en error/offline; se reintenta con el listener */
-  }
+  return conLockSync(async () => {
+    try {
+      setStatus('syncing');
+      // Pull completo al arrancar (`since = 0`) para recuperar cambios escritos
+      // offline en otros dispositivos cuya marca `updatedAt` sea anterior al
+      // último `lastServerPullAt` de este equipo.
+      await ejecutarPull(true);
+      // Push incremental (no full): solo lo que el usuario tocó en este
+      // dispositivo. La semilla tiene updatedAt 0 y se queda en casa.
+      if (!pushPaused) await ejecutarPush(false);
+    } catch {
+      /* el estado ya quedó en error/offline; se reintenta con el listener */
+    }
+  });
 }
 
 /** ¿Hay sesión activa? (la cookie httpOnly responde por nosotros) */
@@ -903,14 +1288,16 @@ async function haySesionOperativa(): Promise<boolean> {
  */
 export async function subirAhora(): Promise<ResultadoSubida> {
   if (!(await haySesionOperativa())) throw new Error(SIN_SESION);
-  if (pushPaused) {
-    pushPaused = false;
-    const prev = await db.syncState.get('1');
-    await db.syncState.put({ ...prev, id: '1', pendingPushPaused: false });
-  }
-  const enviados = await pushChanges(true);
-  await pullChanges().catch(() => { /* el push ya salió; el pull reintenta solo */ });
-  return { enviados };
+  return conLockSync(async () => {
+    if (pushPaused) {
+      pushPaused = false;
+      const prev = await db.syncState.get('1');
+      await db.syncState.put({ ...prev, id: '1', pendingPushPaused: false });
+    }
+    const enviados = await ejecutarPush(true);
+    await ejecutarPull().catch(() => { /* el push ya salió; el pull reintenta solo */ });
+    return { enviados };
+  });
 }
 
 /**
@@ -921,12 +1308,14 @@ export async function subirAhora(): Promise<ResultadoSubida> {
  */
 export async function bajarAhora(): Promise<ResultadoBajada> {
   if (!(await haySesionOperativa())) throw new Error(SIN_SESION);
-  await restaurarClave();
-  // pullChanges cuenta 'applied' y este contrato pide 'aplicados': sin el mapa,
-  // la UI recibía undefined y el toast decía SIEMPRE "ya tenías todo", que era
-  // una mentira incluso bajando de verdad.
-  const { applied } = await pullChanges(true);
-  return { aplicados: applied };
+  return conLockSync(async () => {
+    await restaurarClave();
+    // pullChanges cuenta 'applied' y este contrato pide 'aplicados': sin el mapa,
+    // la UI recibía undefined y el toast decía SIEMPRE "ya tenías todo", que era
+    // una mentira incluso bajando de verdad.
+    const { applied } = await ejecutarPull(true);
+    return { aplicados: applied };
+  });
 }
 
 export async function isLoggedIn(): Promise<boolean> {
@@ -986,10 +1375,12 @@ export function installSyncListeners() {
  */
 export async function initialSyncAfterLogin(): Promise<void> {
   sesionActiva = true;
-  await restaurarClave();
-  setStatus('syncing');
-  await pullChanges(true);
-  if (!pushPaused) await pushChanges(true);
+  return conLockSync(async () => {
+    await restaurarClave();
+    setStatus('syncing');
+    await ejecutarPull(true);
+    if (!pushPaused) await ejecutarPush(true);
+  });
 }
 
 /** Se llama tras logout: la app vuelve a modo solo-local. La pausa de push
