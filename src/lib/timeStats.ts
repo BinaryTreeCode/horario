@@ -8,12 +8,7 @@
 // y se acumula de verdad.
 
 import type { Activity, Category } from './types.js';
-
-/** "HH:MM" → horas decimales (acepta "24:00"). Replica parseTime de stores.ts sin arrastrar la importación de Dexie. */
-function parseTimeToHours(time: string): number {
-  const [h, m] = time.split(':').map(Number);
-  return h + m / 60;
-}
+import { parseTime } from './timeUtils';
 
 export interface CategoryStat {
   key: string;
@@ -47,8 +42,8 @@ export function computeCategoryStats(
     const intervals: { start: number; end: number; categoryId: string }[] = [];
     for (const a of activities) {
       if (!a.daysOfWeek.includes(day)) continue;
-      let s = parseTimeToHours(a.startTime);
-      let e = parseTimeToHours(a.endTime);
+      let s = parseTime(a.startTime);
+      let e = parseTime(a.endTime);
       if (e <= s) continue;
       if (range) {
         s = Math.max(s, range.start);

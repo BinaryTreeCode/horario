@@ -1,5 +1,5 @@
 import type { Activity } from './types';
-import { parseTime, formatTime } from './stores';
+import { parseTime, formatTime } from './timeUtils';
 import { db, newId } from './db';
 
 /** Duración mínima de un bloque (15 min, en horas). */

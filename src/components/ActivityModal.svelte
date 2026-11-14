@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { db, newId } from '../lib/db';
-  import { parseTime, formatTime } from '../lib/stores';
+  import { parseTime, formatTime, format12h } from '../lib/timeUtils';
   import type { Activity, Category, ActivityStep } from '../lib/types';
   import { X, Trash2, CheckCircle, Plus, CheckSquare, Square, ListChecks, Sparkles, Zap, Calendar, ImageIcon, Link2, RefreshCw } from '@lucide/svelte';
   import ImageLightbox from './ImageLightbox.svelte';
@@ -47,14 +47,6 @@
   // Derived category color for preview
   const activeCategory = $derived(categories.find(c => c.id === categoryId));
   const categoryColor = $derived(activeCategory?.color || '#eeeeee');
-
-  // Format 12h for labels
-  function format12h(timeStr: string) {
-    const [h, m] = timeStr.split(':').map(Number);
-    const period = h < 12 ? 'AM' : (h >= 24 ? 'AM' : 'PM');
-    const h12 = h % 12 || 12;
-    return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
-  }
 
   // Duration in minutes
   const durationMinutes = $derived.by(() => {
@@ -344,7 +336,7 @@
    * editando LA PLANTILLA y su consistencia interna).
    */
   async function buscarChoque(nueva: { startTime: string; endTime: string; daysOfWeek: number[] }): Promise<{ name: string; dia: string; rango: string } | null> {
-    const { DIAS_SEMANA, horarioEfectivoDia, chocaHoras } = await import('../lib/cascade');
+    const { horarioEfectivoDia, chocaHoras } = await import('../lib/cascade');
     const scopeDia = targetDay !== null && saveScope === 'day';
     const diasAValidar = scopeDia ? [targetDay] : nueva.daysOfWeek;
     const plantilla = await db.activities.toArray();
@@ -352,7 +344,7 @@
       const override = scopeDia ? await db.dayOverrides.get(dia) : undefined;
       for (const a of horarioEfectivoDia(plantilla, override, dia, id)) {
         if (chocaHoras(nueva.startTime, nueva.endTime, a.startTime, a.endTime)) {
-          return { name: a.name, dia: DIAS_SEMANA[dia] ?? `día ${dia}`, rango: `${format12h(a.startTime)} – ${format12h(a.endTime)}` };
+          return { name: a.name, dia: tNow(`day.${dia}`) ?? `día ${dia}`, rango: `${format12h(a.startTime)} – ${format12h(a.endTime)}` };
         }
       }
     }

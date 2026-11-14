@@ -184,8 +184,3 @@ export async function elegirTema(nuevo: Tema): Promise<void> {
 export function temaOpuesto(efectivo: TemaEfectivo): Tema {
   return efectivo === 'oscuro' ? 'claro' : 'oscuro';
 }
-
-/** El interruptor del header: salta al contrario de lo que se ve y lo guarda. */
-export function alternarTema(): void {
-  void elegirTema(temaOpuesto(get(temaEfectivo)));
-}

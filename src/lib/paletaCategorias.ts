@@ -37,6 +37,16 @@ export type TipoArmonia =
   | 'tetradica'
   | 'equidistante';
 
+export const ARMONIAS_CROMATICAS: readonly { id: TipoArmonia; labelKey: string }[] = [
+  { id: 'analoga', labelKey: 'settings.harmonyAnaloga' },
+  { id: 'monocromatica', labelKey: 'settings.harmonyMonocromatica' },
+  { id: 'triada', labelKey: 'settings.harmonyTriada' },
+  { id: 'complementaria', labelKey: 'settings.harmonyComplementaria' },
+  { id: 'dividida', labelKey: 'settings.harmonyDividida' },
+  { id: 'tetradica', labelKey: 'settings.harmonyTetradica' },
+  { id: 'equidistante', labelKey: 'settings.harmonyEquidistante' }
+] as const;
+
 export interface PaletaTematica {
   id: string;
   nombreKey: string;
@@ -83,6 +93,10 @@ export const PALETAS_TEMATICAS: PaletaTematica[] = [
     colores: ['#8b4513', '#a05a2c', '#b8860b', '#556b2f', '#654321', '#a67c52']
   }
 ];
+
+export function esPaletaTematica(id: string): boolean {
+  return PALETAS_TEMATICAS.some(p => p.id === id);
+}
 
 /** #rrggbb → [h, s, l] con h en 0-360 y s/l en 0-100. */
 export function hexAHsl(hex: string): [number, number, number] {

@@ -91,7 +91,7 @@ export function bytesDeDataUrl(dataUrl: string): { bytes: Uint8Array; mime: stri
 }
 
 /** data-URL → Blob, sin `fetch`. */
-export function blobDeDataUrl(dataUrl: string): Blob {
+function blobDeDataUrl(dataUrl: string): Blob {
   const { bytes, mime } = bytesDeDataUrl(dataUrl);
   return new Blob([bytes], { type: mime });
 }

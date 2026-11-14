@@ -21,7 +21,7 @@
 const MARCA = Symbol('np:escape-consumido');
 
 /** Marca el evento como ya gestionado por un diálogo de nivel superior. */
-export function marcarConsumido(e: Event) {
+function marcarConsumido(e: Event) {
   (e as any)[MARCA] = true;
 }
 

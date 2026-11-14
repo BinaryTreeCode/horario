@@ -789,9 +789,3 @@ export async function importValidatedData(result: ValidationResult): Promise<voi
   await pausePushAfterImport();
 }
 
-/**
- * @deprecated Usar validateImport() + importValidatedData().
- */
-export async function importData(_jsonString: string): Promise<never> {
-  throw new Error('importData fue reemplazado: usa validateImport() + importValidatedData().');
-}

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types';
-  import { parseTime, getActivityColor, formatTime, format12h } from '../lib/stores';
+  import { parseTime, getActivityColor, formatTime, format12h } from '../lib/timeUtils';
   import { resolveDayCascade, resolveResizeDay } from '../lib/cascade';
-  import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
+  import { createDragEngine, type DragHooks } from '../lib/dragEngine';
   import { Clock, Edit3, Copy, Trash2, ListChecks, RotateCcw, Save, Calendar, Zap, ImageIcon, Plus, ChevronLeft, ChevronRight } from '@lucide/svelte';
   import { db, newId } from '../lib/db';
   import { duplicateActivity as duplicateActivityOp } from '../lib/activityOps';
@@ -13,7 +13,7 @@
   import { portal } from '../lib/portal';
   import { formatHours } from '../lib/timeStats';
   import { t, tNow } from '../lib/i18n';
-  import { pushUndo, cloneAct } from '../lib/undo';
+  import { pushUndo } from '../lib/undo';
   import { srcImagen } from '../lib/crypto';
 
   interface Props {
@@ -355,7 +355,7 @@
       .map(a => ({ ...a }));
     await db.dayOverrides.put({
       day,
-      activities: masterActs,
+      activities: $state.snapshot(masterActs),
       updatedAt: Date.now()
     });
     return masterActs;
@@ -830,7 +830,7 @@
         const ovBefore = await db.dayOverrides.get(day);
         await db.dayOverrides.put({
           day,
-          activities: filtered,
+          activities: $state.snapshot(filtered),
           updatedAt: Date.now()
         });
         if (victim) {

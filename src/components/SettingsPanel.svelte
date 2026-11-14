@@ -11,7 +11,7 @@
   import { idioma, cambiarIdioma, t, IDIOMAS_DISPONIBLES } from '../lib/i18n';
   import { modoPrivacidad, alternarPrivacidad } from '../lib/privacy';
   import { tema, elegirTema, TEMAS, type Tema } from '../lib/tema';
-  import { formatTime as horaReloj } from '../lib/stores';
+  import { formatTime as horaReloj } from '../lib/timeUtils';
   import { dndzone } from 'svelte-dnd-action';
   import { flip } from 'svelte/animate';
   import ConfirmDialog from './ConfirmDialog.svelte';

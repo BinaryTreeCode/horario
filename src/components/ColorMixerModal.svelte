@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import type { Category } from '../lib/types';
-  import { X, Check, Palette, Sparkles, SlidersHorizontal, Wand2 } from '@lucide/svelte';
-  import { t, tNow } from '../lib/i18n';
+  import { X, Check, Palette, SlidersHorizontal, Wand2 } from '@lucide/svelte';
+  import { t } from '../lib/i18n';
   import {
     hexAHsl,
     hslAHex,
     generarArmonia,
     armonizarCategorias,
     PALETAS_TEMATICAS,
-    type TipoArmonia
+    ARMONIAS_CROMATICAS,
+    esPaletaTematica
   } from '../lib/paletaCategorias';
 
   interface Props {
@@ -75,10 +75,12 @@
   }
 
   // Armonías en tiempo real para el modo individual
-  const armoniaAnaloga = $derived(generarArmonia(indColor, 'analoga', 5));
-  const armoniaMonocromatica = $derived(generarArmonia(indColor, 'monocromatica', 5));
-  const armoniaTriada = $derived(generarArmonia(indColor, 'triada', 3));
-  const armoniaComplementaria = $derived(generarArmonia(indColor, 'complementaria', 4));
+  const armoniasEnVivo = $derived([
+    { id: 'analoga', labelKey: 'settings.harmonyAnaloga', colores: generarArmonia(indColor, 'analoga', 5) },
+    { id: 'monocromatica', labelKey: 'settings.harmonyMonocromatica', colores: generarArmonia(indColor, 'monocromatica', 5) },
+    { id: 'triada', labelKey: 'settings.harmonyTriada', colores: generarArmonia(indColor, 'triada', 3) },
+    { id: 'complementaria', labelKey: 'settings.harmonyComplementaria', colores: generarArmonia(indColor, 'complementaria', 4) }
+  ]);
 
   // Vista previa global de categorías armonizadas
   const categoriasArmonizadas = $derived(armonizarCategorias(categories, selectedMode, pivotColor));
@@ -203,28 +205,20 @@
             <div class="block-section">
               <span class="block-title">{$t('settings.chromaticHarmonies')}</span>
               <div class="chips-row">
-                {#each [
-                  { id: 'analoga', label: 'settings.harmonyAnaloga' },
-                  { id: 'monocromatica', label: 'settings.harmonyMonocromatica' },
-                  { id: 'triada', label: 'settings.harmonyTriada' },
-                  { id: 'complementaria', label: 'settings.harmonyComplementaria' },
-                  { id: 'dividida', label: 'settings.harmonyDividida' },
-                  { id: 'tetradica', label: 'settings.harmonyTetradica' },
-                  { id: 'equidistante', label: 'settings.harmonyEquidistante' }
-                ] as armonia}
+                {#each ARMONIAS_CROMATICAS as armonia}
                   <button
                     type="button"
                     class="chip-armonia"
                     class:active={selectedMode === armonia.id}
                     onclick={() => (selectedMode = armonia.id)}
                   >
-                    {$t(armonia.label)}
+                    {$t(armonia.labelKey)}
                   </button>
                 {/each}
               </div>
 
               <!-- Selector de color pivote si se elige armonía cromática -->
-              {#if selectedMode !== 'bosque' && selectedMode !== 'oceano' && selectedMode !== 'atardecer' && selectedMode !== 'floral' && selectedMode !== 'nordico' && selectedMode !== 'tierra'}
+              {#if !esPaletaTematica(selectedMode)}
                 <div class="pivot-selector">
                   <label for="input-pivot" class="pivot-label">{$t('settings.pivotColor')}:</label>
                   <div class="pivot-controls">
@@ -378,69 +372,23 @@
             <div class="harmonies-suggestions">
               <span class="block-title">{$t('settings.chromaticHarmonies')}</span>
 
-              <div class="harmony-row">
-                <span class="harmony-label">{$t('settings.harmonyAnaloga')}:</span>
-                <div class="swatches-row">
-                  {#each armoniaAnaloga as col}
-                    <button
-                      type="button"
-                      class="swatch-action"
-                      class:active={indColor === col}
-                      style="background-color: {col};"
-                      onclick={() => (indColor = col)}
-                      aria-label="Elegir color {col}"
-                    ></button>
-                  {/each}
+              {#each armoniasEnVivo as armonia}
+                <div class="harmony-row">
+                  <span class="harmony-label">{$t(armonia.labelKey)}:</span>
+                  <div class="swatches-row">
+                    {#each armonia.colores as col}
+                      <button
+                        type="button"
+                        class="swatch-action"
+                        class:active={indColor === col}
+                        style="background-color: {col};"
+                        onclick={() => (indColor = col)}
+                        aria-label="Elegir color {col}"
+                      ></button>
+                    {/each}
+                  </div>
                 </div>
-              </div>
-
-              <div class="harmony-row">
-                <span class="harmony-label">{$t('settings.harmonyMonocromatica')}:</span>
-                <div class="swatches-row">
-                  {#each armoniaMonocromatica as col}
-                    <button
-                      type="button"
-                      class="swatch-action"
-                      class:active={indColor === col}
-                      style="background-color: {col};"
-                      onclick={() => (indColor = col)}
-                      aria-label="Elegir color {col}"
-                    ></button>
-                  {/each}
-                </div>
-              </div>
-
-              <div class="harmony-row">
-                <span class="harmony-label">{$t('settings.harmonyTriada')}:</span>
-                <div class="swatches-row">
-                  {#each armoniaTriada as col}
-                    <button
-                      type="button"
-                      class="swatch-action"
-                      class:active={indColor === col}
-                      style="background-color: {col};"
-                      onclick={() => (indColor = col)}
-                      aria-label="Elegir color {col}"
-                    ></button>
-                  {/each}
-                </div>
-              </div>
-
-              <div class="harmony-row">
-                <span class="harmony-label">{$t('settings.harmonyComplementaria')}:</span>
-                <div class="swatches-row">
-                  {#each armoniaComplementaria as col}
-                    <button
-                      type="button"
-                      class="swatch-action"
-                      class:active={indColor === col}
-                      style="background-color: {col};"
-                      onclick={() => (indColor = col)}
-                      aria-label="Elegir color {col}"
-                    ></button>
-                  {/each}
-                </div>
-              </div>
+              {/each}
             </div>
           </div>
         {/if}

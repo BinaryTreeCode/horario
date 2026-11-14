@@ -47,10 +47,6 @@ function normTimestamp(n: unknown, fallback: number): number {
   return Math.min(num, Date.now() + MAX_FUTURO_MS);
 }
 
-function normNumber(n: unknown, fallback: number): number {
-  return typeof n === 'number' && Number.isFinite(n) ? n : fallback;
-}
-
 /** Sanea una actividad entrante; null si es irrecuperable. */
 function normActivity(a: any): {
   id: string; categoryId: string; name: string; description: string | null; image: string | null;

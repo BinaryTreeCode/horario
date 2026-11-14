@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import type { Activity, Category, DayOverride } from '../lib/types';
-  import { parseTime, getActivityColor, textOn, formatTime, format12h } from '../lib/stores';
+  import { parseTime, getActivityColor, textOn, formatTime, format12h } from '../lib/timeUtils';
   import { resolveDayCascade, resolveResizeDay, resolveNudgeDay, propagateWeekly, capacidadResizeWeekly, barridoRetiro, barridoGanar, resolverGanarDias } from '../lib/cascade';
   import type { WeeklyResolution } from '../lib/cascade';
   import { db } from '../lib/db';
@@ -12,7 +12,7 @@
   import { toastOk, toastErr, toastErrRepetido } from '../lib/toast';
   import { cloneAct, pushUndo } from '../lib/undo';
   import { portal } from '../lib/portal';
-  import { createDragEngine, type DragHooks, type DragTarget } from '../lib/dragEngine';
+  import { createDragEngine, type DragHooks } from '../lib/dragEngine';
   import { t, tNow } from '../lib/i18n';
   import { srcImagen } from '../lib/crypto';
 
