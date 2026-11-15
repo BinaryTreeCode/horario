@@ -67,7 +67,11 @@ const { title } = Astro.props;
     min-height: 100dvh;
     display: grid;
     grid-template-areas: "content";
-    grid-template-columns: 1fr;
+    /* minmax(0, 1fr): con `1fr` la pista arranca en min-width:auto, así que el
+       contenido más ancho (la fila de botones del header, ~326px nowrap)
+       ensanchaba la PÁGINA entera a 320px (scrollWidth 357px). El mínimo 0
+       deja que el hijo encoja y resuelva su ancho con scroll interno. */
+    grid-template-columns: minmax(0, 1fr);
   }
 
   /* Scrollbar de la página invisible (pedido del usuario): el scroll queda

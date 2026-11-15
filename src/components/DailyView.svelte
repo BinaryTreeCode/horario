@@ -958,9 +958,9 @@
     {/if}
   </div>
 
-  <!-- tabindex+role=region: contenedor scrolleable accesible por teclado
-       (axe: scrollable-region-focusable) -->
-  <div class="daily-container" tabindex="0" role="region" aria-label={$t('dayView.title')}>
+  <!-- role=region sin tabindex: ya no es un contenedor scrolleable (scrollea
+       el documento), así que no debe ser un tab stop extra en el recorrido. -->
+  <div class="daily-container" role="region" aria-label={$t('dayView.title')}>
     <div class="time-track">
       {#each Array.from({ length: totalHours + 1 }, (_, i) => startHour + i) as hour}
         <div class="hour-marker" style="top: {((hour - startHour) / totalHours) * 100}%">
@@ -1390,15 +1390,13 @@
     margin: 1.5rem auto;
     width: 100%;
     max-width: var(--dia-ancho, 100%);
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
+    /* Sin scroller interno: mide 1600px pero ni él ni sus ancestros limitan
+       la altura, así que `overflow-y: auto` solo producía 7px de scroll falso
+       (clientHeight 1600 / scrollHeight 1607) mientras el scroll real lo hacía
+       window (~2000px). El motor de arrastre apuntaba a este scroller y su
+       auto-scroll nunca se disparaba. El flujo normal del documento es el
+       único scroller vertical de la vista Día. */
     min-height: 1600px; /* Scale so 15-min tasks have ~25px and don't crowd */
-    /* Scrollbar invisible: el scroll queda (rueda del mouse + touch), pero sin
-       la barra pegada al borde de las tarjetas. */
-    scrollbar-width: none;
-  }
-  .daily-container::-webkit-scrollbar {
-    display: none;
   }
 
   .time-track {

@@ -40,8 +40,10 @@ export interface DragHooks {
 export interface DragEngineOptions {
   /** Clase que marca la tarjeta en pleno drag (estilo de fantasma). */
   ghostClass?: string;
-  /** Eje del auto-scroll del contenedor (omitir = sin auto-scroll). */
-  scrollAxis?: 'x' | 'y';
+  /** Eje(s) del auto-scroll (omitir = sin auto-scroll). 'both' = X en el
+   *  contenedor y Y en el contenedor o, si ese no scrollea en vertical, en la
+   *  PÁGINA (caso de Día y Semana, donde mide 1600–2900px y scrollea window). */
+  scrollAxis?: 'x' | 'y' | 'both';
   scrollContainer?: () => HTMLElement | null;
   /**
    * Patrón iOS (G6, ELIMINADO en F3 del plan v2): antes, dedo TÁCTIL quieto
@@ -56,6 +58,12 @@ export interface DragEngineOptions {
 export interface BeginOptions {
   ghost?: boolean;
   quiet?: boolean;
+  /**
+   * Háptica al armar/soltar. Por defecto sigue a `ghost` (las vistas que
+   * delegan el fantasma en el motor ya vibraban); las que pintan su propio
+   * clon pasan `{ ghost: false, haptic: true }` y conservan la vibración.
+   */
+  haptic?: boolean;
 }
 
 interface Gesture {
@@ -71,6 +79,8 @@ interface Gesture {
   maxDist: number;
   started: boolean;
   ghost: boolean;
+  /** Vibración efectiva al armar/soltar (ver BeginOptions.haptic). */
+  haptic: boolean;
   armTimer: number;
   quietTimer: number;
   /** scrollTop del contenedor al empezar: compensa el fantasma en auto-scroll. */
@@ -91,6 +101,27 @@ const TOUCH_CANCEL_PX = 10;  // táctil: movimiento pre-armado = scroll
 const LONG_PRESS_MS = 400;
 const EDGE_ZONE = 56;        // franja activa de auto-scroll
 const EDGE_SPEED = 12;       // px por frame
+
+/**
+ * Paso de auto-scroll de UN eje, en px/frame (negativo = atrás/arriba).
+ * `min`/`max` son la intersección VISIBLE del scroller (o del viewport en el
+ * fallback de página), no su rect completo: con la grilla de 1600px el borde
+ * de abajo cae fuera de pantalla y el puntero nunca llegaba a esa franja.
+ * Si el carril visible no supera las dos franjas (pantalla enana, scroller
+ * casi oculto) devuelve 0: no hay zona "central" que respetar.
+ */
+export function calcularPasoAutoScroll(
+  pos: number,
+  min: number,
+  max: number,
+  edgeZone = EDGE_ZONE,
+  speed = EDGE_SPEED
+): number {
+  if (max - min <= edgeZone * 2) return 0;
+  if (pos < min + edgeZone) return -speed;
+  if (pos > max - edgeZone) return speed;
+  return 0;
+}
 
 function safe(fn: () => void) {
   try {
@@ -143,30 +174,71 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
   }
 
   // ── Auto-scroll (M5) ────────────────────────────────────────────────
+  /** ¿El contenedor es un scroller vertical REAL (con recorrido y overflow)? */
+  function scrolleaVertical(el: HTMLElement): boolean {
+    if (el.scrollHeight <= el.clientHeight + 20) return false;
+    return /(auto|scroll)/.test(getComputedStyle(el).overflowY);
+  }
+
   function edgeTick() {
     const cur = g;
     if (!cur?.started || !scrollAxis) { raf = 0; return; }
     const el = container();
-    if (el) {
-      const r = el.getBoundingClientRect();
-      const y = scrollAxis === 'y';
-      const pos = y ? cur.lastY : cur.lastX;
-      const min = y ? r.top : r.left;
-      const max = y ? r.bottom : r.right;
-      const before = y ? el.scrollTop : el.scrollLeft;
-      const after = pos < min + EDGE_ZONE ? before - EDGE_SPEED
-        : pos > max - EDGE_ZONE ? before + EDGE_SPEED : before;
-      if (after !== before) {
-        if (y) el.scrollTop = after; else el.scrollLeft = after;
-        // Con el puntero quieto, el contenido se movió debajo: actualizar preview.
-        // En el tope el navegador ignora el cambio (real === before): nada que
-        // re-emitir, o computeLayoutForDrop correría a 60 fps con el dedo quieto.
-        const real = y ? el.scrollTop : el.scrollLeft;
-        if (real !== before) {
-          paintGhost();
-          em(cur);
+    let movio = false;
+
+    // ── Eje X: el contenedor scrollea en horizontal (grilla de la semana) ──
+    if ((scrollAxis === 'x' || scrollAxis === 'both') && el) {
+      if (el.scrollWidth > el.clientWidth + 1) {
+        const r = el.getBoundingClientRect();
+        // Solo la parte visible: el rect completo puede salirse del viewport.
+        const min = Math.max(r.left, 0);
+        const max = Math.min(r.right, window.innerWidth);
+        const paso = calcularPasoAutoScroll(cur.lastX, min, max);
+        if (paso !== 0) {
+          const before = el.scrollLeft;
+          el.scrollLeft = before + paso;
+          // En el tope el navegador ignora el cambio: nada que re-emitir, o
+          // onMove correría a 60 fps con el dedo quieto.
+          if (el.scrollLeft !== before) movio = true;
         }
       }
+    }
+
+    // ── Eje Y ──────────────────────────────────────────────────────────────
+    if (scrollAxis === 'y' || scrollAxis === 'both') {
+      let desplazado = false;
+      // 1) Contenedor con scroll vertical propio (si existe y tiene recorrido).
+      if (el && scrolleaVertical(el)) {
+        const r = el.getBoundingClientRect();
+        const min = Math.max(r.top, 0);
+        const max = Math.min(r.bottom, window.innerHeight);
+        const paso = calcularPasoAutoScroll(cur.lastY, min, max);
+        if (paso !== 0) {
+          const before = el.scrollTop;
+          el.scrollTop = before + paso;
+          desplazado = el.scrollTop !== before;
+        }
+      }
+      // 2) Fallback: scrollea el DOCUMENTO (Día y Semana). Los bordes son los
+      //    del viewport, no los del contenedor de 1600px que se sale abajo.
+      if (!desplazado) {
+        const paso = calcularPasoAutoScroll(cur.lastY, 0, window.innerHeight);
+        if (paso !== 0) {
+          const prevWinY = window.scrollY;
+          window.scrollBy({ top: paso, behavior: 'instant' as ScrollBehavior });
+          if (window.scrollY !== prevWinY) movio = true;
+        }
+      } else {
+        movio = true;
+      }
+    }
+
+    // Con el puntero quieto, el contenido se movió debajo: actualizar preview.
+    if (movio) {
+      paintGhost();
+      em(cur);
+      // onMove puede haber cerrado el gesto (drop por hook): no re-armar el loop.
+      if (!g) { raf = 0; return; }
     }
     raf = requestAnimationFrame(edgeTick);
   }
@@ -191,10 +263,8 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
       });
     }
 
-    if (cur.ghost) {
-      if (ghostClass) card.classList.add(ghostClass); // classList.add('') lanza
-      haptic(10);
-    }
+    if (cur.ghost && ghostClass) card.classList.add(ghostClass); // add('') lanza
+    if (cur.haptic) haptic(10);
 
     safe(() => cur.hooks.onActivate?.(cur.target));
     paintGhost();
@@ -228,7 +298,7 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
     if (!cur.started) return; // tap corto: la vista hace click
 
     if (drop) {
-      if (cur.ghost) haptic(8);
+      if (cur.haptic) haptic(8);
       // Tras un drag real, el click sintético que sigue al pointerup no abre la tarjeta.
       const kill = (e: Event) => { e.stopPropagation(); e.preventDefault(); };
       window.addEventListener('click', kill, { capture: true, once: true });
@@ -341,6 +411,8 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
       maxDist: 0,
       started: false,
       ghost: o.ghost ?? true,
+      // Efectivo: si la vista no opina, vibra cuando hay fantasma del motor.
+      haptic: o.haptic ?? (o.ghost ?? true),
       armTimer: 0,
       quietTimer: 0,
       scrollTop0: container()?.scrollTop ?? 0,

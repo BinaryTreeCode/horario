@@ -131,7 +131,10 @@
 
   const engine = createDragEngine({
     ghostClass: 'drag-ghost',
-    scrollAxis: 'x',
+    // Ambos ejes: X sobre el contenedor (7 columnas) y Y en la PÁGINA — la
+    // semana mide 2000–2900px y el contenedor no scrollea en vertical, así que
+    // arrastrar/estirar contra los bordes superior/inferior no movía nada.
+    scrollAxis: 'both',
     // El scroller real del eje x es el CONTENEDOR (.grid-scroll es flex,
     // overflow visible): el auto-scroll de bordes necesita el que tiene
     // overflow-x:auto.
@@ -563,8 +566,17 @@
     grabDY = e.clientY - rect.top;
     grabW = rect.width;
     grabH = rect.height;
-    // El motor arma: mouse por umbral (5px), táctil por long-press (260ms).
-    engine.begin(e, { card, activityId: activity.id!, meta: { day: dayIndex } }, dragHooks);
+    // El motor arma: mouse por umbral (5px), táctil por long-press (400ms).
+    // ghost:false — la vista pinta su propio clon (.drag-float) y marca el
+    // original con .drag-ghost; si el motor también aplicara translateY/scale
+    // al original se vería DOBLE desplazamiento. haptic:true conserva la
+    // vibración de armar/soltar que antes solo existía con fantasma.
+    engine.begin(
+      e,
+      { card, activityId: activity.id!, meta: { day: dayIndex } },
+      dragHooks,
+      { ghost: false, haptic: true }
+    );
   }
 
   /**
@@ -796,6 +808,9 @@
     startX: number;         // clientX inicial
     ganado: boolean;        // ya se cruzó el borde (commit 1 vez)
     activityId: string;     // copia local: resolverHResize no ve t.activityId
+    /** scrollLeft del contenedor al empezar: el gesto puede cruzar el borde
+     *  de la pantalla y el auto-scroll mueve la grilla bajo el puntero. */
+    startScrollLeft: number;
   }
 
   const weekResizeHooks: DragHooks = {
@@ -941,7 +956,11 @@
     const cols = [...document.querySelectorAll('.day-column')];
     const colAncho = cols[m.day]?.getBoundingClientRect().width ?? 0;
     if (colAncho <= 0) return null;
-    const delta = clientX - m.startX;
+    // clientX es de VIEWPORT: si el auto-scroll corrió la grilla, ese mismo
+    // puntero está sobre otra columna. Sumar lo scrolleado desde el inicio
+    // convierte el movimiento de pantalla en movimiento de CONTENIDO.
+    const scrollDelta = (document.querySelector<HTMLElement>('.weekly-grid-container')?.scrollLeft ?? 0) - m.startScrollLeft;
+    const delta = (clientX - m.startX) + scrollDelta;
     const cruzo = Math.abs(delta) > colAncho * 0.5; // umbral: media columna
     if (!cruzo) return null;
     const dirAsa = m.lado === 'der' ? 1 : -1;      // hacia afuera
@@ -1047,7 +1066,18 @@
     e.preventDefault();
     engine.beginImmediate(
       e,
-      { card: e.currentTarget as HTMLElement, activityId: activity.id!, meta: { day: dayIndex, lado, startX: e.clientX, ganado: false, activityId: activity.id! } satisfies WeekHResizeMeta },
+      {
+        card: e.currentTarget as HTMLElement,
+        activityId: activity.id!,
+        meta: {
+          day: dayIndex,
+          lado,
+          startX: e.clientX,
+          ganado: false,
+          activityId: activity.id!,
+          startScrollLeft: document.querySelector<HTMLElement>('.weekly-grid-container')?.scrollLeft ?? 0
+        } satisfies WeekHResizeMeta
+      },
       hResizeHooks,
       { ghost: false }
     );

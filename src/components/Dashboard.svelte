@@ -900,6 +900,10 @@
     /* width 100%: sin esto, siendo grid item de .app-layout con margin auto,
        el navegador lo encoge a fit-content y el clamp no llega a usarse. */
     width: 100%;
+    /* Grid item sin min-width:0 no baja de su contenido mínimo (la fila de
+       botones del header) por más que width sea 100%: en 320px ensanchaba
+       toda la página en vez de dejar que el header scrollee por dentro. */
+    min-width: 0;
     margin: 0 auto;
     padding: 1.5rem;
     padding-left: max(1.5rem, env(safe-area-inset-left, 0px));
@@ -917,7 +921,11 @@
      del header quedaba vacío en pantallas anchas. */
   .dashboard-header {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    /* minmax(0, …) en las zonas laterales: con `1fr` la columna de acciones
+       imponía los ~326px de sus botones y estiraba el header (y la página)
+       en 320px. El mínimo 0 permite que .header-right scrollee por dentro. */
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    min-width: 0;
     align-items: center;
     gap: 1rem;
     padding: 1rem 1.5rem;
@@ -1785,10 +1793,28 @@
       padding-top: calc(0.6rem + env(safe-area-inset-top, 0px));
       gap: 0.5rem;
     }
+    /* Fila 1 a 320px: logo + pestañas en una sola línea. El logo se recorta
+       con puntos suspensivos (nunca impone su ancho) y las pestañas no se
+       parten; sus botones conservan los 44px de alto. */
+    .header-left {
+      min-width: 0;
+      gap: 0.5rem;
+    }
+    .logo {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .view-tabs {
+      flex-shrink: 0;
+    }
     .header-right {
       gap: 3px;
       justify-content: center;
       justify-content: safe center;
+      /* min-width:0 + overflow-x: el conjunto de botones (326px mínimos)
+         scrollea DENTRO de la fila en vez de ensanchar el header. */
+      min-width: 0;
       max-width: 100%;
       overflow-x: auto;
       scrollbar-width: none;
