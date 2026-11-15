@@ -748,6 +748,20 @@
     contextMenu.emptyMenuHour = null;
   }
 
+  // El menú contextual es `position: fixed` portado a body: si el contenido se
+  // corre debajo (scroll de la página o de cualquier contenedor, que
+  // `svelte:window` no ve) queda huérfano lejos de lo que lo abrió. Fase de
+  // captura para cubrir todos los scrollers de la vista.
+  $effect(() => {
+    if (!contextMenu.show) return;
+    const alScrollear = (e: Event) => {
+      if ((e.target as Element | null)?.closest?.('.custom-context-menu')) return;
+      closeContextMenu();
+    };
+    window.addEventListener('scroll', alScrollear, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', alScrollear, true);
+  });
+
   async function duplicateActivity() {
     const sourceId = contextMenu.activityId;
     closeContextMenu();

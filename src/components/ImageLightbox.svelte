@@ -17,6 +17,33 @@
   let stepsOpen = $state(true);
   const hasSteps = $derived(Array.isArray(activity.steps) && activity.steps.length > 0);
 
+  // Panel de pasos: es una región scrolleable (max-height 32vh). Solo entra al
+  // recorrido de tabulacion cuando DE VERDAD desborda: en un mensaje corto un
+  // tab stop de mas molesta, y axe (scrollable-region-focusable) exige que la
+  // region scrolleable sea enfocable. Las medidas las dan bindings del DOM.
+  let stepsClientH = $state(0);
+  let stepsScrollH = $state(0);
+  const stepsScrolleable = $derived(hasSteps && stepsOpen && stepsScrollH > stepsClientH + 1);
+
+  /** Mide si el panel de pasos desborda. `bind:scrollHeight` no existe en
+   *  Svelte 5: la medición va por acción y se rehace si cambia la caja. */
+  function medirPasos(node: HTMLElement) {
+    const medir = () => {
+      stepsScrollH = node.scrollHeight;
+      stepsClientH = node.clientHeight;
+    };
+    medir();
+    const ro = new ResizeObserver(medir);
+    ro.observe(node);
+    window.addEventListener('resize', medir);
+    return {
+      destroy() {
+        ro.disconnect();
+        window.removeEventListener('resize', medir);
+      }
+    };
+  }
+
   let lightboxEl = $state<HTMLElement | null>(null);
   let closeBtnEl = $state<HTMLElement | null>(null);
 
@@ -86,7 +113,12 @@
 
   <!-- Panel de pasos: fila fija al final (ya no flota sobre la imagen) -->
   {#if hasSteps && stepsOpen}
-    <ul class="lightbox-steps-panel">
+    <ul
+      class="lightbox-steps-panel"
+      use:medirPasos
+      tabindex={stepsScrolleable ? 0 : undefined}
+      aria-label={$t('lightbox.stepsCount', { n: activity.steps!.length })}
+    >
       {#each activity.steps as step}
         <li class:done={step.completed}>{step.title}</li>
       {/each}
@@ -106,6 +138,10 @@
     height: 100dvh;
     background: rgb(var(--velo) / 0.94);
     backdrop-filter: blur(6px);
+    /* Sin esto, el "scroll de rebote" del visor (o de su panel de pasos) se
+       propaga al documento de atrás, que además queda con overflow:hidden y
+       aun así conserva su posición: el fondo se movía bajo el póster. */
+    overscroll-behavior: contain;
     z-index: 1200;
     display: flex;
     flex-direction: column;
@@ -247,6 +283,10 @@
     width: min(560px, 100%);
     max-height: 32vh;
     overflow-y: auto;
+    /* El gesto vertical es del panel: no encadena al visor ni a la página, y
+       touch-action pan-y evita robar el swipe horizontal en móvil. */
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     list-style: none;
     padding: 0.9rem 1.25rem;
     background: rgb(var(--sobre-color) / 0.1);

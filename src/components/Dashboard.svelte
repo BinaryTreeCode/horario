@@ -372,6 +372,8 @@
   let menuDatos = $state(false);
   let menuDatosSaliendo = $state(false); // animación de subida al cerrar
   let menuDatosEl: HTMLElement | undefined = $state();
+  /** Panel ya portado a body (para distinguir scrolls DENTRO del menú). */
+  let menuDatosPortalEl = $state<HTMLElement | null>(null);
   let menuDatosPos = $state({ x: 0, y: 0 });
 
   /**
@@ -444,9 +446,19 @@
     };
     document.addEventListener('pointerdown', clickAfuera);
     window.addEventListener('keydown', esc);
+    // El menú está portado a body con `position: fixed`: si la página scrollea,
+    // el botón ancla se va y el panel queda flotando solo (medido: menú en
+    // top 139 con su botón ya en top -161). Se cierra en fase de CAPTURA para
+    // cubrir también scrolls de contenedores internos, no solo del documento.
+    const alScrollear = (e: Event) => {
+      if (menuDatosPortalEl?.contains(e.target as Node)) return;
+      cerrarMenuDatos();
+    };
+    window.addEventListener('scroll', alScrollear, { capture: true, passive: true });
     return () => {
       document.removeEventListener('pointerdown', clickAfuera);
       window.removeEventListener('keydown', esc);
+      window.removeEventListener('scroll', alScrollear, true);
     };
   });
   function preloadModals() {
@@ -824,6 +836,7 @@
       class="menu-datos glass-panel menuDatosAnim"
       class:menuDatosSaliendo={menuDatosSaliendo}
       role="menu"
+      bind:this={menuDatosPortalEl}
       use:portal
       style="top: {menuDatosPos.y}px; left: {menuDatosPos.x}px"
     >

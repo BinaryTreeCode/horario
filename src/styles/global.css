@@ -28,8 +28,8 @@
    Selectores puros (sin JS): cada overlay abre/cierra y el body se congela.
    Se congela html además de body porque la propagación de overflow no
    siempre frena el scroll del viewport (medido en Chromium). */
-html:has(.modal-overlay),
-body:has(.modal-overlay) {
+html:has(.modal-overlay, .lightbox-fullscreen),
+body:has(.modal-overlay, .lightbox-fullscreen) {
   overflow: hidden;
 }
 

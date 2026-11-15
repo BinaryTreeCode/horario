@@ -1218,6 +1218,23 @@
     else imgPopoverTimer = setTimeout(() => { imgPopover = null; }, 80);
   }
 
+  // Menú contextual, menú de hueco y popover de imagen son `position: fixed`
+  // portados a body: si la grilla se corre DEBAJO (scrollLeft/scrollTop de
+  // `.weekly-grid-container`, que `svelte:window` no ve) o la página scrollea,
+  // quedaban colgados lejos del bloque que los abrió (medido: menú en left 91
+  // con scrollLeft 140). La fase de captura cubre todos los contenedores.
+  $effect(() => {
+    if (!(contextMenu.show || emptySlotMenu.show || imgPopover !== null)) return;
+    const alScrollear = (e: Event) => {
+      // Un scroll DENTRO del propio menú (si algún día lo necesita) no lo cierra.
+      if ((e.target as Element | null)?.closest?.('.custom-context-menu')) return;
+      closeContextMenu();
+      ocultarImgPopover(true);
+    };
+    window.addEventListener('scroll', alScrollear, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', alScrollear, true);
+  });
+
   const activityHasImage = $derived(
     contextMenu.activityId !== null &&
     // srcImagen: un image cifrado (dispositivo sin clave) no es pintable, y

@@ -75,6 +75,11 @@ interface Gesture {
   startY: number;
   lastX: number;
   lastY: number;
+  /** Último sentido del movimiento por eje (-1, 0, 1). El auto-scroll NUNCA
+   *  va contra el gesto: si el dedo va hacia la izquierda, el borde derecho no
+   *  arrastra la grilla al revés (anulaba el arrastre; ver edgeTick). */
+  dirX: number;
+  dirY: number;
   /** Máxima distancia alcanzada desde el inicio (no la actual). */
   maxDist: number;
   started: boolean;
@@ -174,6 +179,13 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
   }
 
   // ── Auto-scroll (M5) ────────────────────────────────────────────────
+  /** ¿El paso de auto-scroll empuja en contra del último movimiento del dedo?
+   *  Con el puntero quieto (dir 0) se deja seguir: sostener el dedo en el borde
+   *  es la forma clásica de seguir scrolleando. */
+  function contraElGesto(paso: number, dir: number): boolean {
+    return paso !== 0 && dir !== 0 && Math.sign(paso) !== Math.sign(dir);
+  }
+
   /** ¿El contenedor es un scroller vertical REAL (con recorrido y overflow)? */
   function scrolleaVertical(el: HTMLElement): boolean {
     if (el.scrollHeight <= el.clientHeight + 20) return false;
@@ -194,7 +206,7 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
         const min = Math.max(r.left, 0);
         const max = Math.min(r.right, window.innerWidth);
         const paso = calcularPasoAutoScroll(cur.lastX, min, max);
-        if (paso !== 0) {
+        if (paso !== 0 && !contraElGesto(paso, cur.dirX)) {
           const before = el.scrollLeft;
           el.scrollLeft = before + paso;
           // En el tope el navegador ignora el cambio: nada que re-emitir, o
@@ -213,7 +225,7 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
         const min = Math.max(r.top, 0);
         const max = Math.min(r.bottom, window.innerHeight);
         const paso = calcularPasoAutoScroll(cur.lastY, min, max);
-        if (paso !== 0) {
+        if (paso !== 0 && !contraElGesto(paso, cur.dirY)) {
           const before = el.scrollTop;
           el.scrollTop = before + paso;
           desplazado = el.scrollTop !== before;
@@ -223,7 +235,7 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
       //    del viewport, no los del contenedor de 1600px que se sale abajo.
       if (!desplazado) {
         const paso = calcularPasoAutoScroll(cur.lastY, 0, window.innerHeight);
-        if (paso !== 0) {
+        if (paso !== 0 && !contraElGesto(paso, cur.dirY)) {
           const prevWinY = window.scrollY;
           window.scrollBy({ top: paso, behavior: 'instant' as ScrollBehavior });
           if (window.scrollY !== prevWinY) movio = true;
@@ -324,6 +336,10 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
     // pointermove y touchmove pueden reportar el mismo punto: no duplicar onMove.
     if (cur.started && x === cur.lastX && y === cur.lastY) return;
 
+    // Sentido del movimiento ANTES de mover el cursor: lo usa el auto-scroll
+    // para no empujar la vista en contra del gesto.
+    cur.dirX = Math.sign(x - cur.lastX);
+    cur.dirY = Math.sign(y - cur.lastY);
     cur.lastX = x;
     cur.lastY = y;
     const dist = Math.hypot(x - cur.startX, y - cur.startY);
@@ -408,6 +424,8 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
       startY: e.clientY,
       lastX: e.clientX,
       lastY: e.clientY,
+      dirX: 0,
+      dirY: 0,
       maxDist: 0,
       started: false,
       ghost: o.ghost ?? true,

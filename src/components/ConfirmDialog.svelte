@@ -32,6 +32,33 @@
   let boxEl = $state<HTMLElement | null>(null);
   let confirmBtnEl = $state<HTMLElement | null>(null);
 
+  // El MENSAJE es la zona que scrollea cuando el aviso es largo (resumen de
+  // importación, duplicados). Solo es un tab stop si de verdad desborda: en un
+  // mensaje corto un foco extra estorba, pero axe
+  // (scrollable-region-focusable) exige que la región scrolleable sea enfocable.
+  let msgClientH = $state(0);
+  let msgScrollH = $state(0);
+  const msgScrolleable = $derived(msgScrollH > msgClientH + 1);
+
+  /** Mide si el mensaje desborda. `bind:scrollHeight` no existe en Svelte 5,
+   *  así que la medición va por acción (y se rehace si cambia la caja). */
+  function medirMensaje(node: HTMLElement) {
+    const medir = () => {
+      msgScrollH = node.scrollHeight;
+      msgClientH = node.clientHeight;
+    };
+    medir();
+    const ro = new ResizeObserver(medir);
+    ro.observe(node);
+    window.addEventListener('resize', medir);
+    return {
+      destroy() {
+        ro.disconnect();
+        window.removeEventListener('resize', medir);
+      }
+    };
+  }
+
   // El foco entra al diálogo y vuelve al elemento que lo abrió: sin esto,
   // al cerrarse el foco se perdía en el body y el teclado arrancaba de nuevo
   // desde el principio del documento.
@@ -85,7 +112,7 @@
       tabindex="-1"
     >
       <h3>{title}</h3>
-      <p>{message}</p>
+      <p use:medirMensaje tabindex={msgScrolleable ? 0 : undefined}>{message}</p>
       <div class="confirm-actions">
         <button class="btn-confirm-cancel" onclick={() => close('cancel')}>{cancelText}</button>
         {#if secondaryText}
@@ -115,8 +142,17 @@
     overscroll-behavior: contain;
     animation: fade-in 0.15s ease;
   }
+  /* Columna acotada al viewport: en pantallas bajas (844x390) un aviso largo
+     (medido: 787px con .confirm-box sin tope) empujaba los botones a y=783 y
+     no había forma de llegar a confirmar. Ahora título y acciones son fijos y
+     el que scrollea es el mensaje. */
   .confirm-box {
     width: min(92vw, 400px);
+    max-height: calc(100vh - 2rem);
+    max-height: calc(100dvh - 2rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     padding: 22px 24px;
     border-radius: 18px;
     border: 1px solid rgb(var(--borde-blanco) / 0.16);
@@ -136,11 +172,18 @@
     }
   }
   h3 {
+    flex-shrink: 0; /* el título nunca se come el scroll: siempre visible */
     margin: 0 0 10px;
     font-size: 1.12rem;
     color: rgb(var(--texto));
   }
   p {
+    flex: 1 1 auto;
+    min-height: 0; /* sin esto el flex item no baja del alto de su contenido */
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* El aire de la derecha evita que el texto toque la barra fina del tema. */
+    padding-right: 4px;
     margin: 0 0 20px;
     font-size: 0.95rem;
     line-height: 1.5;
@@ -148,6 +191,7 @@
     white-space: pre-line;
   }
   .confirm-actions {
+    flex-shrink: 0; /* las acciones quedan siempre dentro del viewport */
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
@@ -185,6 +229,24 @@
   }
   .btn-confirm-cancel:hover { background: rgb(var(--lavado) / 0.12); }
   .btn-confirm-ok:hover { filter: brightness(1.1); }
+
+  /* Landscape móvil / ventanas bajas: el diálogo se compacta pero los botones
+     conservan los 44px (regla dura #5). */
+  @media (max-height: 480px) {
+    .confirm-overlay {
+      padding: 10px;
+    }
+    .confirm-box {
+      padding: 14px 18px;
+    }
+    h3 {
+      margin-bottom: 6px;
+    }
+    p {
+      margin-bottom: 12px;
+    }
+  }
+
   @keyframes fade-in { from { opacity: 0; } }
   @keyframes pop-in {
     from { opacity: 0; transform: scale(0.94) translateY(8px); }
