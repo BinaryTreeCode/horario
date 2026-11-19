@@ -228,59 +228,180 @@ function acotarActsOverride(acts: any[]): any[] {
 }
 
 /**
- * Cuántas filas se escribieron DE VERDAD y cuáles devolvió el guard LWW.
- *
- * Los upserts de este endpoint son engañosos: `onConflictDoUpdate` con un
- * `where` que no se cumple NO da error, simplemente no escribe. Por eso un
- * `pushed++` al final del bucle contaba la INTENCIÓN, y el cliente subía su
- * cursor por encima de filas que la nube nunca tuvo: como el filtro de "qué va
- * en el siguiente push" es un `>` estricto, esa fila quedaba justo en el
- * cursor y no volvía a subir nunca. La edición desaparecía sin error y sin aviso.
- *
- * No se mide con `returning` sino comparando con lo que hay guardado tras el
- * bucle: la fila está escrita si y solo si su updatedAt es el que traía el lote
- * (el guard del servidor es `<`, así que cualquier otra cosa significa que no
- * se escribió). Si otro dispositivo escribió mientras tanto, el valor guardado
- * es el suyo: también se reporta como rechazo y el cliente se re-sella por
- * encima, que es exactamente lo que toca.
+ * Tamaño de lote por sentencia SQL `INSERT ... ON CONFLICT DO UPDATE`.
+ * Reduce N round-trips a Neon a ceil(N / SQL_BATCH_SIZE) manteniéndose muy por
+ * debajo del límite de parámetros de PostgreSQL (65 535).
  */
-export function clasificarEscritura(enNube: number | undefined, incomingUpdatedAt: number): 'escrita' | 'rechazada' {
+const SQL_BATCH_SIZE = 100;
+
+/**
+ * Lee y parsea un body JSON acotando el número REAL de bytes leídos.
+ *
+ * Comprobar solo la cabecera `Content-Length` no basta: una petición con
+ * `Transfer-Encoding: chunked` (o sin cabecera) se saltaría `MAX_BODY_BYTES`.
+ * Leer el stream chunk a chunk permite abortar en cuanto se supera el límite
+ * sin cargar cuerpos enormes en memoria ni gastar CPU en `JSON.parse`.
+ */
+export async function leerJsonAcotado(
+  request: Request,
+  maxBytes: number,
+): Promise<{ ok: true; body: Record<string, any> } | { ok: false; status: 400 | 413; error: string }> {
+  const declared = Number(request.headers.get('content-length') ?? '0') || 0;
+  if (declared > maxBytes) {
+    return { ok: false, status: 413, error: 'El cuerpo del push supera el límite permitido' };
+  }
+
+  let bytes: Uint8Array;
+  if (request.body && typeof request.body.getReader === 'function') {
+    const reader = request.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        total += value.byteLength;
+        if (total > maxBytes) {
+          await reader.cancel().catch(() => {});
+          return { ok: false, status: 413, error: 'El cuerpo del push supera el límite permitido' };
+        }
+        chunks.push(value);
+      }
+    } catch {
+      return { ok: false, status: 400, error: 'JSON inválido' };
+    }
+    bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+  } else {
+    try {
+      bytes = new Uint8Array(await request.arrayBuffer());
+    } catch {
+      return { ok: false, status: 400, error: 'JSON inválido' };
+    }
+    if (bytes.byteLength > maxBytes) {
+      return { ok: false, status: 413, error: 'El cuerpo del push supera el límite permitido' };
+    }
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return { ok: false, status: 400, error: 'JSON inválido' };
+  }
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, status: 400, error: 'JSON inválido' };
+  }
+  return { ok: true, body: body as Record<string, any> };
+}
+
+/**
+ * Deduplica filas repetidas dentro del mismo lote por clave, conservando la de
+ * mayor `updatedAt` (y en empate, la última). Postgres rechaza un `INSERT ...
+ * ON CONFLICT DO UPDATE` que intenta afectar la misma clave dos veces en la
+ * misma sentencia (código 21000).
+ */
+export function deduplicarLote<T>(
+  lote: T[],
+  claveDe: (fila: T) => string | number,
+  actualizado: (fila: T) => number,
+): T[] {
+  const porClave = new Map<string, T>();
+  for (const fila of lote) {
+    const k = String(claveDe(fila));
+    const prev = porClave.get(k);
+    if (!prev || actualizado(fila) >= actualizado(prev)) {
+      porClave.set(k, fila);
+    }
+  }
+  return Array.from(porClave.values());
+}
+
+/**
+ * Clasifica el resultado LWW de una fila tras el upsert con `.returning()`.
+ *
+ * - Si Postgres devolvió la fila en `.returning()` (`fueEscrita === true`), se
+ *   insertó o actualizó de verdad (`updated_at < excluded.updated_at`) → `'escrita'`.
+ * - Si Postgres NO la devolvió y `enNube > incomingUpdatedAt` → `'rechazada'`
+ *   (la nube tiene una versión más nueva; el cliente debe re-sellar si corresponde).
+ * - Si Postgres NO la devolvió y `enNube === incomingUpdatedAt` → `'sin_cambio'`
+ *   (empate exacto: la nube ya tenía ese sello; NO se escribió, así que no infla
+ *   `pushed`, ni se rechaza para no causar re-sellados infinitos en full push).
+ */
+export function clasificarEscritura(
+  fueEscrita: boolean,
+  enNube: number | undefined,
+  incomingUpdatedAt: number,
+): 'escrita' | 'sin_cambio' | 'rechazada' {
+  if (fueEscrita) return 'escrita';
   if (enNube !== undefined && enNube > incomingUpdatedAt) {
     return 'rechazada';
   }
-  return 'escrita';
+  return 'sin_cambio';
 }
 
-async function repartoDeEscrituras<T>(
+async function verificarNoEscritas<T>(
   tabla: any,
   /** Columna clave del lote (id, o `day` en overrides — dayOverrides NO tiene columna id). */
   columnaClave: any,
   userId: string,
-  lote: T[],
+  noEscritas: T[],
   claveDe: (fila: T) => string | number,
   actualizado: (fila: T) => number,
   tipo: Rechazo['t'],
   rechazos: Rechazo[],
-): Promise<number> {
-  const claves = lote.map(claveDe);
-  if (claves.length === 0) return 0;
-  const guardadas = await db
-    .select({ id: columnaClave, updatedAt: tabla.updatedAt })
-    .from(tabla)
-    .where(and(eq(tabla.userId, userId), inArray(columnaClave, claves)));
-  const porClave = new Map<string, number>(guardadas.map(f => [String(f.id), f.updatedAt]));
-
-  let escritas = 0;
-  for (const fila of lote) {
-    const clave = claveDe(fila);
-    const enNube = porClave.get(String(clave));
-    if (clasificarEscritura(enNube, actualizado(fila)) === 'rechazada') {
-      rechazos.push({ t: tipo, k: String(clave), u: enNube! });
-    } else {
-      escritas++;
+): Promise<void> {
+  if (noEscritas.length === 0) return;
+  const porClave = new Map<string, number>();
+  for (let i = 0; i < noEscritas.length; i += 500) {
+    const claves = noEscritas.slice(i, i + 500).map(claveDe);
+    const guardadas = await db
+      .select({ id: columnaClave, updatedAt: tabla.updatedAt })
+      .from(tabla)
+      .where(and(eq(tabla.userId, userId), inArray(columnaClave, claves)));
+    for (const f of guardadas) {
+      porClave.set(String(f.id), f.updatedAt);
     }
   }
-  return escritas;
+
+  for (const fila of noEscritas) {
+    const clave = claveDe(fila);
+    const enNube = porClave.get(String(clave));
+    if (clasificarEscritura(false, enNube, actualizado(fila)) === 'rechazada') {
+      rechazos.push({ t: tipo, k: String(clave), u: enNube! });
+    }
+  }
+}
+
+async function upsertEnLotes<T>(
+  lote: T[],
+  claveDe: (fila: T) => string | number,
+  actualizado: (fila: T) => number,
+  ejecutarChunk: (chunk: T[]) => Promise<{ id: string | number }[]>,
+  tabla: any,
+  columnaClave: any,
+  userId: string,
+  tipo: Rechazo['t'],
+  rechazos: Rechazo[],
+): Promise<number> {
+  if (lote.length === 0) return 0;
+  const escritasSet = new Set<string>();
+  for (let i = 0; i < lote.length; i += SQL_BATCH_SIZE) {
+    const chunk = lote.slice(i, i + SQL_BATCH_SIZE);
+    const filasEscritas = await ejecutarChunk(chunk);
+    for (const row of filasEscritas) {
+      escritasSet.add(String(row.id));
+    }
+  }
+
+  const noEscritas = lote.filter(fila => !escritasSet.has(String(claveDe(fila))));
+  await verificarNoEscritas(tabla, columnaClave, userId, noEscritas, claveDe, actualizado, tipo, rechazos);
+  return escritasSet.size;
 }
 
 // ── POST /api/sync — push (merge LWW) ────────────────────────────────────────
@@ -296,22 +417,12 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   const sync = await consumirPresupuestoSync(user.id);
   if (sync.bloqueado) return demasiados(sync);
 
-  // Tope de body antes de parsear: un cuerpo enorme se rechaza sin gastar
-  // CPU en el JSON.parse ni en las escrituras posteriores.
-  const declared = Number(request.headers.get('content-length') ?? '0') || 0;
-  if (declared > MAX_BODY_BYTES) {
-    return json({ error: 'El cuerpo del push supera el límite permitido' }, 413);
+  // Tope REAL de bytes del body antes de parsear (cubre también chunked).
+  const parsed = await leerJsonAcotado(request, MAX_BODY_BYTES);
+  if (!parsed.ok) {
+    return json({ error: parsed.error }, parsed.status);
   }
-
-  let body: any;
-  try {
-    body = await request.json();
-  } catch {
-    return json({ error: 'JSON inválido' }, 400);
-  }
-  if (body === null || typeof body !== 'object') {
-    return json({ error: 'JSON inválido' }, 400);
-  }
+  const body = parsed.body;
 
   const now = Date.now();
   let pushed = 0;
@@ -322,81 +433,152 @@ export const POST: APIRoute = async ({ cookies, request }) => {
   try {
     // Categorías
     truncado += descartadas(body.categories, MAX_FILAS.categories);
-    const cats = normalizar(body.categories, MAX_FILAS.categories, 'c', normCategory, r => String(r?.id ?? ''), ignorados);
-    for (const c of cats) {
-      await db
-        .insert(categories)
-        .values({ userId: user.id, ...c })
-        .onConflictDoUpdate({
-          target: [categories.userId, categories.id],
-          set: {
-            label: c.label, color: c.color, order: c.order,
-            updatedAt: c.updatedAt, deletedAt: c.deletedAt,
-          },
-          // LWW: actualiza solo si el incoming (excluded) es más nuevo que el existente
-          where: sql`${categories.updatedAt} < ${c.updatedAt}`
-        });
-    }
-    pushed += await repartoDeEscrituras(categories, categories.id, user.id, cats, c => c.id, c => c.updatedAt, 'c', rechazos);
+    const cats = deduplicarLote(
+      normalizar(body.categories, MAX_FILAS.categories, 'c', normCategory, r => String(r?.id ?? ''), ignorados),
+      c => c.id,
+      c => c.updatedAt,
+    );
+    pushed += await upsertEnLotes(
+      cats,
+      c => c.id,
+      c => c.updatedAt,
+      chunk =>
+        db
+          .insert(categories)
+          .values(chunk.map(c => ({ userId: user.id, ...c })))
+          .onConflictDoUpdate({
+            target: [categories.userId, categories.id],
+            set: {
+              label: sql`excluded.label`,
+              color: sql`excluded.color`,
+              order: sql`excluded."order"`,
+              updatedAt: sql`excluded.updated_at`,
+              deletedAt: sql`excluded.deleted_at`,
+            },
+            where: sql`${categories.updatedAt} < excluded.updated_at`,
+          })
+          .returning({ id: categories.id }),
+      categories,
+      categories.id,
+      user.id,
+      'c',
+      rechazos,
+    );
 
     // Actividades
     truncado += descartadas(body.activities, MAX_FILAS.activities);
-    const acts = normalizar(body.activities, MAX_FILAS.activities, 'a', normActivity, r => String(r?.id ?? ''), ignorados);
-    for (const a of acts) {
-      await db
-        .insert(activities)
-        .values({ userId: user.id, ...a })
-        .onConflictDoUpdate({
-          target: [activities.userId, activities.id],
-          set: {
-            categoryId: a.categoryId, name: a.name, description: a.description, image: a.image,
-            startTime: a.startTime, endTime: a.endTime, daysOfWeek: a.daysOfWeek, steps: a.steps,
-            updatedAt: a.updatedAt, deletedAt: a.deletedAt,
-          },
-          where: sql`${activities.updatedAt} < ${a.updatedAt}`
-        });
-    }
-    pushed += await repartoDeEscrituras(activities, activities.id, user.id, acts, a => a.id, a => a.updatedAt, 'a', rechazos);
+    const acts = deduplicarLote(
+      normalizar(body.activities, MAX_FILAS.activities, 'a', normActivity, r => String(r?.id ?? ''), ignorados),
+      a => a.id,
+      a => a.updatedAt,
+    );
+    pushed += await upsertEnLotes(
+      acts,
+      a => a.id,
+      a => a.updatedAt,
+      chunk =>
+        db
+          .insert(activities)
+          .values(chunk.map(a => ({ userId: user.id, ...a })))
+          .onConflictDoUpdate({
+            target: [activities.userId, activities.id],
+            set: {
+              categoryId: sql`excluded.category_id`,
+              name: sql`excluded.name`,
+              description: sql`excluded.description`,
+              image: sql`excluded.image`,
+              startTime: sql`excluded.start_time`,
+              endTime: sql`excluded.end_time`,
+              daysOfWeek: sql`excluded.days_of_week`,
+              steps: sql`excluded.steps`,
+              updatedAt: sql`excluded.updated_at`,
+              deletedAt: sql`excluded.deleted_at`,
+            },
+            where: sql`${activities.updatedAt} < excluded.updated_at`,
+          })
+          .returning({ id: activities.id }),
+      activities,
+      activities.id,
+      user.id,
+      'a',
+      rechazos,
+    );
 
     // Settings
     truncado += descartadas(body.settings, MAX_FILAS.settings);
-    const sets = normalizar(body.settings, MAX_FILAS.settings, 's', normSetting, r => String(r?.id ?? r?.key ?? ''), ignorados);
-    for (const x of sets) {
-      await db
-        .insert(userSettings)
-        .values({ userId: user.id, ...x })
-        .onConflictDoUpdate({
-          target: [userSettings.userId, userSettings.id],
-          set: { key: x.key, value: x.value, updatedAt: x.updatedAt, deletedAt: x.deletedAt },
-          where: sql`${userSettings.updatedAt} < ${x.updatedAt}`
-        });
-    }
-    pushed += await repartoDeEscrituras(userSettings, userSettings.id, user.id, sets, x => x.id, x => x.updatedAt, 's', rechazos);
+    const sets = deduplicarLote(
+      normalizar(body.settings, MAX_FILAS.settings, 's', normSetting, r => String(r?.id ?? r?.key ?? ''), ignorados),
+      x => x.id,
+      x => x.updatedAt,
+    );
+    pushed += await upsertEnLotes(
+      sets,
+      x => x.id,
+      x => x.updatedAt,
+      chunk =>
+        db
+          .insert(userSettings)
+          .values(chunk.map(x => ({ userId: user.id, ...x })))
+          .onConflictDoUpdate({
+            target: [userSettings.userId, userSettings.id],
+            set: {
+              key: sql`excluded.key`,
+              value: sql`excluded.value`,
+              updatedAt: sql`excluded.updated_at`,
+              deletedAt: sql`excluded.deleted_at`,
+            },
+            where: sql`${userSettings.updatedAt} < excluded.updated_at`,
+          })
+          .returning({ id: userSettings.id }),
+      userSettings,
+      userSettings.id,
+      user.id,
+      's',
+      rechazos,
+    );
 
     // DayOverrides
     truncado += descartadas(body.dayOverrides, MAX_FILAS.overrides);
-    const ovrs = normalizar(body.dayOverrides, MAX_FILAS.overrides, 'o', normOverride, r => String(r?.day ?? ''), ignorados);
-    for (const o of ovrs) {
+    const ovrs = deduplicarLote(
+      normalizar(body.dayOverrides, MAX_FILAS.overrides, 'o', normOverride, r => String(r?.day ?? ''), ignorados),
+      o => o.day,
+      o => o.updatedAt,
+    ).map(o => {
       const acotadas = acotarActsOverride(o.activities);
       // Se cuenta lo que el horario del día PERDIÓ (actividades), no
       // el override: son los cambios del usuario los que no llegan.
       truncado += o.activities.length - acotadas.length;
-      await db
-        .insert(dayOverrides)
-        .values({ userId: user.id, ...o, activities: acotadas })
-        .onConflictDoUpdate({
-          target: [dayOverrides.userId, dayOverrides.day],
-          set: { activities: acotadas, updatedAt: o.updatedAt, deletedAt: o.deletedAt },
-          where: sql`${dayOverrides.updatedAt} < ${o.updatedAt}`
-        });
-    }
-    pushed += await repartoDeEscrituras(dayOverrides, dayOverrides.day, user.id, ovrs, o => o.day, o => o.updatedAt, 'o', rechazos);
+      return { ...o, activities: acotadas };
+    });
+    pushed += await upsertEnLotes(
+      ovrs,
+      o => o.day,
+      o => o.updatedAt,
+      chunk =>
+        db
+          .insert(dayOverrides)
+          .values(chunk.map(o => ({ userId: user.id, ...o })))
+          .onConflictDoUpdate({
+            target: [dayOverrides.userId, dayOverrides.day],
+            set: {
+              activities: sql`excluded.activities`,
+              updatedAt: sql`excluded.updated_at`,
+              deletedAt: sql`excluded.deleted_at`,
+            },
+            where: sql`${dayOverrides.updatedAt} < excluded.updated_at`,
+          })
+          .returning({ id: dayOverrides.day }),
+      dayOverrides,
+      dayOverrides.day,
+      user.id,
+      'o',
+      rechazos,
+    );
 
-    // 'pushed' son filas ESCRITAS y 'rechazos'/'rechazados' las que el guard LWW no dejó
-    // pasar. 'ignorados' es lo tercero: filas que llegaron y la normalización
-    // rechazó (no se escribieron, y tampoco las cuenta 'rechazos'). Las tres
-    // cosas las necesita el cliente para no avanzar su cursor por encima de
-    // nada que no haya llegado de verdad a la nube.
+    // 'pushed' son filas REALMENTE ESCRITAS (insertadas o actualizadas por
+    // Postgres vía RETURNING). 'rechazos'/'rechazados' son las que tenían una
+    // versión más nueva en la nube. 'ignorados' son las descartadas por
+    // normalización. Los empates exactos no inflan `pushed` ni generan rechazo.
     return json({
       ok: true,
       pushed,
@@ -473,6 +655,11 @@ export const GET: APIRoute = async ({ cookies, url }) => {
   try {
     const user = await getSessionUser(cookies);
     if (!user) return json({ error: 'No autenticado' }, 401);
+
+    // Mismo presupuesto de sincronización que POST para frenar bucles o abuso
+    // de pulls completos (since=0) con una sesión válida.
+    const sync = await consumirPresupuestoSync(user.id);
+    if (sync.bloqueado) return demasiados(sync);
 
     const since = Math.max(0, Number(url.searchParams.get('since') ?? '0') || 0);
     const PULL_LIMIT = 2000;

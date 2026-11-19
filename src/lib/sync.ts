@@ -646,59 +646,187 @@ export function cursorPushTrasPull(
   return Math.max(cursorActual, Math.min(maxAplicada, techoPendientes));
 }
 
+export interface ElementoPush<T extends { updatedAt: number } = { updatedAt: number }> {
+  tipo: 'c' | 'a' | 's' | 'o';
+  clave: string;
+  localUpdatedAt: number;
+  payload: T;
+}
+
+export interface ChunkPush {
+  categories: any[];
+  activities: any[];
+  settings: any[];
+  dayOverrides: any[];
+  elementos: ElementoPush[];
+  bytesEstimados: number;
+}
+
+/** Tope conservador por sub-lote (muy por debajo de 4 MB del servidor y 4.5 MB de Vercel). */
+export const MAX_CHUNK_BYTES = 1_500_000;
+/** Tope de filas por colección en cada sub-lote (por debajo de MAX_FILAS en `/api/sync`). */
+export const MAX_CHUNK_FILAS = {
+  c: 150,
+  a: 400,
+  s: 150,
+  o: 7,
+} as const;
+
+/**
+ * Divide un lote de push en sub-lotes acotados en bytes y filas, ordenados de
+ * forma ascendente por `localUpdatedAt` para permitir avance seguro del cursor
+ * entre chunks sin saltar nunca filas no enviadas.
+ */
+export function particionarLotePush(
+  elementos: ElementoPush[],
+  maxBytes = MAX_CHUNK_BYTES,
+  maxFilas: Readonly<Record<'c' | 'a' | 's' | 'o', number>> = MAX_CHUNK_FILAS,
+): ChunkPush[] {
+  if (elementos.length === 0) return [];
+  const ordenados = [...elementos].sort((a, b) => a.localUpdatedAt - b.localUpdatedAt);
+  const chunks: ChunkPush[] = [];
+
+  const crearVacio = (): ChunkPush => ({
+    categories: [],
+    activities: [],
+    settings: [],
+    dayOverrides: [],
+    elementos: [],
+    bytesEstimados: 64, // overhead JSON de las 4 claves raíz
+  });
+
+  let actual = crearVacio();
+  let conteo: Record<'c' | 'a' | 's' | 'o', number> = { c: 0, a: 0, s: 0, o: 0 };
+
+  for (const el of ordenados) {
+    const elBytes = JSON.stringify(el.payload).length + 2;
+    const superaBytes = actual.elementos.length > 0 && actual.bytesEstimados + elBytes > maxBytes;
+    const superaFilas = actual.elementos.length > 0 && conteo[el.tipo] >= maxFilas[el.tipo];
+    if (superaBytes || superaFilas) {
+      chunks.push(actual);
+      actual = crearVacio();
+      conteo = { c: 0, a: 0, s: 0, o: 0 };
+    }
+
+    if (el.tipo === 'c') actual.categories.push(el.payload);
+    else if (el.tipo === 'a') actual.activities.push(el.payload);
+    else if (el.tipo === 's') actual.settings.push(el.payload);
+    else actual.dayOverrides.push(el.payload);
+
+    actual.elementos.push(el);
+    actual.bytesEstimados += elBytes;
+    conteo[el.tipo]++;
+  }
+
+  if (actual.elementos.length > 0) chunks.push(actual);
+  return chunks;
+}
+
+/**
+ * Calcula el cursor seguro tras confirmar un sub-lote cuando aún quedan otros
+ * sub-lotes por enviar. Nunca avanza por encima de `min(fechasRestantes) - 1`,
+ * garantizando que un corte de red a mitad de un push particionado jamás
+ * deje filas restantes por debajo de `lastPushAt` (incluso si comparten ms).
+ */
+export function cursorPushTrasChunk(
+  aceptadasChunk: { updatedAt: number }[],
+  cursorPrevio: number,
+  ahora: number,
+  truncado: number,
+  ignoradas: number,
+  fechasRestantes: number[],
+): number {
+  const candidato = cursorPushTrasLote(aceptadasChunk, cursorPrevio, ahora, truncado, ignoradas);
+  if (fechasRestantes.length === 0) return candidato;
+  const minRestante = Math.min(...fechasRestantes);
+  return Math.max(cursorPrevio, Math.min(candidato, minRestante - 1));
+}
+
 // ── Push: enviar cambios locales (LWW en el servidor) ────────────────────────
 
 /**
  * Recolecta los registros con updatedAt > lastPushAt (o todos si full=true)
- * y los envía al servidor. El servidor hace upsert con guard LWW.
+ * y los envía al servidor en sub-lotes acotados. El servidor hace upsert con guard LWW.
  */
 // ── Migración de data-URLs a Vercel Blob ──────────────────────────────────
 // Las imágenes de rutina antiguas viven como data-URL base64 (hasta 2 MB) DENTRO
 // de la actividad: llenan localStorage ("respaldo automático pausado") y hacen
 // HTTP 413 en el push. Al empujar con sesión activa, cada data-URL se sube una
 // vez a Vercel Blob y la actividad pasa a guardar la URL corta. Idempotente:
-// una URL http(s)/blob ya migrada no se toca.
+// una URL http(s)/blob ya migrada no se toca. Se evalúa dinámicamente en cada
+// push sobre las filas ya leídas (cubre fotos importadas o creadas offline).
 
-let migracionImagenesHecha = false;
+let blobNoConfiguradoHasta = 0;
 
-async function migrarImagenesABlob(): Promise<void> {
-  if (migracionImagenesHecha) return;
-  const actividades = await db.activities.toArray();
-  const pendientes = actividades.filter(a => esDataUrlImagen(a.image));
-  if (pendientes.length === 0) {
-    migracionImagenesHecha = true;
-    return;
+async function migrarImagenesABlob(
+  activities: Activity[],
+  dayOverrides: DayOverride[],
+): Promise<{ activities: Activity[]; dayOverrides: DayOverride[] }> {
+  if (Date.now() < blobNoConfiguradoHasta) return { activities, dayOverrides };
+
+  const urlsUnicas = new Set<string>();
+  for (const a of activities) {
+    if (esDataUrlImagen(a.image)) urlsUnicas.add(a.image);
   }
-  const overrides = await db.dayOverrides.toArray();
-  const mapa = new Map<string, string>(); // data-URL → URL de Blob
-  for (const a of pendientes) {
-    try {
-      const url = await subirABlob(a.image!);
-      mapa.set(a.image!, url);
-    } catch {
-      // Sin Blob configurado o error puntual: esa imagen queda como está y
-      // se reintenta en el próximo push (migracionImagenesHecha no se marca).
+  for (const o of dayOverrides) {
+    for (const act of o.activities ?? []) {
+      if (esDataUrlImagen(act.image)) urlsUnicas.add(act.image);
     }
   }
-  if (mapa.size === 0) return; // nada migrado: reintento completo la próxima vez
+  if (urlsUnicas.size === 0) return { activities, dayOverrides };
+
+  const mapa = new Map<string, string>(); // data-URL → URL de Blob
+  for (const dataUrl of urlsUnicas) {
+    try {
+      const url = await subirABlob(dataUrl);
+      mapa.set(dataUrl, url);
+    } catch (err: any) {
+      if (err?.status === 401) {
+        sesionActiva = false;
+        throw Object.assign(new Error(SIN_SESION), { sinSesion: true });
+      }
+      if (err?.status === 503) {
+        // Vercel Blob sin configurar: evitar reintentar en cada foto por 5 min.
+        blobNoConfiguradoHasta = Date.now() + 5 * 60 * 1000;
+        break;
+      }
+      // Error puntual: esta imagen queda como está y se reintenta en el próximo push.
+    }
+  }
+  if (mapa.size === 0) return { activities, dayOverrides };
 
   const stamp = now();
+  const actsActualizadas: Activity[] = [];
+  const ovrsActualizados: DayOverride[] = [];
+
   await db.transaction('rw', db.activities, db.dayOverrides, async () => {
-    for (const a of actividades) {
+    for (const a of activities) {
       const nueva = a.image && mapa.get(a.image);
-      if (nueva) await db.activities.put({ ...a, image: nueva, updatedAt: stamp });
+      if (nueva) {
+        const updated = { ...a, image: nueva, updatedAt: stamp };
+        await db.activities.put(updated);
+        actsActualizadas.push(updated);
+      } else {
+        actsActualizadas.push(a);
+      }
     }
-    for (const o of overrides) {
+    for (const o of dayOverrides) {
       let cambio = false;
-      const acts = o.activities.map(act => {
+      const acts = (o.activities ?? []).map(act => {
         const nueva = act.image && mapa.get(act.image);
         if (nueva) { cambio = true; return { ...act, image: nueva }; }
         return act;
       });
-      if (cambio) await db.dayOverrides.put({ ...o, activities: acts, updatedAt: stamp });
+      if (cambio) {
+        const updated = { ...o, activities: acts, updatedAt: stamp };
+        await db.dayOverrides.put(updated);
+        ovrsActualizados.push(updated);
+      } else {
+        ovrsActualizados.push(o);
+      }
     }
   });
-  migracionImagenesHecha = true;
+  return { activities: actsActualizadas, dayOverrides: ovrsActualizados };
 }
 
 /** Respuesta del push: lo ESCRITO, lo RECHAZADO y lo DESCARTADO. */
@@ -723,109 +851,160 @@ export function pushChanges(full = false): Promise<number> {
 
 async function ejecutarPush(full = false): Promise<number> {
   const state = (await db.syncState.get('1')) ?? { id: '1' };
-  const cursor = full ? 0 : (state.lastPushAt ?? 0);
+  const cursorInicial = full ? 0 : (state.lastPushAt ?? 0);
   // Desfase aprendido de las respuestas anteriores (0 hasta la primera).
-  const sesgo = state.sesgoServidor ?? 0;
+  let sesgo = state.sesgoServidor ?? 0;
 
-  await migrarImagenesABlob();
   if (!tieneClave()) await restaurarClave();
   const claveActiva = tieneClave();
   const puedeSubirSinClave = <T,>(fila: T) => claveActiva || !tieneContenidoBloqueado(fila);
 
-  // Lectura por tabla + filtro por cursor y semilla (contrato explícito: lo
-  // que puso la app no es del usuario y no viaja).
-  const [activities, categories, settings, dayOverrides] = await Promise.all([
+  // Lectura por tabla + migración dinámica de data-URLs (activities y dayOverrides).
+  const [rawActivities, categories, settings, rawDayOverrides] = await Promise.all([
     db.activities.toArray(),
     db.categories.toArray(),
     db.settings.toArray(),
     db.dayOverrides.toArray(),
   ]);
-  const actsSuben = seleccionables(activities, cursor).filter(puedeSubirSinClave);
-  const catsSuben = seleccionables(categories, cursor);
-  const setsSuben = seleccionables(settings, cursor);
-  const ovsSuben = seleccionables(dayOverrides, cursor).filter(puedeSubirSinClave);
+
+  let activities = rawActivities;
+  let dayOverrides = rawDayOverrides;
+  try {
+    const migradas = await migrarImagenesABlob(rawActivities, rawDayOverrides);
+    activities = migradas.activities;
+    dayOverrides = migradas.dayOverrides;
+  } catch (err: any) {
+    if (err?.sinSesion) {
+      pendingCount = 0;
+      setStatus('local');
+      throw err;
+    }
+  }
+
+  // Filtro por cursor y semilla (contrato explícito: lo que puso la app no es del usuario y no viaja).
+  const actsSuben = seleccionables(activities, cursorInicial).filter(puedeSubirSinClave);
+  const catsSuben = seleccionables(categories, cursorInicial);
+  const setsSuben = seleccionables(settings, cursorInicial);
+  const ovsSuben = seleccionables(dayOverrides, cursorInicial).filter(puedeSubirSinClave);
+
+  const total = actsSuben.length + catsSuben.length + setsSuben.length + ovsSuben.length;
+  if (total === 0) {
+    if (pendingCount !== 0) {
+      pendingCount = 0;
+      setStatus('synced');
+    }
+    return 0;
+  }
 
   // E2E: cifrar los campos sensibles ANTES de salir del dispositivo. Solo si
   // hay clave en memoria (login reciente). Con sesión restaurada por cookie,
   // los datos viajan planos legacy hasta el próximo login con password.
-  const actsCifradas = await Promise.all(actsSuben.map(a => cifrarActividad(a)));
-  const ovsCifrados = await Promise.all(ovsSuben.map(o => cifrarOverride(o)));
+  const [actsCifradas, ovsCifrados] = await Promise.all([
+    Promise.all(actsSuben.map(a => cifrarActividad(a))),
+    Promise.all(ovsSuben.map(o => cifrarOverride(o))),
+  ]);
+
   // El LWW se decide con el reloj del SERVIDOR y las filas se sellan con el del
   // dispositivo. Traducir el sello al reloj del servidor es lo que hace que un
-  // reloj torcido deje de importar: sin esto, cada cambio nace con una fecha que
-  // el guard estricto del servidor va a rechazar y el push se agota en silencio.
+  // reloj torcido deje de importar.
   const alServidor = <T extends { updatedAt: number }>(f: T): T => sellarParaServidor(f, sesgo);
-  const payload = {
-    activities: actsCifradas.map(alServidor),
-    categories: catsSuben.map(alServidor),
-    settings: setsSuben.map(alServidor),
-    dayOverrides: ovsCifrados.map(alServidor),
-  };
-  const total = actsSuben.length + catsSuben.length + setsSuben.length + ovsSuben.length;
-  if (total === 0) return 0;
+  const elementos: ElementoPush[] = [
+    ...catsSuben.map(c => ({ tipo: 'c' as const, clave: c.id, localUpdatedAt: c.updatedAt, payload: alServidor(c) })),
+    ...actsCifradas.map((a, i) => ({ tipo: 'a' as const, clave: a.id, localUpdatedAt: actsSuben[i].updatedAt, payload: alServidor(a) })),
+    ...setsSuben.map(s => ({ tipo: 's' as const, clave: s.id, localUpdatedAt: s.updatedAt, payload: alServidor(s) })),
+    ...ovsCifrados.map((o, i) => ({ tipo: 'o' as const, clave: String(o.day), localUpdatedAt: ovsSuben[i].updatedAt, payload: alServidor(o) })),
+  ];
 
-  pendingCount += total;
+  const chunks = particionarLotePush(elementos);
+
+  // Reflejar el total real del lote en vuelo (nunca acumular `+=` sobre intentos fallidos).
+  pendingCount = total;
   setStatus('syncing');
 
+  let totalPushed = 0;
+  let totalRechazados = 0;
+  let totalTruncado = 0;
+  let totalIgnorados = 0;
+  let cursorActual = cursorInicial;
+  let restantes = total;
+
   try {
-    const res = await api<RespuestaPush>('/api/sync', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    for (let idx = 0; idx < chunks.length; idx++) {
+      const chunk = chunks[idx];
+      const res = await api<RespuestaPush>('/api/sync', {
+        method: 'POST',
+        body: JSON.stringify({
+          activities: chunk.activities,
+          categories: chunk.categories,
+          settings: chunk.settings,
+          dayOverrides: chunk.dayOverrides,
+        }),
+      });
 
-    // Cada respuesta del servidor enseña cuánto va de adelantado su reloj.
-    const sesgoNuevo = sesgoDe(res.serverTime, Date.now());
-    const rechazados = res.rechazados ?? [];
-    if (rechazados.length > 0) await resellarRechazados(rechazados, sesgoNuevo);
-    // Filas que el servidor DESCARTÓ por sus tope: nunca llegaron, así
-    // que no están en `rechazos` y el cursor no puede avanzar por
-    // encima so pena de no reintentarlas jamás (ver cursorPushTrasLote).
-    const truncado = res.truncado ?? 0;
+      // Cada respuesta del servidor enseña cuánto va de adelantado su reloj.
+      sesgo = sesgoDe(res.serverTime, Date.now());
+      const rechazados = res.rechazados ?? [];
+      if (rechazados.length > 0) await resellarRechazados(rechazados, sesgo);
+      const truncado = res.truncado ?? 0;
+      const ignoradas = res.ignorados ?? [];
 
-    // El cursor avanza SOLO por lo que el servidor confirmó. Con todo lo
-    // enviado, una fila rechazada quedaba justo en el cursor y el filtro
-    // estricto de seleccionables la convertía en una fila muerta: la siguiente
-    // push ya no la elegía y el pull la sobrescribía con la versión vieja.
-    // Las ignoradas por el servidor tampoco están escritas ni rechazadas por
-    // LWW: sin esto entrarían en `aceptadas` y el cursor avanzaría por encima
-    // de filas que la nube jamás vio, convirtiéndolas en filas muertas.
-    const ignoradas = res.ignorados ?? [];
-    const rechazadas = new Set([
-      ...rechazados.map(r => `${r.t}:${r.k}`),
-      ...ignoradas.map(r => `${r.t}:${r.k}`),
-    ]);
-    const aceptadas = [
-      ...actsSuben.filter(a => !rechazadas.has(`a:${a.id}`)),
-      ...catsSuben.filter(c => !rechazadas.has(`c:${c.id}`)),
-      ...setsSuben.filter(s => !rechazadas.has(`s:${s.id}`)),
-      ...ovsSuben.filter(o => !rechazadas.has(`o:${o.day}`)),
-    ];
-    pendingCount = Math.max(0, pendingCount - res.pushed - rechazados.length);
-    // Las filas descartadas NO se restan: no fueron escritas ni
-    // rechazadas, así que siguen pendientes de verdad.
+      const rechazadas = new Set([
+        ...rechazados.map(r => `${r.t}:${r.k}`),
+        ...ignoradas.map(r => `${r.t}:${r.k}`),
+      ]);
+      const aceptadas = chunk.elementos
+        .filter(el => !rechazadas.has(`${el.tipo}:${el.clave}`))
+        .map(el => ({ updatedAt: el.localUpdatedAt }));
 
-    // MERGE: conservar los demás campos de la fila (persistState hace lo mismo
-    // en la dirección contraria — los cursores nunca se pierden por un put parcial).
-    const prev = await db.syncState.get('1');
-    await db.syncState.put({
-      ...prev,
-      id: '1',
-      lastPushAt: cursorPushTrasLote(aceptadas, cursor, Date.now(), truncado, ignoradas.length),
-      sesgoServidor: sesgoNuevo,
-    });
-    // Antes del setStatus: el detalle que avisa a los listeners ya
-    // lleva el descarte.
-    avisoDeDescarte(truncado);
-    avisoDeIgnorados(ignoradas.length);
+      const fechasRestantes = chunks
+        .slice(idx + 1)
+        .flatMap(c => c.elementos.map(el => el.localUpdatedAt));
+
+      cursorActual = cursorPushTrasChunk(
+        aceptadas,
+        cursorActual,
+        Date.now(),
+        truncado,
+        ignoradas.length,
+        fechasRestantes,
+      );
+
+      totalPushed += res.pushed;
+      totalRechazados += rechazados.length;
+      totalTruncado += truncado;
+      totalIgnorados += ignoradas.length;
+      restantes = Math.max(0, restantes - chunk.elementos.length);
+      pendingCount = restantes + totalRechazados + totalTruncado + totalIgnorados;
+
+      // MERGE: conservar los demás campos de la fila y persistir progreso de cada chunk.
+      const prev = await db.syncState.get('1');
+      const lastPushPersistido =
+        full && truncado === 0 && ignoradas.length === 0 && rechazados.length === 0
+          ? Math.max(prev?.lastPushAt ?? 0, cursorActual)
+          : cursorActual;
+      await db.syncState.put({
+        ...prev,
+        id: '1',
+        lastPushAt: lastPushPersistido,
+        sesgoServidor: sesgo,
+      });
+    }
+
+    // Antes del setStatus: el detalle que avisa a los listeners ya lleva el descarte.
+    avisoDeDescarte(totalTruncado);
+    avisoDeIgnorados(totalIgnorados);
+    pendingCount = totalRechazados + totalTruncado + totalIgnorados;
     setStatus(pendingCount > 0 ? 'syncing' : 'synced');
-    return res.pushed;
+    return totalPushed;
   } catch (err: any) {
     // Sin sesión no hay nada que reintentar: es la app volviendo al modo local,
     // no una avería (y api() ya apagó la sesión, así que los triggers paran).
     if (err?.sinSesion) {
+      pendingCount = 0;
       setStatus('local');
       throw err;
     }
+    pendingCount = Math.max(restantes, totalRechazados + totalTruncado + totalIgnorados);
     setStatus(navigator.onLine ? 'error' : 'offline', err?.message ?? 'Error de red');
     throw err;
   }
@@ -1310,12 +1489,16 @@ export async function subirAhora(): Promise<ResultadoSubida> {
  */
 export async function bajarAhora(
   modo: 'auto' | 'combinar' | 'reemplazar' = 'auto',
+  snapshot?: SnapshotNube,
 ): Promise<ResultadoBajada> {
   if (!(await haySesionOperativa())) throw new Error(SIN_SESION);
   await restaurarClave();
   if (modo === 'reemplazar') {
-    const snap = await descargarSnapshotNube();
+    const snap = snapshot ?? (await descargarSnapshotNube());
     return aplicarSnapshotReemplazando(snap);
+  }
+  if (snapshot) {
+    return aplicarSnapshotCombinando(snapshot);
   }
   return conLockSync(async () => {
     // pullChanges cuenta 'applied' y este contrato pide 'aplicados': sin el mapa,
@@ -1336,6 +1519,10 @@ export interface SnapshotNube {
   serverTime: number;
   primerServerTime: number;
   tieneBloqueados: boolean;
+  /** IDs de actividades cuyo `steps` llegó cifrado en la nube (para desbloqueo E2E). */
+  rawActsStepsCifrados?: string[];
+  /** Por día de override, IDs de sub-actividades cuyo `steps` llegó cifrado. */
+  rawOvrsStepsCifrados?: Record<number, string[]>;
 }
 
 export interface DivergenciaPull {
@@ -1381,11 +1568,11 @@ export function detectarDivergenciaPull(
   ).length;
 
   const soloLocalesCats = locales.categories.filter(
-    c => !c.deletedAt && !idsRemotosCats.has(c.id)
+    c => !c.deletedAt && !esSemilla(c) && !idsRemotosCats.has(c.id)
   ).length;
 
   const soloLocalesOvrs = locales.dayOverrides.filter(
-    o => !o.deletedAt && !daysRemotosOvrs.has(o.day)
+    o => !o.deletedAt && !esSemilla(o) && !daysRemotosOvrs.has(o.day)
   ).length;
 
   const remotasActs = idsRemotosActs.size;
@@ -1452,8 +1639,27 @@ export async function descargarSnapshotNube(): Promise<SnapshotNube> {
   const rawActs = Array.from(mapActs.values());
   const rawOvrs = Array.from(mapOvrs.values());
 
-  const descActs = await Promise.all(rawActs.map(a => descifrarActividad(a)));
-  const descOvrs = await Promise.all(rawOvrs.map(o => descifrarOverride(o)));
+  // Leer copias locales para preservar contenido ya descifrado si faltara clave E2E.
+  const [localesActs, localesOvrs] = await Promise.all([
+    rawActs.length > 0 ? db.activities.toArray() : Promise.resolve([] as Activity[]),
+    rawOvrs.length > 0 ? db.dayOverrides.toArray() : Promise.resolve([] as DayOverride[]),
+  ]);
+  const mapaLocalActs = new Map(localesActs.map(a => [a.id, a]));
+  const mapaLocalOvrs = new Map(localesOvrs.map(o => [o.day, o]));
+
+  const rawActsStepsCifrados = rawActs.filter(a => esCifrado(a.steps)).map(a => String(a.id));
+  const rawOvrsStepsCifrados: Record<number, string[]> = {};
+  for (const o of rawOvrs) {
+    if (Array.isArray(o.activities)) {
+      const ids = o.activities.filter((sub: any) => esCifrado(sub?.steps)).map((sub: any) => String(sub.id));
+      if (ids.length > 0) rawOvrsStepsCifrados[o.day] = ids;
+    }
+  }
+
+  const [descActs, descOvrs] = await Promise.all([
+    Promise.all(rawActs.map(a => descifrarActividad(a, mapaLocalActs.get(a.id)))),
+    Promise.all(rawOvrs.map(o => descifrarOverride(o, mapaLocalOvrs.get(o.day)))),
+  ]);
 
   let tieneBloqueados = false;
   for (const a of descActs) {
@@ -1479,7 +1685,160 @@ export async function descargarSnapshotNube(): Promise<SnapshotNube> {
     serverTime: ultimoServerTime,
     primerServerTime: primerServerTime ?? ultimoServerTime,
     tieneBloqueados,
+    rawActsStepsCifrados,
+    rawOvrsStepsCifrados,
   };
+}
+
+/**
+ * Aplica un snapshot ya descargado y descifrado en modo COMBINAR (merge LWW),
+ * evitando una segunda descarga y un segundo descifrado completo tras
+ * `inspeccionarBajada()`.
+ */
+export async function aplicarSnapshotCombinando(snapshotInput: SnapshotNube): Promise<ResultadoBajada> {
+  const snapshot: SnapshotNube = JSON.parse(JSON.stringify(snapshotInput));
+
+  return conLockSync(async () => {
+    setStatus('syncing');
+    escrituraNubeProfundidad++;
+    try {
+      if (!tieneClave()) await restaurarClave();
+      const conClave = tieneClave();
+      const ahora = Date.now();
+      const sesgo = sesgoDe(snapshot.serverTime, ahora);
+
+      const rawStepsActs = new Set(snapshot.rawActsStepsCifrados ?? []);
+      const rawStepsOvrs = snapshot.rawOvrsStepsCifrados ?? {};
+      const clavesAplicadas = new Set<string>();
+      const idsActividadesRemotas = new Set(snapshot.activities.map(a => a.id));
+
+      const rawActsSinteticas = snapshot.activities.map(a => ({
+        ...a,
+        steps: rawStepsActs.has(a.id) ? 'np1:0' : a.steps,
+      }));
+      const rawOvrsSinteticos = snapshot.dayOverrides.map(o => {
+        const subIds = new Set(rawStepsOvrs[o.day] ?? []);
+        if (subIds.size === 0 || !Array.isArray(o.activities)) return o;
+        return {
+          ...o,
+          activities: o.activities.map(sub => (subIds.has(sub.id) ? { ...sub, steps: 'np1:0' } : sub)),
+        };
+      });
+
+      const mapaActsListas = new Map<string, Preparada<Activity>>(
+        snapshot.activities.map((a, i) => [a.id, { remota: rawActsSinteticas[i], filaDescifrada: a }]),
+      );
+      const mapaOvrsListas = new Map<number, Preparada<DayOverride>>(
+        snapshot.dayOverrides.map((o, i) => [o.day, { remota: rawOvrsSinteticos[i], filaDescifrada: o }]),
+      );
+
+      let applied = 0;
+
+      await db.transaction(
+        'rw',
+        db.activities,
+        db.categories,
+        db.settings,
+        db.dayOverrides,
+        db.syncState,
+        async () => {
+          const fechasAplicadas: number[] = [];
+
+          applied += await aplicarTablaSimple(
+            db.categories, 'c', snapshot.categories, ahora, sesgo, fechasAplicadas, clavesAplicadas,
+          );
+          applied += await aplicarTablaSimple(
+            db.settings, 's', snapshot.settings, ahora, sesgo, fechasAplicadas, clavesAplicadas,
+          );
+          applied += await aplicarTablaDescifrada<string, Activity>(
+            db.activities,
+            'a',
+            rawActsSinteticas,
+            a => a.id,
+            mapaActsListas,
+            (local, dec, raw, s) =>
+              desbloquearCamposActividad(
+                local,
+                dec,
+                esCifrado(raw?.steps),
+                fuePulledaSinEdicionPosterior(local, raw, s),
+              ),
+            ahora,
+            sesgo,
+            conClave,
+            fechasAplicadas,
+            clavesAplicadas,
+          );
+          applied += await aplicarTablaDescifrada<number, DayOverride>(
+            db.dayOverrides,
+            'o',
+            rawOvrsSinteticos,
+            o => o.day,
+            mapaOvrsListas,
+            (local, dec, raw, s) => desbloquearCamposOverride(local, dec, raw, s),
+            ahora,
+            sesgo,
+            conClave,
+            fechasAplicadas,
+            clavesAplicadas,
+          );
+
+          const curState = (await db.syncState.get('1')) ?? { id: '1' };
+          const prevPushAt = curState.lastPushAt ?? 0;
+          const [todasCats, todasActs, todasSetts, todosOvrs] = await Promise.all([
+            db.categories.toArray(),
+            db.activities.toArray(),
+            db.settings.toArray(),
+            db.dayOverrides.toArray(),
+          ]);
+          const pendientes: number[] = [];
+          const registrarPendientes = <T extends { updatedAt: number }>(
+            lista: T[],
+            prefijo: string,
+            claveDe: (item: T) => string | number,
+          ) => {
+            for (const item of lista) {
+              if (!esSemilla(item) && item.updatedAt > prevPushAt && !clavesAplicadas.has(`${prefijo}:${claveDe(item)}`)) {
+                pendientes.push(item.updatedAt);
+              }
+            }
+          };
+          registrarPendientes(todasCats, 'c', c => c.id);
+          registrarPendientes(todasActs, 'a', a => a.id);
+          registrarPendientes(todasSetts, 's', s => s.id);
+          registrarPendientes(todosOvrs, 'o', o => o.day);
+
+          const nuevoPushAt = cursorPushTrasPull(prevPushAt, fechasAplicadas, pendientes, ahora);
+
+          await db.syncState.put({
+            ...curState,
+            id: '1',
+            lastServerPullAt: cursorPull(snapshot.primerServerTime),
+            lastPullAt: Date.now(),
+            lastPushAt: nuevoPushAt,
+            sesgoServidor: sesgo,
+          });
+        },
+      );
+
+      if (snapshot.activities.length > 0) {
+        await db.transaction('rw', db.activities, async () => {
+          const locales = await db.activities.toArray();
+          for (const loc of locales) {
+            if (esSemilla(loc) && !idsActividadesRemotas.has(loc.id)) {
+              await db.activities.delete(loc.id);
+            }
+          }
+        });
+      }
+
+      lastSyncAt = Date.now();
+      setStatus(pendingCount > 0 ? 'syncing' : 'synced');
+      return { aplicados: applied };
+    } finally {
+      escrituraNubeProfundidad = Math.max(0, escrituraNubeProfundidad - 1);
+    }
+  });
 }
 
 /**
@@ -1783,12 +2142,33 @@ export async function initialSyncAfterLogin(): Promise<void> {
  *  persiste: si el usuario importó sin subir, al volver a entrar tampoco debe
  *  subir (la decisión fue sobre esos datos, no sobre la sesión). */
 export function resetSyncAfterLogout(): void {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
   sesionActiva = false;
+  syncPendiente = false;
+  fullPendiente = false;
+  blobNoConfiguradoHasta = 0;
+  ultimoTruncado = 0;
+  ultimosIgnorados = 0;
   olvidarClave();
   status = 'local';
   pendingCount = 0;
   lastError = undefined;
-  persistState();
-  db.syncState.put({ id: '1', lastPushAt: 0, lastServerPullAt: 0, pendingPushPaused: false }).catch(() => {});
-  for (const fn of listeners) fn(status, { pending: 0, sesion: sesionActiva });
+  // Escritura única sin `persistState()` concurrente: evita la carrera donde
+  // persistState() releía y restauraba los cursores de la cuenta anterior.
+  db.syncState
+    .put({
+      id: '1',
+      lastPushAt: 0,
+      lastServerPullAt: 0,
+      sesgoServidor: 0,
+      pendingChanges: 0,
+      pendingPushPaused: pushPaused,
+    })
+    .catch(() => {});
+  for (const fn of listeners) {
+    fn(status, { pending: 0, error: undefined, lastSyncAt, sesion: sesionActiva, truncado: 0 });
+  }
 }

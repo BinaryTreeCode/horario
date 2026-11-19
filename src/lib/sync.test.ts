@@ -5,6 +5,9 @@ import {
   descifrarActividad, CONTENIDO_BLOQUEADO, tieneContenidoBloqueado,
   debeAplicarEnPull, desbloquearCamposActividad, desbloquearCamposOverride,
   cursorPushTrasPull,
+  particionarLotePush,
+  cursorPushTrasChunk,
+  type ElementoPush,
   detectarDivergenciaPull,
   detectarDuplicadosActividades,
 } from './sync';
@@ -451,24 +454,161 @@ describe('descifrarActividad sin clave: la foto no se pierde', () => {
 });
 
 describe('clasificarEscritura: contrato de rechazos y escrituras LWW', () => {
-  it('fila escrita con éxito (enNube === incoming) se cuenta como escrita, NO como rechazo', async () => {
+  it('fila escrita con éxito (fueEscrita = true) se cuenta como escrita', async () => {
     const { clasificarEscritura } = await import('../pages/api/sync');
-    expect(clasificarEscritura(1_000, 1_000)).toBe('escrita');
+    expect(clasificarEscritura(true, 1_000, 1_000)).toBe('escrita');
+    expect(clasificarEscritura(true, undefined, 1_000)).toBe('escrita');
   });
 
-  it('fila más nueva que la nube (enNube < incoming) se cuenta como escrita', async () => {
+  it('empate exacto sin escritura (fueEscrita = false, enNube === incoming) se clasifica como sin_cambio', async () => {
     const { clasificarEscritura } = await import('../pages/api/sync');
-    expect(clasificarEscritura(500, 1_000)).toBe('escrita');
+    expect(clasificarEscritura(false, 1_000, 1_000)).toBe('sin_cambio');
   });
 
-  it('fila nueva sin registro previo en la nube (undefined) se cuenta como escrita', async () => {
+  it('fila rechazada por el guard LWW (fueEscrita = false, enNube > incoming) se reporta como rechazada', async () => {
     const { clasificarEscritura } = await import('../pages/api/sync');
-    expect(clasificarEscritura(undefined, 1_000)).toBe('escrita');
+    expect(clasificarEscritura(false, 1_500, 1_000)).toBe('rechazada');
   });
 
-  it('fila rechazada por el guard LWW (enNube > incoming) se reporta como rechazo', async () => {
+  it('sin registro en la nube y sin escritura (fueEscrita = false, enNube === undefined) es sin_cambio', async () => {
     const { clasificarEscritura } = await import('../pages/api/sync');
-    expect(clasificarEscritura(1_500, 1_000)).toBe('rechazada');
+    expect(clasificarEscritura(false, undefined, 1_000)).toBe('sin_cambio');
+  });
+});
+
+describe('deduplicarLote: colapso de claves repetidas en el mismo lote', () => {
+  it('conserva la fila de mayor updatedAt y en empate la última recibida', async () => {
+    const { deduplicarLote } = await import('../pages/api/sync');
+    const filas = [
+      { id: 'a', updatedAt: 100, name: 'vieja' },
+      { id: 'b', updatedAt: 200, name: 'empate-1' },
+      { id: 'a', updatedAt: 300, name: 'nueva' },
+      { id: 'b', updatedAt: 200, name: 'empate-2' },
+      { id: 'a', updatedAt: 150, name: 'intermedia-vieja' },
+    ];
+    const res = deduplicarLote(filas, f => f.id, f => f.updatedAt);
+    expect(res).toEqual([
+      { id: 'a', updatedAt: 300, name: 'nueva' },
+      { id: 'b', updatedAt: 200, name: 'empate-2' },
+    ]);
+  });
+});
+
+describe('leerJsonAcotado: tope de bytes del body antes de parsear', () => {
+  it('acepta body JSON válido dentro del límite', async () => {
+    const { leerJsonAcotado } = await import('../pages/api/sync');
+    const req = new Request('http://localhost/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activities: [{ id: 'a1' }] }),
+    });
+    const res = await leerJsonAcotado(req, 1024);
+    expect(res).toEqual({ ok: true, body: { activities: [{ id: 'a1' }] } });
+  });
+
+  it('rechaza con 413 un stream sin Content-Length que excede maxBytes', async () => {
+    const { leerJsonAcotado } = await import('../pages/api/sync');
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"a":"' + 'x'.repeat(200)));
+        controller.enqueue(new TextEncoder().encode('y'.repeat(200) + '"}'));
+        controller.close();
+      },
+    });
+    const req = new Request('http://localhost/api/sync', {
+      method: 'POST',
+      body: stream,
+    });
+    expect(req.headers.get('content-length')).toBeNull();
+    const res = await leerJsonAcotado(req, 150);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.status).toBe(413);
+  });
+
+  it('rechaza con 413 cuando Content-Length declarado excede maxBytes', async () => {
+    const { leerJsonAcotado } = await import('../pages/api/sync');
+    const req = new Request('http://localhost/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Length': '5000' },
+      body: '{}',
+    });
+    const res = await leerJsonAcotado(req, 1024);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.status).toBe(413);
+  });
+
+  it('rechaza con 400 JSON inválido o array en raíz', async () => {
+    const { leerJsonAcotado } = await import('../pages/api/sync');
+    const reqInvalid = new Request('http://localhost/api/sync', {
+      method: 'POST',
+      body: '{roto',
+    });
+    const r1 = await leerJsonAcotado(reqInvalid, 1024);
+    expect(r1.ok).toBe(false);
+    if (!r1.ok) expect(r1.status).toBe(400);
+
+    const reqArray = new Request('http://localhost/api/sync', {
+      method: 'POST',
+      body: '[1, 2, 3]',
+    });
+    const r2 = await leerJsonAcotado(reqArray, 1024);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.status).toBe(400);
+  });
+});
+
+describe('particionarLotePush y cursorPushTrasChunk: sub-lotes acotados y cursor seguro', () => {
+  const mkEl = (tipo: 'c' | 'a' | 's' | 'o', id: string, localUpdatedAt: number, extra = ''): ElementoPush => ({
+    tipo,
+    clave: id,
+    localUpdatedAt,
+    payload: { id, updatedAt: localUpdatedAt, extra } as any,
+  });
+
+  it('particiona por maxBytes y por maxFilas ordenando ascendentemente por localUpdatedAt', () => {
+    const elementos = [
+      mkEl('a', 'a3', 300, 'x'.repeat(40)),
+      mkEl('a', 'a1', 100, 'x'.repeat(40)),
+      mkEl('c', 'c1', 200, 'x'.repeat(40)),
+      mkEl('a', 'a2', 150, 'x'.repeat(40)),
+    ];
+    // maxBytes obliga a cortar tras 2 elementos; orden esperado: 100, 150, 200, 300
+    const porBytes = particionarLotePush(elementos, 230, { c: 10, a: 10, s: 10, o: 10 });
+    expect(porBytes.length).toBeGreaterThan(1);
+    const ordenBytes = porBytes.flatMap(ch => ch.elementos.map(e => e.localUpdatedAt));
+    expect(ordenBytes).toEqual([100, 150, 200, 300]);
+
+    // maxFilas = 1 para 'a' corta cada actividad aunque sobre espacio en bytes
+    const porFilas = particionarLotePush(elementos, 100_000, { c: 10, a: 1, s: 10, o: 10 });
+    expect(porFilas.length).toBe(3); // [a1(100)], [a2(150), c1(200)], [a3(300)]
+    expect(porFilas[0].activities).toHaveLength(1);
+    expect(porFilas[1].activities).toHaveLength(1);
+    expect(porFilas[1].categories).toHaveLength(1);
+    expect(porFilas[2].activities).toHaveLength(1);
+  });
+
+  it('una fila sola mayor a maxBytes viaja igualmente en su propio chunk sin bucle infinito', () => {
+    const gigante = mkEl('a', 'big', 500, 'z'.repeat(1_000));
+    const chunks = particionarLotePush([gigante], 100);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].elementos).toHaveLength(1);
+    expect(chunks[0].activities[0].id).toBe('big');
+  });
+
+  it('cursorPushTrasChunk avanza entre chunks crecientes y se frena en minRestante - 1 si comparten ms', () => {
+    // Timestamps estrictamente crecientes: chunk 1 (1000) con restante 2000 -> avanza a 1000 (<= 1999)
+    expect(cursorPushTrasChunk([{ updatedAt: 1_000 }], 500, 5_000, 0, 0, [2_000])).toBe(1_000);
+
+    // Mismo milisegundo entre chunk 1 (1000) y restante (1000): se frena en 999 para no saltar el restante
+    expect(cursorPushTrasChunk([{ updatedAt: 1_000 }], 500, 5_000, 0, 0, [1_000])).toBe(999);
+
+    // Si cursorPrevio ya era 1000 y restante es 1000, nunca retrocede por debajo de cursorPrevio
+    expect(cursorPushTrasChunk([{ updatedAt: 1_000 }], 1_000, 5_000, 0, 0, [1_000])).toBe(1_000);
+  });
+
+  it('cursorPushTrasChunk no avanza si truncado > 0 o ignoradas > 0', () => {
+    expect(cursorPushTrasChunk([{ updatedAt: 1_000 }], 500, 5_000, 1, 0, [2_000])).toBe(500);
+    expect(cursorPushTrasChunk([{ updatedAt: 1_000 }], 500, 5_000, 0, 2, [2_000])).toBe(500);
   });
 });
 
@@ -698,8 +838,8 @@ describe('detectarDivergenciaPull: aviso previo a reemplazo vs combinación', ()
   it('semilla local no cuenta como divergencia (no hay peligro de solapar)', () => {
     const locales = {
       activities: [{ id: 'seed-1', updatedAt: 0 } as any],
-      categories: [],
-      dayOverrides: [],
+      categories: [{ id: 'rutina', updatedAt: 0 } as any],
+      dayOverrides: [{ day: 1, updatedAt: 0, activities: [] } as any],
     };
     const remotos = {
       activities: [{ id: 'rem-1', updatedAt: 5000 }],
@@ -708,6 +848,8 @@ describe('detectarDivergenciaPull: aviso previo a reemplazo vs combinación', ()
     };
     const res = detectarDivergenciaPull(locales, remotos);
     expect(res.soloLocalesActs).toBe(0);
+    expect(res.soloLocalesCats).toBe(0);
+    expect(res.soloLocalesOvrs).toBe(0);
     expect(res.totalSoloLocales).toBe(0);
     expect(res.remotasActs).toBe(1);
   });

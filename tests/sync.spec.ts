@@ -275,6 +275,7 @@ test.describe('Sincronización entre dispositivos', () => {
     // que la nube devuelve las dos filas: el toast tiene que decir 2, no 0.
     nube.setRemotas([remota('La de antes'), remota('La que acaba de llegar')]);
 
+    const pullsAntes = nube.pulls;
     await abrirMenuDatos(page);
     await page.locator('.menu-datos button', { hasText: TEXTO_BAJAR }).click();
 
@@ -282,6 +283,7 @@ test.describe('Sincronización entre dispositivos', () => {
       page.locator('.toast-success .toast-msg'),
       'el toast de bajada no contó lo que realmente trajo'
     ).toHaveText(/Bajado ✓ · 2 registro|Downloaded ✓ · 2 new record/, { timeout: 10_000 });
+    expect(nube.pulls - pullsAntes, 'pulsar Bajar debe hacer 1 solo GET /api/sync (sin doble descarga)').toBe(1);
     await esperarSemana(page);
     await expect(page.locator('.activity-item[title="La que acaba de llegar"]').first()).toBeVisible();
   });
