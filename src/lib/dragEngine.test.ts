@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { calcularPasoAutoScroll } from './dragEngine';
+import { actualizarDireccion, calcularPasoAutoScroll, contraElGesto } from './dragEngine';
 
 /**
  * El auto-scroll de bordes es geometría pura: este test fija el contrato de
@@ -49,5 +49,57 @@ describe('calcularPasoAutoScroll', () => {
   test('acepta franja y velocidad personalizadas', () => {
     expect(calcularPasoAutoScroll(10, 0, 800, 20, 4)).toBe(-4);
     expect(calcularPasoAutoScroll(790, 0, 800, 20, 4)).toBe(4);
+  });
+});
+
+/**
+ * El filtro que impide que el auto-scroll pelee con el dedo: arrastrar el asa
+ * lateral hacia adentro mientras el borde derecho de la grilla scrollea movía
+ * el contenido justo al revés y el gesto se anulaba solo.
+ */
+describe('contraElGesto', () => {
+  test('mismo sentido que el dedo: se permite', () => {
+    expect(contraElGesto(12, 1)).toBe(false);
+    expect(contraElGesto(-12, -1)).toBe(false);
+  });
+
+  test('sentido opuesto: se veta', () => {
+    expect(contraElGesto(12, -1)).toBe(true);
+    expect(contraElGesto(-12, 1)).toBe(true);
+  });
+
+  test('sin movimiento previo o sin paso no hay veto', () => {
+    expect(contraElGesto(12, 0)).toBe(false);
+    expect(contraElGesto(0, -1)).toBe(false);
+    expect(contraElGesto(0, 0)).toBe(false);
+  });
+});
+
+describe('actualizarDireccion', () => {
+  test('un desvío vertical puro (dx === 0) conserva dirX para contraElGesto', () => {
+    const dir = { dirX: 0, dirY: 0 };
+    actualizarDireccion(dir, -6, 0);
+    expect(dir.dirX).toBe(-1);
+    expect(contraElGesto(12, dir.dirX)).toBe(true);
+
+    // Desvío vertical de 1px sin movimiento horizontal: no debe borrar dirX.
+    actualizarDireccion(dir, 0, 1);
+    expect(dir.dirX).toBe(-1);
+    expect(dir.dirY).toBe(1);
+    expect(contraElGesto(12, dir.dirX)).toBe(true);
+  });
+
+  test('un desvío horizontal puro (dy === 0) conserva dirY', () => {
+    const dir = { dirX: 0, dirY: 0 };
+    actualizarDireccion(dir, 0, -4);
+    actualizarDireccion(dir, 3, 0);
+    expect(dir.dirX).toBe(1);
+    expect(dir.dirY).toBe(-1);
+  });
+
+  test('dx === 0 y dy === 0 mantiene ambos sentidos intactos', () => {
+    const dir = { dirX: 1, dirY: -1 };
+    actualizarDireccion(dir, 0, 0);
+    expect(dir).toEqual({ dirX: 1, dirY: -1 });
   });
 });

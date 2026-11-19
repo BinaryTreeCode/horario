@@ -16,6 +16,7 @@
   import { createDragEngine, type DragHooks } from '../lib/dragEngine';
   import { t, tNow } from '../lib/i18n';
   import { srcImagen } from '../lib/crypto';
+  import { observarDesborde, type Desborde } from '../lib/observarDesborde';
 
   interface Props {
     activities: Activity[];
@@ -382,6 +383,11 @@
 
   // Drag and Drop handlers (mecánica en src/lib/dragEngine.ts)
   let draggedActivityId = $state<string | null>(null);
+
+  // Desborde real del scroller: el aviso de "desliza para ver más días" solo
+  // se pinta cuando los 7 días NO caben (antes aparecía por ancho de
+  // contenedor, incluso en 600–767px donde no hay nada que deslizar).
+  let gridDesborde = $state<Desborde>({ x: false, y: false });
   let dragSourceDay = $state<number | null>(null);
   let dragOffsetHours = 0;
   /** Firma del último preview publicado: si no cambió por CONTENIDO, no se
@@ -883,6 +889,11 @@
   };
 
   function startResize(e: PointerEvent, activity: Activity, dayIndex: number, lado: 'arriba' | 'abajo') {
+    const isMini =
+      (activity as Partial<LayoutActivity>).numSlots !== undefined
+        ? (activity as LayoutActivity).numSlots <= 1
+        : Math.round((parseTime(activity.endTime) - parseTime(activity.startTime)) * 60) <= 15;
+    if (e.pointerType === 'touch' && isMini) return;
     e.stopPropagation(); // no disparar long-press/click/drag del ítem
     e.preventDefault();
     engine.beginImmediate(
@@ -1339,10 +1350,16 @@
   }
 </script>
 
-<svelte:window onclick={closeContextMenu} onscroll={closeContextMenu} />
+<svelte:window onclick={closeContextMenu} />
 
-<div class="weekly-grid-container" style="--total-slots: {totalSlots}; --slot-height: {slotHeightPx}px">
-  <div class="scroll-hint" aria-hidden="true">{$t('week.scrollHint')}</div>
+<div
+  class="weekly-grid-container"
+  style="--total-slots: {totalSlots}; --slot-height: {slotHeightPx}px"
+  use:observarDesborde={{ onCambio: (d: Desborde) => (gridDesborde = d), observarContenido: false }}
+>
+  {#if gridDesborde.x}
+    <div class="scroll-hint" aria-hidden="true">{$t('week.scrollHint')}</div>
+  {/if}
   <div class="grid-scroll">
   <div class="time-column">
     <div class="header-spacer"></div>
@@ -1619,7 +1636,9 @@
 <style>
   .weekly-grid-container {
     overflow-x: auto;
-    overscroll-behavior-y: contain;
+    /* Al topar el borde lateral no se dispara el gesto "atrás/adelante" del
+       navegador móvil: el swipe se queda en la grilla. */
+    overscroll-behavior-x: contain;
     -webkit-overflow-scrolling: touch;
     max-width: 100%;
     padding-bottom: 1rem;
@@ -1647,14 +1666,17 @@
     flex: 1;
     min-width: calc(68px + 7 * 88px + 6px);
   }
+  /* El piso total suma la columna de horas REAL de cada breakpoint (56px acá)
+     más 7 días al piso de los días (66px) y los gaps: con 48px el piso mentía y
+     los últimos días quedaban recortados por el redondeo. */
   @container weekly-grid (width < 768px) {
     .grid-scroll {
-      min-width: calc(48px + 7 * 66px + 6px);
+      min-width: calc(56px + 7 * 66px + 6px);
     }
   }
   @container weekly-grid (width < 480px) {
     .grid-scroll {
-      min-width: calc(48px + 7 * 56px + 6px);
+      min-width: calc(48px + 7 * 60px + 6px);
     }
   }
 
@@ -2422,6 +2444,15 @@
     overflow: visible;
     z-index: 3;
   }
+  /* Táctil: en un bloque de 15 min los manejadores verticales no se pintan (no
+     caben), así que tampoco deben robar el swipe vertical. Las asas LATERALES
+     siguen con touch-action: none (son gestos propios). */
+  @media (hover: none) and (pointer: coarse) {
+    .activity-item.mini .resize-handle:not(.hres-izq):not(.hres-der) {
+      touch-action: pan-x pan-y;
+      pointer-events: none;
+    }
+  }
   .activity-item.mini .activity-title {
     font-size: 0.66rem;
     line-height: 1.15;
@@ -2453,19 +2484,17 @@
     }
   }
 
-  /* Hint de scroll horizontal solo cuando el contenedor es angosto */
+  /* Hint de scroll horizontal: solo se RENDERIZA cuando hay desborde real
+     (ver #[if gridDesborde.x]). sticky + left:0 lo mantiene centrado mientras
+     la grilla se desliza, en vez de irse con el contenido. */
   .scroll-hint {
-    display: none;
-  }
-  @container weekly-grid (width < 768px) {
-    .scroll-hint {
-      display: block;
-      font-size: 0.75rem;
-      color: rgb(var(--texto-2));
-      padding: 2px 4px 6px;
-      text-align: center;
-      animation: hint-fade 5s ease forwards;
-    }
+    position: sticky;
+    left: 0;
+    font-size: 0.75rem;
+    color: rgb(var(--texto-2));
+    padding: 2px 4px 6px;
+    text-align: center;
+    animation: hint-fade 5s ease forwards;
   }
   @keyframes hint-fade {
     0%, 70% { opacity: 1; }

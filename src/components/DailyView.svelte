@@ -602,6 +602,10 @@
   };
 
   function startResize(e: PointerEvent, activity: Activity, lado: 'arriba' | 'abajo') {
+    const durationMins =
+      (activity as Partial<DailyLayoutItem>).durationMins ??
+      Math.round((parseTime(activity.endTime) - parseTime(activity.startTime)) * 60);
+    if (e.pointerType === 'touch' && durationMins <= 20) return;
     e.stopPropagation(); // no iniciar drag de la tarjeta ni su click
     engine.beginImmediate(
       e,
@@ -872,7 +876,7 @@
   }
 </script>
 
-<svelte:window onclick={closeContextMenu} onscroll={closeContextMenu} />
+<svelte:window onclick={closeContextMenu} />
 
 <div class="daily-view">
   <div class="daily-header">
@@ -1537,6 +1541,17 @@
     }
   }
 
+  /* Táctil: en una tarjeta corta (≤20 min) el asa no pinta indicador y el gesto
+     natural es scrollear el día. Su `touch-action: none` bloqueaba el swipe
+     vertical que empezaba sobre la tarjeta; el long-press para arrastrar
+     sigue igual (lo decide el motor, no el CSS). */
+  @media (hover: none) and (pointer: coarse) {
+    .daily-activity-card.is-short .resize-handle {
+      touch-action: pan-y;
+      pointer-events: none;
+    }
+  }
+
   /* Asa superior: espejo de la inferior (resize bidireccional). */
   .resize-handle.top {
     top: 0;
@@ -1937,9 +1952,13 @@
     .daily-header h2 {
       font-size: 1.25rem;
     }
+    /* A 320px el chip de la hora empujaba 5px el documento entero (medido:
+       scrollWidth 325 con clientWidth 320). Con letra y aire de móvil entra en
+       la misma fila; los botones de navegación siguen en 44px. */
     .current-time-display {
-      font-size: 0.8rem;
-      padding: 0.35rem 0.75rem;
+      font-size: 0.72rem;
+      gap: 0.35rem;
+      padding: 0.3rem 0.55rem;
     }
     .daily-container {
       margin: 1rem 0.5rem;

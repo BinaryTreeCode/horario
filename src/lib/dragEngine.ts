@@ -90,6 +90,8 @@ interface Gesture {
   quietTimer: number;
   /** scrollTop del contenedor al empezar: compensa el fantasma en auto-scroll. */
   scrollTop0: number;
+  /** Contenedor de scroll cacheado al armar el gesto (evita querySelector a 60fps). */
+  scrollEl: HTMLElement | null;
   /** scrollY de la PÁGINA al empezar: el fantasma (tarjeta in-flow en la vista
    *  Día) se desliza con el documento si la página scrollea a mitad del gesto
    *  — sin compensar, la sombra/transform queda "atrás" del cursor. */
@@ -115,6 +117,31 @@ const EDGE_SPEED = 12;       // px por frame
  * Si el carril visible no supera las dos franjas (pantalla enana, scroller
  * casi oculto) devuelve 0: no hay zona "central" que respetar.
  */
+/**
+ * ¿El paso de auto-scroll empuja en contra del último movimiento del dedo?
+ * Con el puntero quieto (dir 0) se deja seguir: sostener el dedo en el borde
+ * es la forma clásica de seguir scrolleando. Sin este filtro, arrastrar el asa
+ * lateral hacia adentro mientras el borde derecho auto-scrollea la grilla anula
+ * el gesto (el contenido se mueve al revés que el puntero).
+ */
+export function contraElGesto(paso: number, dir: number): boolean {
+  return paso !== 0 && dir !== 0 && Math.sign(paso) !== Math.sign(dir);
+}
+
+/**
+ * Actualiza el último sentido de movimiento por eje (-1 o 1) solo cuando hubo
+ * desplazamiento real en ese eje; un desvío ortogonal puro (`dx === 0`)
+ * conserva `dirX` para que `contraElGesto` no pierda el veto en auto-scroll.
+ */
+export function actualizarDireccion(
+  dir: { dirX: number; dirY: number },
+  dx: number,
+  dy: number
+): void {
+  if (dx !== 0) dir.dirX = Math.sign(dx);
+  if (dy !== 0) dir.dirY = Math.sign(dy);
+}
+
 export function calcularPasoAutoScroll(
   pos: number,
   min: number,
@@ -166,9 +193,16 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
   const isArmed = () => !!g?.started;
 
   // ── Fantasma ────────────────────────────────────────────────────────────
+  function resolverScrollEl(cur: Gesture): HTMLElement | null {
+    if (cur.scrollEl && !cur.scrollEl.isConnected) {
+      cur.scrollEl = container();
+    }
+    return cur.scrollEl;
+  }
+
   function paintGhost() {
     if (!g?.ghost) return;
-    const el = container();
+    const el = g.started ? resolverScrollEl(g) : container();
     // Compensar AMBOS scrolls: el del contenedor (auto-scroll del motor) y el
     // de la PÁGINA (rueda del usuario a mitad del gesto) — la tarjeta fantasma
     // vive en el flujo del documento y ambos la deslizan bajo el cursor.
@@ -179,13 +213,6 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
   }
 
   // ── Auto-scroll (M5) ────────────────────────────────────────────────
-  /** ¿El paso de auto-scroll empuja en contra del último movimiento del dedo?
-   *  Con el puntero quieto (dir 0) se deja seguir: sostener el dedo en el borde
-   *  es la forma clásica de seguir scrolleando. */
-  function contraElGesto(paso: number, dir: number): boolean {
-    return paso !== 0 && dir !== 0 && Math.sign(paso) !== Math.sign(dir);
-  }
-
   /** ¿El contenedor es un scroller vertical REAL (con recorrido y overflow)? */
   function scrolleaVertical(el: HTMLElement): boolean {
     if (el.scrollHeight <= el.clientHeight + 20) return false;
@@ -195,7 +222,7 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
   function edgeTick() {
     const cur = g;
     if (!cur?.started || !scrollAxis) { raf = 0; return; }
-    const el = container();
+    const el = resolverScrollEl(cur);
     let movio = false;
 
     // ── Eje X: el contenedor scrollea en horizontal (grilla de la semana) ──
@@ -205,7 +232,12 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
         // Solo la parte visible: el rect completo puede salirse del viewport.
         const min = Math.max(r.left, 0);
         const max = Math.min(r.right, window.innerWidth);
-        const paso = calcularPasoAutoScroll(cur.lastX, min, max);
+        // En un scroller angosto (grilla de 359px en móvil) una franja fija de
+        // 56px se come el 15% del ancho y se dispara con solo rozar el borde,
+        // arrastrando la vista en pleno gesto de asa. Se escala al carril; en
+        // pantallas anchas la franja sigue siendo EDGE_ZONE.
+        const zonaX = Math.min(EDGE_ZONE, (max - min) * 0.1);
+        const paso = calcularPasoAutoScroll(cur.lastX, min, max, zonaX);
         if (paso !== 0 && !contraElGesto(paso, cur.dirX)) {
           const before = el.scrollLeft;
           el.scrollLeft = before + paso;
@@ -261,6 +293,7 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
     if (!cur || cur.started) return;
     cur.started = true;
     clearTimeout(cur.armTimer);
+    cur.scrollEl = container();
 
     const { card } = cur.target;
     try { card.setPointerCapture(cur.pointerId); } catch { /* puntero ya liberado */ }
@@ -269,6 +302,13 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
       // touch-action 'none' anula el scroll nativo mientras el gesto vive
       // (el CSS base pan-y/none de la tarjeta se recupera al limpiar).
       card.style.touchAction = 'none';
+      // C1: no pasivo es lo que permite preventDefault del scroll en el drag.
+      // Registrado al armar (no en pointerdown) para no bloquear el compositor
+      // durante los 400ms previos al long-press cuando el usuario solo scrollea.
+      window.addEventListener('touchmove', onTouchMove, {
+        passive: false,
+        signal: cur.listeners.signal
+      });
       window.addEventListener('contextmenu', preventContext, {
         capture: true,
         signal: cur.listeners.signal
@@ -338,8 +378,7 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
 
     // Sentido del movimiento ANTES de mover el cursor: lo usa el auto-scroll
     // para no empujar la vista en contra del gesto.
-    cur.dirX = Math.sign(x - cur.lastX);
-    cur.dirY = Math.sign(y - cur.lastY);
+    actualizarDireccion(cur, x - cur.lastX, y - cur.lastY);
     cur.lastX = x;
     cur.lastY = y;
     const dist = Math.hypot(x - cur.startX, y - cur.startY);
@@ -434,6 +473,7 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
       armTimer: 0,
       quietTimer: 0,
       scrollTop0: container()?.scrollTop ?? 0,
+      scrollEl: null,
       pageY0: window.scrollY,
       listeners: new AbortController()
     };
@@ -446,8 +486,6 @@ export function createDragEngine(opts: DragEngineOptions = {}) {
     // Captura en fase de captura: el scroll de CUALQUIER contenedor (página,
     // grilla, track) re-ancla el gesto a la geometría nueva.
     window.addEventListener('scroll', onScroll, { capture: true, passive: true, signal });
-    // C1: no pasivo es lo que permite preventDefault del scroll en el drag.
-    window.addEventListener('touchmove', onTouchMove, { passive: false, signal });
     window.addEventListener('keydown', onKey, { signal });
     window.addEventListener('blur', onBlur, { signal });
 
