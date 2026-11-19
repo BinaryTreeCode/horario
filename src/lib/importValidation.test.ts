@@ -258,6 +258,21 @@ describe('validateImport', () => {
     expect(r.warnings.join(' ')).toContain('vacía');
   });
 
+  test('dayOverrides duplicados para el mismo día → warning y solo se toma el primero', () => {
+    const r = validateImport(JSON.stringify({
+      app: 'nature-planner',
+      version: 4,
+      dayOverrides: [
+        { day: 2, activities: [{ ...okAct, name: 'Primera edición' }] },
+        { day: 2, activities: [{ ...okAct, name: 'Segunda edición' }] }
+      ]
+    }));
+    expect(r.valid).toBe(true);
+    expect(r.summary.dayOverrides).toBe(1);
+    expect(r._dayOverrides[0].activities[0].name).toBe('Primera edición');
+    expect(r.warnings.join(' ')).toContain('duplicada');
+  });
+
   test('override cuyas actividades son todas inválidas → ignorado por completo', () => {
     const r = validateImport(JSON.stringify({
       app: 'nature-planner',

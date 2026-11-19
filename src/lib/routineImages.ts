@@ -183,7 +183,7 @@ export async function subirABlob(dataUrl: string): Promise<string> {
   });
   if (!put.ok) {
     const msg = await put.json().catch(() => ({ error: `HTTP ${put.status}` }));
-    throw new Error(msg?.error ?? `HTTP ${put.status}`);
+    throw Object.assign(new Error(msg?.error ?? `HTTP ${put.status}`), { status: put.status });
   }
   const data = await put.json();
   if (!data?.url) throw new Error('Respuesta sin URL');

@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { zipSync, strToU8 } from 'fflate';
-import { leerRespaldo } from './backupFile';
+import { leerRespaldo, MAX_UNZIPPED_BYTES, MAX_ZIP_ENTRIES } from './backupFile';
 import { validateImport, compactToBackup, type BackupPayload } from './importValidation';
 import type { Activity, Category, AppSettings, DayOverride } from './types';
 
@@ -146,5 +146,34 @@ describe('leerRespaldo (.npz → JSON para validateImport)', () => {
       if (a.image) expect(a.image.startsWith('data:image/') || a.image.startsWith('https://')).toBe(true);
     }
     expect(v._activities[0].image!.startsWith('data:image/webp;base64,')).toBe(true);
+  });
+
+  test('.npz corrupto (no es un ZIP valido) lanza error claro', async () => {
+    const file = new File([new TextEncoder().encode('esto-no-es-un-zip')], 'corrupto.npz', { type: 'application/zip' });
+    await expect(leerRespaldo(file)).rejects.toThrow(/dañado|ZIP válido/);
+  });
+
+  test('.npz con JSON corrupto en la entrada "d" lanza error claro', async () => {
+    const file = new File([zipSync({ d: strToU8('{json roto') })], 'json-roto.npz', { type: 'application/zip' });
+    await expect(leerRespaldo(file)).rejects.toThrow(/corruptos|JSON inválido/);
+  });
+
+  test('.npz con demasiadas entradas supera MAX_ZIP_ENTRIES y es rechazado', async () => {
+    const zip: Record<string, Uint8Array> = { d: strToU8('{}') };
+    for (let i = 0; i < MAX_ZIP_ENTRIES; i++) {
+      zip[`${i}.bin`] = new Uint8Array([1]);
+    }
+    const file = new File([zipSync(zip)], 'muchas-entradas.npz', { type: 'application/zip' });
+    await expect(leerRespaldo(file)).rejects.toThrow(/supera el límite/);
+  });
+
+  test('.npz que excede MAX_UNZIPPED_BYTES (zip-bomb) es rechazado', async () => {
+    const grande = new Uint8Array(MAX_UNZIPPED_BYTES + 1024); // ceros: comprime a ~30 KB pero descomprime > 30 MB
+    const file = new File(
+      [zipSync({ d: strToU8('{}'), '0.bin': grande }, { level: 6 })],
+      'bomba.npz',
+      { type: 'application/zip' }
+    );
+    await expect(leerRespaldo(file)).rejects.toThrow(/tamaño máximo descomprimido/);
   });
 });

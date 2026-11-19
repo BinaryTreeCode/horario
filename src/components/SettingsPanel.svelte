@@ -1,7 +1,7 @@
 <script lang="ts">
   import { db, descargarRespaldo, exportarRespaldoBinario, estimarRespaldo, exportData, validateImport, importValidatedData, type StatsRespaldo, type ValidationResult } from '../lib/db';
   import { leerRespaldo } from '../lib/backupFile';
-  import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync, subirAhora, bajarAhora, inspeccionarBajada, aplicarSnapshotReemplazando, detectarDuplicadosActividades, limpiarDuplicadosNube, SIN_SESION } from '../lib/sync';
+  import { isLoggedIn, syncNow, initialSyncAfterLogin, resetSyncAfterLogout, onSyncChange, isPushPaused, resumePushAndSync, subirAhora, bajarAhora, inspeccionarBajada, aplicarSnapshotCombinando, aplicarSnapshotReemplazando, detectarDuplicadosActividades, limpiarDuplicadosNube, SIN_SESION } from '../lib/sync';
   import { establecerClave, olvidarClave } from '../lib/crypto';
   import type { SyncStatus } from '../lib/types';
   import { Cloud, CloudUpload, CloudDownload, LogIn, LogOut, RefreshCw, UserPlus, TriangleAlert } from '@lucide/svelte';
@@ -197,7 +197,7 @@
     try {
       const { snapshot, divergencia } = await inspeccionarBajada();
       if (divergencia.soloLocalesActs === 0) {
-        const { aplicados } = await bajarAhora('combinar');
+        const { aplicados } = await aplicarSnapshotCombinando(snapshot);
         await refrescarDesdeBD();
         syncMessage = aplicados > 0 ? tNow('cloud.bajado', { n: aplicados }) : tNow('cloud.bajadoNada');
       } else {
@@ -221,7 +221,9 @@
         await refrescarDesdeBD();
         syncMessage = tNow('cloud.reemplazado', { n: aplicados });
       } else {
-        const { aplicados } = await bajarAhora('combinar');
+        const { aplicados } = pendingSnapshot
+          ? await aplicarSnapshotCombinando(pendingSnapshot)
+          : await bajarAhora('combinar');
         await refrescarDesdeBD();
         syncMessage = aplicados > 0 ? tNow('cloud.bajado', { n: aplicados }) : tNow('cloud.bajadoNada');
       }
@@ -597,45 +599,38 @@
       return;
     }
 
-    const reader = new FileReader();
-    reader.onerror = () => {
-      toastErr(tNow('settings.fileReadError'));
-    };
-    reader.onload = async (e) => {
-      try {
-        // .npz (ZIP con imágenes binarias) → data-URLs reconstruidas;
-        // .json → el mismo texto. Un solo pipeline después.
-        const text = await leerRespaldo(file);
+    try {
+      // .npz (ZIP con imágenes binarias) → data-URLs reconstruidas;
+      // .json → el mismo texto. Un solo pipeline después.
+      const text = await leerRespaldo(file);
 
-        // 1) Validar ANTES de tocar la base de datos
-        const validation = validateImport(text);
-        if (!validation.valid) {
-          toastErr(tNow('settings.importFailed', { error: validation.error }));
-          return;
-        }
-
-        // 2) Confirmar con resumen + advertencias antes de reemplazar TODO
-        const { summary, warnings } = validation;
-        const s = summary;
-        pendingImport = {
-          validation,
-          summary: [
-            tNow('settings.summaryActs', { n: s.activities }),
-            tNow('settings.summaryCats', { n: s.categories }),
-            tNow('settings.summarySettings', { n: s.settings }),
-            tNow('settings.summaryOverrides', { n: s.dayOverrides })
-          ].join('\n'),
-          warnings:
-            warnings.length > 6
-              ? [...warnings.slice(0, 6), tNow('settings.moreWarnings', { count: warnings.length - 6 })]
-              : warnings
-        };
-        confirmImport = true;
-      } catch (err: any) {
-        toastErr(tNow('settings.importError', { msg: err?.message || tNow('settings.networkError') }));
+      // 1) Validar ANTES de tocar la base de datos
+      const validation = validateImport(text);
+      if (!validation.valid) {
+        toastErr(tNow('settings.importFailed', { error: validation.error }));
+        return;
       }
-    };
-    reader.readAsArrayBuffer(file);
+
+      // 2) Confirmar con resumen + advertencias antes de reemplazar TODO
+      const { summary, warnings } = validation;
+      const s = summary;
+      pendingImport = {
+        validation,
+        summary: [
+          tNow('settings.summaryActs', { n: s.activities }),
+          tNow('settings.summaryCats', { n: s.categories }),
+          tNow('settings.summarySettings', { n: s.settings }),
+          tNow('settings.summaryOverrides', { n: s.dayOverrides })
+        ].join('\n'),
+        warnings:
+          warnings.length > 6
+            ? [...warnings.slice(0, 6), tNow('settings.moreWarnings', { count: warnings.length - 6 })]
+            : warnings
+      };
+      confirmImport = true;
+    } catch (err: any) {
+      toastErr(err?.message ? tNow('settings.importError', { msg: err.message }) : tNow('settings.fileReadError'));
+    }
   }
 
   async function doImport() {
@@ -646,6 +641,8 @@
       // objetos planos antes de tocar Dexie.
       const validation = $state.snapshot(pendingImport.validation);
       await importValidatedData(validation);
+      pushPausado = true;
+      await refrescarDesdeBD();
       confirmImport = false;
       clearUndo(); // los snapshots de undo referencian filas que el import reemplazó
 
@@ -1647,6 +1644,25 @@
     .btn-backup,
     .import-btn {
       min-height: 44px;
+    }
+  }
+
+  /* Ventanas BAJAS (móvil horizontal 844x390): el panel es una barra lateral a
+     pantalla completa y con 2rem de padding + 2rem de gap entre secciones el
+     área útil quedaba en ~155px. La media de ancho (640px) no entraba acá. */
+  @media (max-height: 520px) {
+    .modal-content {
+      padding: 0.9rem 1.25rem;
+    }
+    .modal-header {
+      margin-bottom: 0.65rem;
+    }
+    .settings-sections {
+      gap: 1rem;
+    }
+    .modal-footer {
+      margin-top: 0.65rem;
+      padding-top: 0.65rem;
     }
   }
 

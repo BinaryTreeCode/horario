@@ -15,7 +15,7 @@
   import { undoStack, redoStack } from '../lib/undo';
   import { Settings, Calendar, Clock, Plus, ChevronsUp, ChevronsDown, Undo2, Redo2, Cloud, CloudOff, CloudUpload, CloudDownload, LogIn, RefreshCw, Info, TriangleAlert } from '@lucide/svelte';
   import { portal } from '../lib/portal';
-  import { onSyncChange, syncNow, subirAhora, bajarAhora, inspeccionarBajada, aplicarSnapshotReemplazando, SIN_SESION } from '../lib/sync';
+  import { onSyncChange, syncNow, subirAhora, bajarAhora, inspeccionarBajada, aplicarSnapshotCombinando, aplicarSnapshotReemplazando, SIN_SESION } from '../lib/sync';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { t, tNow, idioma } from '../lib/i18n';
   import { modoPrivacidad } from '../lib/privacy';
@@ -144,7 +144,7 @@
     try {
       const { snapshot, divergencia } = await inspeccionarBajada();
       if (divergencia.soloLocalesActs === 0) {
-        const { aplicados } = await bajarAhora('combinar');
+        const { aplicados } = await aplicarSnapshotCombinando(snapshot);
         if (aplicados > 0) toastOk(tNow('cloud.bajado', { n: aplicados }));
         else toastOk(tNow('cloud.bajadoNada'));
         menuDatos = false;
@@ -169,7 +169,9 @@
         const { aplicados } = await aplicarSnapshotReemplazando(pendingSnapshot);
         toastOk(tNow('cloud.reemplazado', { n: aplicados }));
       } else {
-        const { aplicados } = await bajarAhora('combinar');
+        const { aplicados } = pendingSnapshot
+          ? await aplicarSnapshotCombinando(pendingSnapshot)
+          : await bajarAhora('combinar');
         if (aplicados > 0) toastOk(tNow('cloud.bajado', { n: aplicados }));
         else toastOk(tNow('cloud.bajadoNada'));
       }
@@ -1619,7 +1621,10 @@
 
   .grid-section {
     padding: 1rem;
-    overflow-x: auto;
+    /* Sin `overflow-x: auto` propio: el scroller horizontal de la semana es
+       .weekly-grid-container. Este div creaba un scrollport redundante (y, por
+       especificación CSS, `overflow-y` pasaba a auto, recortando el contenido). */
+    min-width: 0;
   }
 
   /* Pista de primera ejecución: una sola vez, encima de la rejilla. El botón
@@ -1830,6 +1835,8 @@
       min-width: 0;
       max-width: 100%;
       overflow-x: auto;
+      /* Topar el borde no dispara navegación atrás/adelante en móvil. */
+      overscroll-behavior-x: contain;
       scrollbar-width: none;
     }
     .header-right::-webkit-scrollbar {

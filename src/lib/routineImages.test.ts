@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { escalaPara, esDataUrlImagen, bytesDeDataUrl, DIM_LOCAL, DIM_BLOB, MAX_BYTES_ENTRADA } from './routineImages';
+import { validarMagicBytesImagen } from '../pages/api/images';
 
 /**
  * El compresor de imágenes era una caja negra: la decisión de "no agrandar" y
@@ -132,5 +133,48 @@ describe('limites de imagen', () => {
     expect(DIM_LOCAL).toBe(512);
     expect(DIM_BLOB).toBe(1600);
     expect(DIM_BLOB).toBeGreaterThan(DIM_LOCAL);
+  });
+});
+
+describe('validarMagicBytesImagen', () => {
+  const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00]);
+  const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+  const gif87a = new TextEncoder().encode('GIF87a\x01\x00');
+  const gif89a = new TextEncoder().encode('GIF89a\x01\x00');
+  const webpBytes = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, // RIFF
+    0x24, 0x00, 0x00, 0x00, // tamaño
+    0x57, 0x45, 0x42, 0x50, // WEBP
+    0x56, 0x50, 0x38, 0x20,
+  ]);
+
+  test('acepta JPEG, PNG, WebP y GIF (87a y 89a) con firma valida', () => {
+    expect(validarMagicBytesImagen(jpegBytes, 'image/jpeg')).toBe(true);
+    expect(validarMagicBytesImagen(pngBytes, 'image/png')).toBe(true);
+    expect(validarMagicBytesImagen(gif87a, 'image/gif')).toBe(true);
+    expect(validarMagicBytesImagen(gif89a, 'image/gif')).toBe(true);
+    expect(validarMagicBytesImagen(webpBytes, 'image/webp')).toBe(true);
+  });
+
+  test('rechaza HTML o texto plano disfrazado de PNG', () => {
+    const html = new TextEncoder().encode('<!DOCTYPE html><html><script>alert(1)</script></html>');
+    expect(validarMagicBytesImagen(html, 'image/png')).toBe(false);
+    expect(validarMagicBytesImagen(new TextEncoder().encode('<svg></svg>'), 'image/webp')).toBe(false);
+  });
+
+  test('rechaza buffer vacio o mas corto que la firma', () => {
+    expect(validarMagicBytesImagen(new Uint8Array(0), 'image/jpeg')).toBe(false);
+    expect(validarMagicBytesImagen(new Uint8Array([0xff, 0xd8]), 'image/jpeg')).toBe(false);
+    expect(validarMagicBytesImagen(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), 'image/png')).toBe(false);
+    expect(validarMagicBytesImagen(new TextEncoder().encode('GIF89'), 'image/gif')).toBe(false);
+    expect(validarMagicBytesImagen(new TextEncoder().encode('RIFF1234WEB'), 'image/webp')).toBe(false);
+  });
+
+  test('rechaza mismatch entre Content-Type y firma real o MIME desconocido', () => {
+    expect(validarMagicBytesImagen(jpegBytes, 'image/png')).toBe(false);
+    expect(validarMagicBytesImagen(pngBytes, 'image/jpeg')).toBe(false);
+    expect(validarMagicBytesImagen(webpBytes, 'image/gif')).toBe(false);
+    expect(validarMagicBytesImagen(gif89a, 'image/webp')).toBe(false);
+    expect(validarMagicBytesImagen(pngBytes, 'image/svg+xml')).toBe(false);
   });
 });

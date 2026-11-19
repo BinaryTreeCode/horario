@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import type { Zippable } from 'fflate';
 import type { Activity, Category, AppSettings, DayOverride, SyncState } from './types';
 import { validateImport, EXPORT_FORMAT_VERSION, compactToBackup, type ValidationResult } from './importValidation';
 import { notifyDataChange } from './dataBus';
@@ -641,13 +642,13 @@ async function buildRespaldoBinario(mode: ExportMode): Promise<{ zipped: Uint8Ar
   for (const a of ovActsDe(parsed)) asignar(a);
 
   const jsonFinal = JSON.stringify(parsed);
-  const zip: Record<string, Uint8Array> = {
-    d: strToU8(jsonFinal),
-    ...Object.fromEntries([...placeholderABytes].map(([idx, bytes]) => [`${idx}.bin`, bytes]))
+  // Nivel 6 solo para el JSON (`d`); nivel 0 (STORE) para los `.bin` porque
+  // ya son imágenes comprimidas (WebP/JPEG/PNG) y recomprimirlas gasta CPU sin ahorrar bytes.
+  const zip: Zippable = {
+    d: [strToU8(jsonFinal), { level: 6 }],
+    ...Object.fromEntries([...placeholderABytes].map(([idx, bytes]) => [`${idx}.bin`, [bytes, { level: 0 }]]))
   };
-  // Nivel 6: buen ratio sin achicharrar el hilo (el JSON domina y ya está
-  // minificado; las imágenes WebP/JPEG no comprimen más).
-  const zipped = zipSync(zip, { level: 6 });
+  const zipped = zipSync(zip);
   return {
     zipped,
     stats: {
@@ -769,18 +770,28 @@ export async function importValidatedData(result: ValidationResult): Promise<voi
 
     if (result._activities.length)
       await db.activities.bulkPut(patch(result._activities.map(a => conservarImagen(a, previas.get(a.id)))));
-    if (result._categories.length) await db.categories.bulkPut(patch(result._categories));
+    if (result._categories.length) {
+      await db.categories.bulkPut(patch(result._categories));
+    } else {
+      // Un backup parcial sin categorías no puede dejar la app huérfana: restaurar las iniciales (semilla).
+      await db.categories.bulkPut(INITIAL_CATEGORIES.map(c => ({ ...c, updatedAt: 0 })));
+    }
     if (result._settings.length) await db.settings.bulkPut(patch(result._settings));
     if (result._dayOverrides.length)
       await db.dayOverrides.bulkPut(patch(result._dayOverrides.map(o => ({
         ...o,
         activities: (o.activities ?? []).map(a => conservarImagen(a, previasOv.get(a.id)))
       }))));
-    // PRESERVAR lastServerPullAt del syncState (no resetear): el cursor de pull
-    // es del dispositivo, no de los datos. Resetearlo haría que el próximo pull
-    // re-trajera la nube entera y el LWW pisara el import con lo remoto.
+    // PRESERVAR lastServerPullAt y sesgoServidor del syncState (no resetear): el cursor de
+    // pull es del dispositivo, no de los datos. Marcar pendingPushPaused dentro de la misma
+    // transacción elimina la ventana de carrera antes de pausePushAfterImport().
     const prev = await db.syncState.get('1');
-    await db.syncState.put({ id: '1', lastServerPullAt: prev?.lastServerPullAt });
+    await db.syncState.put({
+      id: '1',
+      lastServerPullAt: prev?.lastServerPullAt,
+      sesgoServidor: prev?.sesgoServidor,
+      pendingPushPaused: true
+    });
   });
 
   // Petición del usuario: lo importado NO viaja a la nube automáticamente.

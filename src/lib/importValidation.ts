@@ -479,9 +479,14 @@ export function validateImport(jsonString: string): ValidationResult {
     result.error = 'El campo "dayOverrides" debe ser una lista.';
     return result;
   }
+  const seenOverrideDays = new Set<number>();
   for (const [i, o] of (data.dayOverrides ?? []).entries()) {
     if (!Number.isInteger(o?.day) || o.day < 0 || o.day > 6) {
       warnings.push(`Edición temporal #${i + 1}: día inválido. Será ignorada.`);
+      continue;
+    }
+    if (seenOverrideDays.has(o.day)) {
+      warnings.push(`Edición temporal duplicada para el día ${o.day + 1}. Solo se tomará la primera.`);
       continue;
     }
     if (!Array.isArray(o.activities)) {
@@ -528,6 +533,7 @@ export function validateImport(jsonString: string): ValidationResult {
       warnings.push(`Edición temporal del día ${o.day + 1}: todas sus actividades son inválidas. Será ignorada.`);
       continue;
     }
+    seenOverrideDays.add(o.day);
     _dayOverrides.push({
       day: o.day,
       activities: validOvActs,
