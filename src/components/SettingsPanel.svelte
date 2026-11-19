@@ -278,7 +278,7 @@
       if (e.key === 'Escape' && !fueConsumido(e)) onClose();
     };
     window.addEventListener('keydown', handleKey);
-    panelEl?.focus();
+    panelEl?.focus({ preventScroll: true });
     return () => window.removeEventListener('keydown', handleKey);
   });
 
@@ -1005,6 +1005,8 @@
     width: 100%;
     max-width: 400px;
     height: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
     background: rgb(var(--sup));
     padding: 2rem;
     box-sizing: border-box;
@@ -1647,25 +1649,6 @@
     }
   }
 
-  /* Ventanas BAJAS (móvil horizontal 844x390): el panel es una barra lateral a
-     pantalla completa y con 2rem de padding + 2rem de gap entre secciones el
-     área útil quedaba en ~155px. La media de ancho (640px) no entraba acá. */
-  @media (max-height: 520px) {
-    .modal-content {
-      padding: 0.9rem 1.25rem;
-    }
-    .modal-header {
-      margin-bottom: 0.65rem;
-    }
-    .settings-sections {
-      gap: 1rem;
-    }
-    .modal-footer {
-      margin-top: 0.65rem;
-      padding-top: 0.65rem;
-    }
-  }
-
   @media (max-width: 640px) {
     .modal-content {
       max-width: 100%;
@@ -1694,6 +1677,27 @@
       min-height: 44px;
       flex: 1;
       justify-content: center;
+    }
+  }
+
+  /* Ventanas BAJAS (móvil horizontal 844x390): el panel es una barra lateral a
+     pantalla completa y con 2rem de padding + 2rem de gap entre secciones el
+     área útil quedaba en ~155px. La media de ancho (640px) no entraba acá. */
+  @media (max-height: 520px) {
+    .modal-content {
+      padding: 0.9rem 1.25rem;
+      padding-left: max(1.25rem, env(safe-area-inset-left, 0px));
+      padding-right: max(1.25rem, env(safe-area-inset-right, 0px));
+    }
+    .modal-header {
+      margin-bottom: 0.65rem;
+    }
+    .settings-sections {
+      gap: 1rem;
+    }
+    .modal-footer {
+      margin-top: 0.65rem;
+      padding-top: 0.65rem;
     }
   }
 </style>

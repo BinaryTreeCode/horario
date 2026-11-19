@@ -205,6 +205,9 @@
     width: 100%;
     max-width: 620px;
     max-height: 90vh;
+    /* dvh: con la barra del navegador móvil visible, 90vh se sale de la
+       pantalla y el footer queda tapado (mismo criterio que los demás modales). */
+    max-height: 90dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 16px 40px rgb(var(--sombra) / 0.2);
@@ -293,6 +296,8 @@
   .modal-body {
     padding: 1.2rem 1.4rem;
     overflow-y: auto;
+    /* El gesto vertical es del cuerpo: no encadena al modal ni a la página. */
+    overscroll-behavior: contain;
     flex: 1;
     display: flex;
     flex-direction: column;

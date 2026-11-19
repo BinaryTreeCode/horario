@@ -407,7 +407,7 @@
       const btn = botonNubeHeader();
       if (btn) {
         const r = btn.getBoundingClientRect();
-        const MENU_W = 230;
+        const MENU_W = 264;
         const MENU_H = 220; // 4 items + pie; solo para el clamp vertical
         menuDatosPos = {
           x: Math.max(8, Math.min(r.left, window.innerWidth - MENU_W - 8)),
@@ -416,7 +416,7 @@
       } else {
         // Anclaje por defecto: abajo a la derecha del viewport, donde el dedo
         // llega mÃ¡s fÃ¡cil (el header de la vista Day estÃ¡ recortado/oculto).
-        const MENU_W = 230;
+        const MENU_W = 264;
         menuDatosPos = {
           x: Math.max(8, Math.min(window.innerWidth - MENU_W - 8, window.innerWidth - MENU_W - 8)),
           y: Math.max(8, window.innerHeight - 230)
@@ -436,6 +436,19 @@
     menuDatosSaliendo = true;
     setTimeout(() => { menuDatos = false; menuDatosSaliendo = false; }, MENU_CIERRE_MS);
   }
+
+  // Re-clamp con las dimensiones REALES del panel ya montado (offsetWidth/Height,
+  // no getBoundingClientRect porque menuDatosAnim arranca con scale(0.92)).
+  $effect(() => {
+    if (!menuDatos || !menuDatosPortalEl) return;
+    const realW = menuDatosPortalEl.offsetWidth;
+    const realH = menuDatosPortalEl.offsetHeight;
+    const nx = Math.max(8, Math.min(menuDatosPos.x, window.innerWidth - realW - 8));
+    const ny = Math.max(8, Math.min(menuDatosPos.y, window.innerHeight - realH - 8));
+    if (nx !== menuDatosPos.x || ny !== menuDatosPos.y) {
+      menuDatosPos = { x: nx, y: ny };
+    }
+  });
 
   // Click afuera + Esc cierran el menú (patrón del menú contextual existente).
   $effect(() => {
@@ -1131,6 +1144,7 @@
     position: fixed;
     z-index: 1200;
     min-width: 230px;
+    max-width: calc(100vw - 16px);
     padding: 0.35rem;
     border-radius: 12px;
     display: flex;

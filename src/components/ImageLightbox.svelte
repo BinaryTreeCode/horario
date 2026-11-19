@@ -5,6 +5,7 @@
   import { atraparTab, enfocarDialogo, recordarFoco } from '../lib/focus';
   import { capturarEscape } from '../lib/dialogStack';
   import { srcImagen } from '../lib/crypto';
+  import { observarDesborde, type Desborde } from '../lib/observarDesborde';
   import type { Activity } from '../lib/types';
 
   interface Props {
@@ -18,31 +19,11 @@
   const hasSteps = $derived(Array.isArray(activity.steps) && activity.steps.length > 0);
 
   // Panel de pasos: es una región scrolleable (max-height 32vh). Solo entra al
-  // recorrido de tabulacion cuando DE VERDAD desborda: en un mensaje corto un
-  // tab stop de mas molesta, y axe (scrollable-region-focusable) exige que la
-  // region scrolleable sea enfocable. Las medidas las dan bindings del DOM.
-  let stepsClientH = $state(0);
-  let stepsScrollH = $state(0);
-  const stepsScrolleable = $derived(hasSteps && stepsOpen && stepsScrollH > stepsClientH + 1);
-
-  /** Mide si el panel de pasos desborda. `bind:scrollHeight` no existe en
-   *  Svelte 5: la medición va por acción y se rehace si cambia la caja. */
-  function medirPasos(node: HTMLElement) {
-    const medir = () => {
-      stepsScrollH = node.scrollHeight;
-      stepsClientH = node.clientHeight;
-    };
-    medir();
-    const ro = new ResizeObserver(medir);
-    ro.observe(node);
-    window.addEventListener('resize', medir);
-    return {
-      destroy() {
-        ro.disconnect();
-        window.removeEventListener('resize', medir);
-      }
-    };
-  }
+  // recorrido de tabulación cuando DE VERDAD desborda: en una lista corta un
+  // tab stop de más molesta, y axe (scrollable-region-focusable) exige que la
+  // región scrolleable sea enfocable. Medición compartida en lib/observarDesborde.
+  let pasosDesborde = $state<Desborde>({ x: false, y: false });
+  const stepsScrolleable = $derived(hasSteps && stepsOpen && pasosDesborde.y);
 
   let lightboxEl = $state<HTMLElement | null>(null);
   let closeBtnEl = $state<HTMLElement | null>(null);
@@ -115,7 +96,7 @@
   {#if hasSteps && stepsOpen}
     <ul
       class="lightbox-steps-panel"
-      use:medirPasos
+      use:observarDesborde={(d: Desborde) => (pasosDesborde = d)}
       tabindex={stepsScrolleable ? 0 : undefined}
       aria-label={$t('lightbox.stepsCount', { n: activity.steps!.length })}
     >
@@ -282,6 +263,7 @@
     align-self: center;
     width: min(560px, 100%);
     max-height: 32vh;
+    max-height: 32dvh;
     overflow-y: auto;
     /* El gesto vertical es del panel: no encadena al visor ni a la página, y
        touch-action pan-y evita robar el swipe horizontal en móvil. */

@@ -649,7 +649,7 @@
       <button class="close-btn" onclick={onClose} aria-label={$t('modal.closeNoSave')}><X size={20} /></button>
     </div>
 
-    <form onsubmit={e => { e.preventDefault(); save(); }}>
+    <form id="activity-form" class="modal-form" onsubmit={e => { e.preventDefault(); save(); }}>
       <div class="category-preview" style="background: {categoryColor}"></div>
 
       <!-- Scope selector (only shown when opened from daily view) -->
@@ -867,23 +867,24 @@
         </fieldset>
       {/if}
 
-      <footer class="modal-footer">
-        {#if id !== null}
-          <button type="button" class="btn btn-secondary" onclick={() => confirmDuplicate = true}>
-            <Copy size={18} /> {$t('modal.duplicate')}
-          </button>
-          <button id="btn-delete-activity" type="button" class="btn btn-danger" onclick={() => confirmRemove = true}>
-            <Trash2 size={18} /> {$t('confirm.deleteBtn')}
-          </button>
-        {/if}
-        <div class="footer-right">
-          <button type="button" class="btn btn-secondary" onclick={onClose}>{$t('confirm.cancel')}</button>
-          <button type="submit" class="btn btn-primary">
-            <CheckCircle size={18} /> {$t('modal.save')}
-          </button>
-        </div>
-      </footer>
     </form>
+
+    <footer class="modal-footer">
+      {#if id !== null}
+        <button type="button" class="btn btn-secondary" onclick={() => confirmDuplicate = true}>
+          <Copy size={18} /> {$t('modal.duplicate')}
+        </button>
+        <button id="btn-delete-activity" type="button" class="btn btn-danger" onclick={() => confirmRemove = true}>
+          <Trash2 size={18} /> {$t('confirm.deleteBtn')}
+        </button>
+      {/if}
+      <div class="footer-right">
+        <button type="button" class="btn btn-secondary" onclick={onClose}>{$t('confirm.cancel')}</button>
+        <button type="submit" form="activity-form" class="btn btn-primary">
+          <CheckCircle size={18} /> {$t('modal.save')}
+        </button>
+      </div>
+    </footer>
   </div>
 </div>
 
@@ -924,6 +925,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 0.5rem;
   }
 
@@ -1081,6 +1083,7 @@
 
   .scope-option {
     flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -1124,6 +1127,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }
 
   .steps-title {
@@ -1162,6 +1167,7 @@
 
   .step-input {
     flex: 1;
+    min-width: 0;
     padding: 0.5rem 0.75rem;
     border: 1px solid rgb(var(--linea) / 0.12);
     border-radius: 8px;
@@ -1237,6 +1243,7 @@
 
   .step-text-input {
     flex: 1;
+    min-width: 0;
     border: none;
     background: transparent;
     font-size: 0.85rem;
@@ -1289,14 +1296,15 @@
   }
 
   .modal-content {
-    width: 95%;
+    width: 100%;
     max-width: 500px;
     /* dvh: el teclado virtual SÍ reduce dvh (no vh) — el footer queda visible al escribir.
        vh primero como fallback (cascade: la última declaración válida gana). */
     max-height: 92vh;
     max-height: 92dvh;
     padding: 0;
-    overflow-y: auto;
+    overflow: hidden;
+    overscroll-behavior: contain;
     background: rgb(var(--sup));
     border-radius: 16px;
     box-shadow: 0 20px 25px -5px rgb(var(--sombra) / 0.1), 0 10px 10px -5px rgb(var(--sombra) / 0.04);
@@ -1324,23 +1332,37 @@
     flex-shrink: 0;
   }
 
-  .modal-header, form {
+  .modal-header, .modal-form {
     padding: 1.5rem 2rem;
   }
 
+  /* Cabecera fija fuera del scroller: el título y el botón cerrar siempre
+     quedan visibles arriba sin position: sticky. */
   .modal-header {
-    padding-bottom: 0.5rem;
+    background: rgb(var(--sup));
+    border-bottom: 1px solid rgb(var(--linea) / 0.06);
+    padding-bottom: 0.75rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-shrink: 0;
   }
 
-  form {
+  .modal-form {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
     padding-top: 1rem;
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
+  }
+
+  .modal-form > * {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .input-large {
@@ -1371,6 +1393,7 @@
 
   .time-picker-group {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
@@ -1504,6 +1527,8 @@
     border-radius: 8px;
     font-size: 1rem;
     background: rgb(var(--sup) / 0.8);
+    max-width: 100%;
+    min-width: 0;
   }
 
   input:focus, select:focus {
@@ -1520,6 +1545,7 @@
 
   .day-toggle {
     flex: 1;
+    min-width: 0;
     height: 44px;
     border-radius: 8px;
     border: 1px solid rgb(var(--linea) / 0.1);
@@ -1557,37 +1583,25 @@
   .modal-footer {
     display: flex;
     justify-content: space-between;
-    padding: 1.5rem 2rem;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    padding: 1rem 1.25rem;
     border-top: 1px solid rgb(var(--linea) / 0.05);
     background: rgb(var(--sup));
     flex-shrink: 0;
-    /* Pegajoso, sin breakpoint. Cancelar/Guardar son la acción principal del
-       modal y no pueden depender de que el usuario adivine que hay que
-       bajar: el formulario de creación mide 1040px, asi que en cuanto la
-       pantalla es más baja el botón Guardar queda fuera de vista.
-
-       Antes solo era sticky con (max-width: 640px), una condición de ANCHO
-       que no describe el problema (es de altura): en móvil horizontal
-       (844x390) no se aplicaba y Guardar quedaba a 759px de scroll, y en
-       escritorio (1280x800) tampoco, con el boton fuera de pantalla.
-
-       Sin efecto secundario cuando el contenido cabe: sticky solo actúa si
-       el elemento trataria de salirse del contenedor, asi que en un modal
-       corto se comporta igual que un footer normal. */
-    position: sticky;
-    bottom: 0;
-    z-index: 10;
     box-shadow: 0 -6px 18px rgb(var(--sombra) / 0.08);
-    background: rgb(var(--sup));
   }
 
   .footer-right {
     display: flex;
-    gap: 0.75rem;
+    gap: 0.45rem;
+    margin-left: auto;
   }
 
   .btn {
     padding: 0.6rem 1.2rem;
+    min-height: 44px;
     border-radius: 8px;
     font-weight: 600;
     cursor: pointer;
@@ -1596,6 +1610,14 @@
     align-items: center;
     gap: 0.5rem;
     font-size: 0.9rem;
+  }
+
+  .modal-footer .btn {
+    padding: 0.5rem 0.72rem;
+    font-size: 0.85rem;
+    gap: 0.35rem;
+    white-space: nowrap;
+    min-height: 44px;
   }
 
   .btn-danger {
@@ -1613,6 +1635,24 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+  }
+
+  /* Ventanas bajas (móvil horizontal 844x390): el formulario mide ~1040px y
+     con los paddings de escritorio quedaba un área útil mínima entre la
+     cabecera sticky y el footer. Se compacta el aire vertical, no los targets
+     (cerrar y acciones siguen ≥44px). */
+  @media (max-height: 520px) {
+    .modal-header,
+    .modal-form {
+      padding: 0.75rem 1.25rem;
+    }
+    .modal-form {
+      gap: 0.75rem;
+    }
+    .modal-footer {
+      padding: 0.65rem 1rem;
+      padding-bottom: max(0.65rem, env(safe-area-inset-bottom, 0px));
+    }
   }
 
   @media (max-width: 640px) {
@@ -1633,7 +1673,7 @@
   }
 
   @media (max-width: 540px) {
-    .modal-header, form, .modal-footer {
+    .modal-header, .modal-form, .modal-footer {
       padding: 1rem 1.25rem;
     }
     .modal-header h2 {

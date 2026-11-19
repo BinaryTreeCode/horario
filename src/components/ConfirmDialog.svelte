@@ -36,28 +36,9 @@
   // importación, duplicados). Solo es un tab stop si de verdad desborda: en un
   // mensaje corto un foco extra estorba, pero axe
   // (scrollable-region-focusable) exige que la región scrolleable sea enfocable.
-  let msgClientH = $state(0);
-  let msgScrollH = $state(0);
-  const msgScrolleable = $derived(msgScrollH > msgClientH + 1);
-
-  /** Mide si el mensaje desborda. `bind:scrollHeight` no existe en Svelte 5,
-   *  así que la medición va por acción (y se rehace si cambia la caja). */
-  function medirMensaje(node: HTMLElement) {
-    const medir = () => {
-      msgScrollH = node.scrollHeight;
-      msgClientH = node.clientHeight;
-    };
-    medir();
-    const ro = new ResizeObserver(medir);
-    ro.observe(node);
-    window.addEventListener('resize', medir);
-    return {
-      destroy() {
-        ro.disconnect();
-        window.removeEventListener('resize', medir);
-      }
-    };
-  }
+  // La medición vive en lib/observarDesborde (misma que el visor de imagen).
+  let msgDesborde = $state<Desborde>({ x: false, y: false });
+  const msgScrolleable = $derived(msgDesborde.y);
 
   // El foco entra al diálogo y vuelve al elemento que lo abrió: sin esto,
   // al cerrarse el foco se perdía en el body y el teclado arrancaba de nuevo
@@ -86,6 +67,7 @@
     if (e.key === 'Enter') { e.stopPropagation(); close('confirm'); }
   }
   import { portal } from '../lib/portal';
+  import { observarDesborde, type Desborde } from '../lib/observarDesborde';
   import { atraparTab, enfocarDialogo, recordarFoco } from '../lib/focus';
   import { capturarEscape } from '../lib/dialogStack';
   import { tNow } from '../lib/i18n';
@@ -112,7 +94,7 @@
       tabindex="-1"
     >
       <h3>{title}</h3>
-      <p use:medirMensaje tabindex={msgScrolleable ? 0 : undefined}>{message}</p>
+      <p use:observarDesborde={(d: Desborde) => (msgDesborde = d)} tabindex={msgScrolleable ? 0 : undefined}>{message}</p>
       <div class="confirm-actions">
         <button class="btn-confirm-cancel" onclick={() => close('cancel')}>{cancelText}</button>
         {#if secondaryText}

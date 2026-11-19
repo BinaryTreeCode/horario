@@ -6,6 +6,7 @@
     ARMONIAS_CROMATICAS,
     esPaletaTematica
   } from '../../lib/paletaCategorias';
+  import { observarDesborde, type Desborde } from '../../lib/observarDesborde';
 
   interface Props {
     categories: Category[];
@@ -20,6 +21,11 @@
     pivotColor = $bindable(),
     categoriasArmonizadas
   }: Props = $props();
+
+  // La previsualización tiene max-height 180px: solo es un tab stop cuando la
+  // lista desborda de verdad (axe: scrollable-region-focusable), en vez del
+  // `tabindex="0"` fijo que había incluso con dos categorías.
+  let previewDesborde = $state<Desborde>({ x: false, y: false });
 </script>
 
 <div id="panel-armonizar" role="tabpanel" aria-labelledby="tab-armonizar" class="tab-panel">
@@ -99,7 +105,13 @@
   <!-- Previsualización de categorías -->
   <div class="block-section">
     <span class="block-title">{$t('settings.palettePreview')}</span>
-    <div class="preview-categories-list" tabindex="0" role="region" aria-label={$t('settings.palettePreview')}>
+    <div
+      class="preview-categories-list"
+      tabindex={previewDesborde.y ? 0 : undefined}
+      role="region"
+      aria-label={$t('settings.palettePreview')}
+      use:observarDesborde={(d: Desborde) => (previewDesborde = d)}
+    >
       {#each categoriasArmonizadas as catArm}
         {@const catOrig = categories.find(c => c.id === catArm.id)}
         <div class="preview-cat-row">
