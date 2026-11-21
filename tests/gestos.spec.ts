@@ -1209,3 +1209,98 @@ const ctx = await browser.newContext();
   expect(alto, `el botón de reintentar mide ${Math.round(alto)}px: zona táctil menor a 44px`).toBeGreaterThanOrEqual(44);
   await ctx.close();
 });
+
+test('Semana: intercambiar dos bloques en un día empuja hacia arriba en otro día sin desbordar', async ({ page }) => {
+  await page.evaluate(async () => {
+    const db: IDBDatabase = await new Promise((res, rej) => {
+      const r = indexedDB.open('ScheduleDB');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    await new Promise<void>((res, rej) => {
+      const tx = db.transaction('activities', 'readwrite');
+      const store = tx.objectStore('activities');
+      store.clear();
+      const now = Date.now();
+      const base = { categoryId: 'rutina', description: '', image: null, steps: [], updatedAt: now };
+      store.put({ ...base, id: 'cena-swap', name: 'Cena', startTime: '19:30', endTime: '20:00', daysOfWeek: [0, 1, 2, 3, 4, 5] });
+      store.put({ ...base, id: 'wafles-swap', name: 'Wafles', startTime: '20:00', endTime: '20:30', daysOfWeek: [0, 2, 4, 5] });
+      store.put({ ...base, id: 'bano-swap', name: 'Baño', startTime: '20:30', endTime: '22:00', daysOfWeek: [0, 3, 5] });
+      store.put({ ...base, id: 'org-swap', name: 'Organizar', startTime: '20:30', endTime: '22:00', daysOfWeek: [1, 2, 4] });
+      store.put({ ...base, id: 'dormir-swap', name: 'Dormir', startTime: '22:00', endTime: '23:00', daysOfWeek: [0, 1, 2, 3, 4, 5] });
+      tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+    });
+    db.close();
+  });
+  await page.reload();
+  await expect(page.locator('.day-column').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.day-column').nth(0).locator('.activity-item[title="Wafles"]')).toBeVisible({ timeout: 30_000 });
+
+  // Centrar verticalmente la franja 20:00-23:00 para no activar auto-scroll de borde.
+  await page.evaluate(() => {
+    const col0 = document.querySelectorAll('.day-column')[0];
+    const bano = col0?.querySelector('.activity-item[title="Baño"]') as HTMLElement | null;
+    if (!bano) return;
+    const r = bano.getBoundingClientRect();
+    window.scrollBy(0, r.top + r.height / 2 - window.innerHeight / 2);
+  });
+  await page.waitForTimeout(150);
+
+  const geom = await page.evaluate(() => {
+    const col0 = document.querySelectorAll('.day-column')[0];
+    const wafles = col0?.querySelector('.activity-item[title="Wafles"]') as HTMLElement | null;
+    const bano = col0?.querySelector('.activity-item[title="Baño"]') as HTMLElement | null;
+    if (!wafles || !bano) return null;
+    const wr = wafles.getBoundingClientRect();
+    const br = bano.getBoundingClientRect();
+    return {
+      fromX: wr.left + wr.width / 2,
+      fromY: wr.top + wr.height / 2,
+      toX: br.left + br.width / 2,
+      toY: br.top + br.height * 0.75
+    };
+  });
+  expect(geom, 'no se encontraron Wafles y Baño en Lunes').not.toBeNull();
+
+  await page.mouse.move(geom!.fromX, geom!.fromY);
+  await page.mouse.down();
+  await page.mouse.move(geom!.toX, geom!.toY, { steps: 10 });
+  await page.waitForTimeout(250);
+
+  const flotante = page.locator('.drag-float');
+  await expect(flotante, 'el clon flotante no apareció durante el drag').toBeVisible({ timeout: 10_000 });
+  await expect(flotante, 'el intercambio válido se marcó como inválido').not.toHaveClass(/invalido/);
+  await expect(
+    page.locator('.day-column').nth(2).locator('.activity-item.redim-pendiente[title="Organizar"]'),
+    'el preview multi-día no anticipó el desplazamiento de Organizar en Miércoles'
+  ).toHaveCount(1);
+
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+
+  await expect(page.locator('.toast-error'), 'mostró error ⛔ al intercambiar posiciones').toHaveCount(0);
+
+  const pos = await page.evaluate(() => {
+    const leerDia = (d: number) => {
+      const col = document.querySelectorAll('.day-column')[d];
+      const cr = col.getBoundingClientRect();
+      return [...col.querySelectorAll('.activity-item')].map(el => {
+        const r = el.getBoundingClientRect();
+        return {
+          title: el.getAttribute('title') ?? '',
+          top: Math.round(r.top - cr.top),
+          bottom: Math.round(r.bottom - cr.top)
+        };
+      }).sort((a, b) => a.top - b.top);
+    };
+    return { lunes: leerDia(0), miercoles: leerDia(2) };
+  });
+
+  const lunMap = new Map(pos.lunes.map(x => [x.title, x]));
+  const mieMap = new Map(pos.miercoles.map(x => [x.title, x]));
+
+  expect(lunMap.get('Baño')!.top, 'Baño no subió arriba de Wafles en Lunes').toBeLessThan(lunMap.get('Wafles')!.top);
+  expect(lunMap.get('Wafles')!.bottom, 'Wafles se solapa con Dormir en Lunes').toBeLessThanOrEqual(lunMap.get('Dormir')!.top + 2);
+  expect(mieMap.get('Organizar')!.top, 'Organizar no subió arriba de Wafles en Miércoles').toBeLessThan(mieMap.get('Wafles')!.top);
+  expect(mieMap.get('Organizar')!.bottom, 'Organizar se solapa con Wafles en Miércoles').toBeLessThanOrEqual(mieMap.get('Wafles')!.top + 2);
+  expect(mieMap.get('Wafles')!.bottom, 'Wafles se solapa con Dormir en Miércoles').toBeLessThanOrEqual(mieMap.get('Dormir')!.top + 2);
+});

@@ -463,7 +463,7 @@
           clearDragPreview();
           return;
         }
-        dropPreview = { day, slots: new Map(res.slots.map(s => [s.id, { start: s.start, end: s.end }])) };
+        dropPreview = { day, byDay: aMapaPorDia(cascada.byDay) };
         let newDays = [...activity.daysOfWeek];
         const idx = newDays.indexOf(sourceDay);
         if (idx !== -1) {
@@ -514,7 +514,7 @@
     if (!activity) return;
     const target = dropTargetAt(x, y);
     if (!target) {
-      publicarPreview(null, null, false, '');
+      publicarPreview(null, null, null, false, '');
       return;
     }
     const duration = parseTime(activity.endTime) - parseTime(activity.startTime);
@@ -534,20 +534,46 @@
       startHour,
       endHour
     );
+    if (!res.valido) {
+      publicarPreview(target.day, null, null, true, '⛔ No cabe');
+      return;
+    }
+    const cascada = computeFullCascade(activity.id!, target.day, res.movido.start, res);
+    if (!cascada.valido) {
+      publicarPreview(target.day, null, res.movido, true, cascada.motivo || '⛔ No cabe');
+      return;
+    }
+    const movido = cascada.times.get(activity.id!) ?? res.movido;
     publicarPreview(
       target.day,
-      res.valido ? res.slots : null,
-      !res.valido,
-      !res.valido ? '⛔ No cabe' : res.accion === 'insertar' ? '↕ Insertar aquí' : ''
+      aMapaPorDia(cascada.byDay),
+      movido,
+      false,
+      res.accion === 'insertar' ? '↕ Insertar aquí' : ''
     );
   }
 
   /** Publica el preview solo si el contenido cambió (anti-parpadeo). */
-  function publicarPreview(day: number | null, slots: { id: string; start: number; end: number }[] | null, invalido: boolean, hint: string) {
-    const firma = slots ? `${day}:${slots.map(s => `${s.id}@${s.start}-${s.end}`).join('|')}` : 'null';
-    if (draggedActivityId !== null) {
-      const mio = slots?.find(s => s.id === draggedActivityId);
-      if (mio) dragGhostHora = `${format12h(formatTime(mio.start))} – ${format12h(formatTime(mio.end))}`;
+  function publicarPreview(
+    day: number | null,
+    byDay: Map<number, Map<string, { start: number; end: number }>> | null,
+    movido: { start: number; end: number } | null,
+    invalido: boolean,
+    hint: string
+  ) {
+    const firma = byDay
+      ? `${day}:${[...byDay.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([d, slots]) =>
+            `${d}[${[...slots.entries()]
+              .sort((a, b) => a[0].localeCompare(b[0]))
+              .map(([id, s]) => `${id}@${s.start}-${s.end}`)
+              .join('|')}]`
+          )
+          .join(';')}`
+      : 'null';
+    if (draggedActivityId !== null && movido) {
+      dragGhostHora = `${format12h(formatTime(movido.start))} – ${format12h(formatTime(movido.end))}`;
       // (El resalte de mitad del pisado se retiró: el feedback de posición
       // vive en el clon flotante — hora proyectada + acción del drop.)
     }
@@ -559,7 +585,7 @@
     firmaPreview = firma;
     setInvalid(invalido);
     dragHint = hint;
-    dropPreview = slots ? { day: day!, slots: new Map(slots.map(s => [s.id, { start: s.start, end: s.end }])) } : null;
+    dropPreview = byDay && day !== null ? { day, byDay } : null;
   }
 
   function handleItemPointerDown(e: PointerEvent, activity: Activity, dayIndex: number) {
@@ -586,12 +612,11 @@
   }
 
   /**
-   * Vista previa del drop (igual que la vista Día): id → {start, end} en
-   * horas, calculada en dragover SIN tocar la BD. Las actividades del día
-   * destino se deslizan en vivo vía transition CSS hacia su posición
-   * predicha. null = sin drag activo.
+   * Vista previa del drop (multi-día): día destino + mapa por día con
+   * id → {start, end} en horas, calculada sin tocar la BD. Todas las
+   * columnas afectadas se deslizan en vivo vía transition CSS.
    */
-  let dropPreview = $state<{ day: number; slots: Map<string, { start: number; end: number }> } | null>(null);
+  let dropPreview = $state<{ day: number; byDay: Map<number, Map<string, { start: number; end: number }>> } | null>(null);
 
   /**
    * Preview del ESTIRAR vertical: la duración es GLOBAL, así que al soltar el
@@ -603,12 +628,22 @@
   let redimPreview = $state<Map<number, Map<string, { start: number; end: number }>> | null>(null);
   let redimDiaOrigen = $state<number | null>(null);
 
+  /** Convierte byDay de cascade.ts al mapa mutable de preview por día. */
+  function aMapaPorDia(
+    byDay: Map<number, Map<string, { start: number; end: number }>>
+  ): Map<number, Map<string, { start: number; end: number }>> {
+    const porDia = new Map<number, Map<string, { start: number; end: number }>>();
+    for (const [dia, slots] of byDay) {
+      porDia.set(dia, new Map([...slots].map(([id, sl]) => [id, { start: sl.start, end: sl.end }])));
+    }
+    return porDia;
+  }
+
   /** Preview que aplica al día `i`, venga del estirar o de un drop. */
   function previewDelDia(i: number): Map<string, { start: number; end: number }> | undefined {
     const delRedim = redimPreview?.get(i);
     if (delRedim) return delRedim;
-    if (dropPreview && dropPreview.day === i) return dropPreview.slots;
-    return undefined;
+    return dropPreview?.byDay.get(i);
   }
 
   /** Ids que se mueven en el día `i`: para pintarlos como "aún no guardado". */
@@ -617,6 +652,7 @@
     const out = new Set<string>();
     if (!pre) return out;
     for (const [id, slot] of pre) {
+      if (redimPreview === null && id === draggedActivityId) continue;
       const a = activities.find(x => x.id === id);
       if (!a) continue;
       if (Math.abs(parseTime(a.startTime) - slot.start) > 1e-9 ||
@@ -638,12 +674,7 @@
     lado: 'arriba' | 'abajo'
   ) {
     const sem = propagateWeekly(activities, actId, ancla, endHour, CODEC, act?.daysOfWeek ?? [], nuevaDur, 0, true, undefined, lado);
-    const porDia = new Map<number, Map<string, { start: number; end: number }>>();
-    if (sem.valido) {
-      for (const [dia, slots] of sem.byDay) {
-        porDia.set(dia, new Map([...slots].map(([id, sl]) => [id, { start: sl.start, end: sl.end }])));
-      }
-    }
+    const porDia = sem.valido ? aMapaPorDia(sem.byDay) : new Map<number, Map<string, { start: number; end: number }>>();
     return { sem, porDia };
   }
   /** Drop inválido: no cabe / pisaría — tarjeta roja y al soltar vuelve. */
@@ -684,11 +715,10 @@
   const ghostColor = $derived(ghostActivity ? getActivityColor(ghostActivity.categoryId, categories) : '#2d3748');
 
   /**
-   * Cascada completa para el commit: TODOS los días de la actividad (incluido
-   * el destino si el drag cruza columnas). Devuelve la resolución COMPLETA:
-   * si el movimiento choca en otro día (o algún día desborda) → valido=false
-   * y NO se escribe nada (el bloque vuelve). Es la regla del usuario: mover
-   * jamás empuja fuera del día del drop.
+   * Cascada completa para preview y commit: TODOS los días de la actividad
+   * (incluido el destino si el drag cruza columnas). Usa cascada transitiva
+   * bidireccional respetando [startHour, endHour]; si algún día desborda o
+   * choca → valido=false y NO se escribe nada (el bloque vuelve).
    */
   function computeFullCascade(
     actId: string,
@@ -703,10 +733,10 @@
       ? [...origDays.filter(d => d !== dragSourceDay), targetDay]
       : [...origDays];
     // Con resDestino el día del drop se siembra EXACTO (lo que se vio);
-    // los demás días se validan contra el slot anclado (sin empujar a nadie).
+    // los demás días cierran choques por cascada transitiva bidireccional.
     return propagateWeekly(
       activities, actId, anchorStart, endHour, CODEC, [...new Set(finalDays)],
-      undefined, 0, false,
+      undefined, startHour, false,
       resDestino ? { day: targetDay, slots: resDestino.slots } : undefined
     );
   }
@@ -843,7 +873,7 @@
         const { sem, porDia } = previewEstirarSemanal(act, t.activityId, ancla, nuevaDur, m.lado);
         redimPreview = sem.valido ? porDia : null;
         redimDiaOrigen = m.day;
-        if (sem.valido) dropPreview = { day: m.day, slots: calc.slots };
+        if (sem.valido) dropPreview = { day: m.day, byDay: porDia };
       }
     },
     async onDrop(t, _x, clientY) {
@@ -855,8 +885,8 @@
       shakeInvalid = false;
       dragHint = '';
       vresHint = null;
-      if (!calc) { dropPreview = null; redimPreview = null; return; }
-      if (!calc.valido) { toastErrRepetido(`estirar-sem:${m.day}`, '⛔ No cabe: estirar desbordaría el día'); dropPreview = null; redimPreview = null; return; }
+      if (!calc) { dropPreview = null; redimPreview = null; redimDiaOrigen = null; return; }
+      if (!calc.valido) { toastErrRepetido(`estirar-sem:${m.day}`, '⛔ No cabe: estirar desbordaría el día'); dropPreview = null; redimPreview = null; redimDiaOrigen = null; return; }
       // Commit global: el borde del PUNTERO manda. Con lado 'arriba' el fin
       // queda fijo (ancla = nuevo inicio) y la nueva duración viaja a todos
       // los días; el rechazo multi-día del candado protege el límite.
@@ -870,10 +900,11 @@
       // re-derivaba con pared anclada al inicio y los vecinos traspasaban.
       // Misma función que el preview: lo que se vio es lo que se guarda.
       const { sem } = previewEstirarSemanal(act, t.activityId, ancla, nuevaDur, m.lado);
-      if (!sem.valido) { toastErrRepetido(`estirar-sem:${m.day}`, sem.motivo); dropPreview = null; redimPreview = null; return; }
+      if (!sem.valido) { toastErrRepetido(`estirar-sem:${m.day}`, sem.motivo); dropPreview = null; redimPreview = null; redimDiaOrigen = null; return; }
       await commitWeeklyTimes(sem.times, `Estirar ${act?.name ?? 'actividad'}`);
       dropPreview = null;
       redimPreview = null;
+      redimDiaOrigen = null;
     },
     onCancel() {
       draggedActivityId = null;

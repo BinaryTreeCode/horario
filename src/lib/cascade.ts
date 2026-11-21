@@ -152,6 +152,26 @@ const enRangoTolerante = (arr: BloqueM[], originales: BloqueM[], minM: number, m
   return arr.every(b => estabaFuera.has(b.id) || (b.inicio >= minM - EPS && finDe(b) <= maxM + EPS));
 };
 
+/**
+ * Candado por bloque respecto a su horario ORIGINAL: los bloques dentro de
+ * [minM, maxM] nunca salen del día; los bloques preexistentes fuera de rango
+ * (p. ej. 6:45 con inicio a las 7:00) pueden mantenerse o acercarse al rango,
+ * pero jamás empeorar ni salirse de [0, 24h].
+ */
+function enRangoNoEmpeora(
+  arr: BloqueM[],
+  origPorId: Map<string, BloqueM>,
+  minM: number,
+  maxM: number
+): boolean {
+  return arr.every(b => {
+    const orig = origPorId.get(b.id);
+    const piso = orig && orig.inicio < minM - EPS ? Math.max(0, orig.inicio) : minM;
+    const techo = orig && finDe(orig) > maxM + EPS ? Math.min(24 * 60, finDe(orig)) : maxM;
+    return b.inicio >= piso - EPS && finDe(b) <= techo + EPS;
+  });
+}
+
 const cerrar = (arr: BloqueM[]): Slot[] => [...arr].sort(porInicio).map(aHoras);
 
 /**
@@ -510,6 +530,99 @@ function resolveParedArriba(
   return [...out, { id, inicio: pared.inicio, dur: pared.dur }].sort(porInicio);
 }
 
+/**
+ * Empuje dividido alrededor de una pared fija: compacta hacia ARRIBA lo que
+ * empieza antes de `pared.inicio` y empuja hacia ABAJO el resto. Respaldo
+ * para choques en días vecinos donde ni todo-arriba ni todo-abajo cabe.
+ */
+function resolveParedDividida(
+  todosM: BloqueM[],
+  id: string,
+  pared: { inicio: number; dur: number }
+): BloqueM[] {
+  const otros = todosM.filter(x => x.id !== id).sort(porInicio);
+  const arriba = otros
+    .filter(o => o.inicio < pared.inicio - EPS)
+    .map(o => ({ ...o }))
+    .sort((a, b) => finDe(a) - finDe(b));
+  const abajo = otros
+    .filter(o => o.inicio >= pared.inicio - EPS)
+    .map(o => ({ ...o }));
+
+  let cursorArriba = pared.inicio;
+  for (let k = arriba.length - 1; k >= 0; k--) {
+    if (finDe(arriba[k]) > cursorArriba + EPS) {
+      arriba[k].inicio = cursorArriba - arriba[k].dur;
+    }
+    cursorArriba = Math.min(cursorArriba, arriba[k].inicio);
+  }
+
+  let cursorAbajo = pared.inicio + pared.dur;
+  for (const o of abajo) {
+    if (o.inicio < cursorAbajo - EPS) o.inicio = cursorAbajo;
+    cursorAbajo = Math.max(cursorAbajo, finDe(o));
+  }
+
+  return [...arriba, { id, inicio: pared.inicio, dur: pared.dur }, ...abajo].sort(porInicio);
+}
+
+/**
+ * Resuelve el choque de una pared al MOVER en la grilla semanal buscando
+ * dirección bidireccional: prefiere subir cuando la pared saltó sobre el bloque
+ * pisado dejando hueco arriba (intercambio) o en ola ascendente, y recurre a
+ * la dirección opuesta o al empuje dividido si el sentido preferido desborda.
+ */
+function resolverChoqueParedMover(
+  slotsDiaM: BloqueM[],
+  id: string,
+  pared: { inicio: number; dur: number },
+  origAct: Activity | undefined,
+  origPorId: Map<string, BloqueM>,
+  day: number,
+  minM: number,
+  maxM: number
+): BloqueM[] {
+  const paredFin = pared.inicio + pared.dur;
+  const hits = slotsDiaM
+    .filter(o => o.id !== id && o.inicio < paredFin - EPS && pared.inicio < finDe(o) - EPS)
+    .sort(porInicio);
+  if (hits.length === 0) return slotsDiaM;
+
+  let preferirArriba = false;
+  const orig = origPorId.get(id);
+  if (orig && origAct?.daysOfWeek.includes(day)) {
+    if (pared.inicio > orig.inicio + EPS) {
+      const primero = hits[0];
+      if (primero.inicio >= finDe(orig) - EPS && pared.inicio >= primero.inicio - EPS) {
+        preferirArriba = true;
+      }
+    } else if (pared.inicio < orig.inicio - EPS) {
+      const ultimo = hits[hits.length - 1];
+      if (finDe(ultimo) <= orig.inicio + EPS && pared.inicio > ultimo.inicio + EPS) {
+        preferirArriba = true;
+      }
+    }
+  }
+
+  const resAbajo = resolvePared(slotsDiaM, id, pared);
+  const resArriba = resolveParedArriba(slotsDiaM, id, pared);
+  const okAbajo = enRangoNoEmpeora(resAbajo, origPorId, minM, maxM);
+  const okArriba = enRangoNoEmpeora(resArriba, origPorId, minM, maxM);
+
+  if (preferirArriba) {
+    if (okArriba) return resArriba;
+    if (okAbajo) return resAbajo;
+  } else {
+    if (okAbajo) return resAbajo;
+    if (okArriba) return resArriba;
+  }
+
+  const resDiv = resolveParedDividida(slotsDiaM, id, pared);
+  if (enRangoNoEmpeora(resDiv, origPorId, minM, maxM)) return resDiv;
+
+  return preferirArriba ? resArriba : resAbajo;
+}
+
 export interface WeeklyResolution {
   /** id → slot final, por día incluido en el cierre. */
   byDay: Map<number, Map<string, Slot>>;
@@ -581,19 +694,48 @@ export function propagateWeekly(
   // El horario de un bloque es GLOBAL: correrlo en este día obliga a correrlo en
   // todos los suyos, y la cadena sigue ahí (paredes transitivas, más abajo).)
 
+  const origPorId = new Map<string, BloqueM>(
+    activities.map(a => [
+      a.id!,
+      {
+        id: a.id!,
+        inicio: toMin(codec.parse(a.startTime)),
+        dur: Math.max(0, toMin(codec.parse(a.endTime)) - toMin(codec.parse(a.startTime)))
+      }
+    ])
+  );
+
   const daySet = new Set<number>(mineDays);
   const exacto = diaDestino ? new Map(diaDestino.slots.map(s => [s.id, s])) : null;
   if (diaDestino) daySet.add(diaDestino.day);
+
+  const validarCierreMover = (dias: Set<number>): string | null => {
+    for (const day of dias) {
+      daySet.add(day);
+      const nombreDia = DIAS_SEMANA[day] ?? `día ${day}`;
+      const slotsDia = slotsOn(day);
+      const fuera = slotsDia.find(s => !enRangoNoEmpeora([aM(s)], origPorId, minM, maxM));
+      if (fuera) return `⛔ No cabe: la cadena desbordaría ${nombreDia}`;
+      for (let i = 0; i < slotsDia.length; i++) {
+        for (let j = i + 1; j < slotsDia.length; j++) {
+          if (overlaps(slotsDia[i], slotsDia[j])) return `⛔ No cabe: chocaría en ${nombreDia}`;
+        }
+      }
+    }
+    return null;
+  };
 
   if (exacto && diaDestino) {
     // ── MOVER con día del drop: sembrar EXACTO y cerrar choques en cadena ──
     // El día del drop va tal cual (preview = commit). Cada bloque CAMBIADO
     // (arrastrado + vecinos reubicados) actúa como PARED en TODOS sus días:
-    // lo pisado baja en cadena (conservando duración) hasta que nadie choque
-    // — transitivo: un empujado que pisa a otro se vuelve pared (MAX_PASSES).
+    // cierra choques en cadena bidireccional (conservando duración) hasta
+    // converger — transitivo: un empujado que pisa a otro se vuelve pared.
     for (const s of exacto.values()) {
-      // En HORAS (exacto son Slots; minM/maxM son minutos).
-      if (s.start < startHour - EPS || s.end > endHour + EPS) return rechazar('⛔ No cabe: queda fuera del rango del día');
+      // Tolerante con pre-desborde sin empeorar rango original.
+      if (!enRangoNoEmpeora([aM(s)], origPorId, minM, maxM)) {
+        return rechazar('⛔ No cabe: queda fuera del rango del día');
+      }
       times.set(s.id, s);
     }
     // Paredes = bloques cuyo horario global cambió respecto a la BD (crece
@@ -614,7 +756,16 @@ export function propagateWeekly(
           if (!isOnDay(byId.get(id)!, day)) continue; // la pared no vive en este día
           const w = times.get(id)!;
           const pared = { inicio: toMin(w.start), dur: Math.max(1, Math.round((w.end - w.start) * 60)) };
-          const res = resolvePared(slotsOn(day).map(aM), id, pared);
+          const res = resolverChoqueParedMover(
+            slotsOn(day).map(aM),
+            id,
+            pared,
+            byId.get(id),
+            origPorId,
+            day,
+            minM,
+            maxM
+          );
           for (const sM of res) {
             const s2 = aHoras(sM);
             if (sameSlot(times.get(s2.id)!, s2)) continue;
@@ -628,30 +779,13 @@ export function propagateWeekly(
       if (!changed) break;
     }
     // Candado doble: rango Y solapes residuales (cierre no convergido).
-    for (const day of aCerrar) {
-      const nombreDia = DIAS_SEMANA[day] ?? `día ${day}`;
-      const slotsDia = slotsOn(day);
-      // Tolerante con pre-desborde: un bloque que YA estaba fuera del rango
-      // configurado no invalida el mover (solo se rechaza un desborde NUEVO).
-      const estabaFuera = new Set(
-        activities.filter(a => isOnDay(a, day))
-          .map(a => ({ id: a.id!, start: codec.parse(a.startTime), end: codec.parse(a.endTime) }))
-          .filter(s => s.start < startHour - EPS || s.end > endHour + EPS)
-          .map(s => s.id)
-      );
-      const fuera = slotsDia.find(s => !estabaFuera.has(s.id) && (s.start < startHour - EPS || s.end > endHour + EPS));
-      if (fuera) return rechazar(`⛔ No cabe: la cadena desbordaría ${nombreDia}`);
-      for (let i = 0; i < slotsDia.length; i++) {
-        for (let j = i + 1; j < slotsDia.length; j++) {
-          if (overlaps(slotsDia[i], slotsDia[j])) return rechazar(`⛔ No cabe: chocaría en ${nombreDia}`);
-        }
-      }
-    }
+    const errorCierre = validarCierreMover(aCerrar);
+    if (errorCierre) return rechazar(errorCierre);
   } else if (!keepPlace) {
     // ── MOVER sin día exacto: el arrastrado como PARED en todos sus días ──
-    // (drag sin preview). Empuja en cadena — transitivo: un empujado que pisa
-    // a otro se vuelve pared. ⛔ solo si una cadena desborda el rango o deja
-    // solape (cadena no cabe) en algún día.
+    // (drag sin preview). Empuja en cadena bidireccional — transitivo: un
+    // empujado que pisa a otro se vuelve pared. ⛔ solo si una cadena
+    // desborda el rango o deja solape (cadena no cabe) en algún día.
     const paredes = new Set<string>([actId]);
     const aCerrar = new Set<number>(daySet);
     for (const id of paredes) byId.get(id)?.daysOfWeek.forEach(d => aCerrar.add(d));
@@ -662,7 +796,16 @@ export function propagateWeekly(
           if (!isOnDay(byId.get(id)!, day)) continue;
           const w = times.get(id)!;
           const pared = { inicio: toMin(w.start), dur: Math.max(1, Math.round((w.end - w.start) * 60)) };
-          const res = resolvePared(slotsOn(day).map(aM), id, pared);
+          const res = resolverChoqueParedMover(
+            slotsOn(day).map(aM),
+            id,
+            pared,
+            byId.get(id),
+            origPorId,
+            day,
+            minM,
+            maxM
+          );
           for (const sM of res) {
             const s = aHoras(sM);
             if (sameSlot(times.get(s.id)!, s)) continue;
@@ -678,25 +821,8 @@ export function propagateWeekly(
       }
       if (!changed) break;
     }
-    for (const day of aCerrar) {
-      const nombreDia = DIAS_SEMANA[day] ?? `día ${day}`;
-      const slotsDia = slotsOn(day);
-      // Tolerante con pre-desborde: un bloque que YA estaba fuera del rango
-      // configurado no invalida el mover (solo se rechaza un desborde NUEVO).
-      const estabaFuera = new Set(
-        activities.filter(a => isOnDay(a, day))
-          .map(a => ({ id: a.id!, start: codec.parse(a.startTime), end: codec.parse(a.endTime) }))
-          .filter(s => s.start < startHour - EPS || s.end > endHour + EPS)
-          .map(s => s.id)
-      );
-      const fuera = slotsDia.find(s => !estabaFuera.has(s.id) && (s.start < startHour - EPS || s.end > endHour + EPS));
-      if (fuera) return rechazar(`⛔ No cabe: la cadena desbordaría ${nombreDia}`);
-      for (let i = 0; i < slotsDia.length; i++) {
-        for (let j = i + 1; j < slotsDia.length; j++) {
-          if (overlaps(slotsDia[i], slotsDia[j])) return rechazar(`⛔ No cabe: chocaría en ${nombreDia}`);
-        }
-      }
-    }
+    const errorCierre = validarCierreMover(aCerrar);
+    if (errorCierre) return rechazar(errorCierre);
   } else {
     // ── ESTIRAR: única excepción que empuja (pared en pinnedStart) ──
     // Encoger NUNCA se rechaza (libera espacio; puede ser la única vía para

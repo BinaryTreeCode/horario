@@ -432,6 +432,159 @@ describe('propagateWeekly — cierre transitivo', () => {
     expect(res.times.get('x')).toEqual(s('x', 10, 11));
     expect(res.times.get('k')).toEqual(s('k', 11, 12));
   });
+
+  test('caso reportado (Wafles/Baño/Organizar/Dormir): intercambiar en Lunes sube Organizar en Mié/Vie sin desbordar', () => {
+    const acts = [
+      act('cena', '19:30', '20:00', [0, 1, 2, 3, 4, 5]),
+      act('wafles', '20:00', '20:30', [0, 2, 4, 5]),
+      act('bano', '20:30', '22:00', [0, 3, 5]),
+      act('organizar', '20:30', '22:00', [1, 2, 4]),
+      act('dormir', '22:00', '24:00', [0, 1, 2, 3, 4, 5])
+    ];
+    const res = propagateWeekly(acts, 'wafles', 21.5, 24, codec, [0, 2, 4, 5], undefined, 7, false, {
+      day: 0,
+      slots: [s('cena', 19.5, 20), s('bano', 20, 21.5), s('wafles', 21.5, 22), s('dormir', 22, 24)]
+    });
+    expect({ valido: res.valido, motivo: res.motivo }).toEqual({ valido: true, motivo: '' });
+    expect(res.times.get('bano')).toEqual(s('bano', 20, 21.5));
+    expect(res.times.get('wafles')).toEqual(s('wafles', 21.5, 22));
+    expect(res.times.get('organizar')).toEqual(s('organizar', 20, 21.5));
+    expect(res.times.get('dormir')).toEqual(s('dormir', 22, 24));
+    expect(res.times.get('cena')).toEqual(s('cena', 19.5, 20));
+    expect([...res.byDay.keys()].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5]);
+    for (const [d, m] of res.byDay) {
+      const arr = [...m.values()];
+      for (let i = 0; i < arr.length; i++) {
+        for (let j = i + 1; j < arr.length; j++) {
+          expect(arr[i].start < arr[j].end && arr[j].start < arr[i].end,
+            `solape en día ${d}: ${arr[i].id} vs ${arr[j].id}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  test('intercambio inverso: devolver Wafles arriba de Baño restaura Organizar hacia abajo', () => {
+    const acts = [
+      act('cena', '19:30', '20:00', [0, 1, 2, 3, 4, 5]),
+      act('bano', '20:00', '21:30', [0, 3, 5]),
+      act('organizar', '20:00', '21:30', [1, 2, 4]),
+      act('wafles', '21:30', '22:00', [0, 2, 4, 5]),
+      act('dormir', '22:00', '24:00', [0, 1, 2, 3, 4, 5])
+    ];
+    const res = propagateWeekly(acts, 'wafles', 20, 24, codec, [0, 2, 4, 5], undefined, 7, false, {
+      day: 0,
+      slots: [s('cena', 19.5, 20), s('wafles', 20, 20.5), s('bano', 20.5, 22), s('dormir', 22, 24)]
+    });
+    expect({ valido: res.valido, motivo: res.motivo }).toEqual({ valido: true, motivo: '' });
+    expect(res.times.get('wafles')).toEqual(s('wafles', 20, 20.5));
+    expect(res.times.get('bano')).toEqual(s('bano', 20.5, 22));
+    expect(res.times.get('organizar')).toEqual(s('organizar', 20.5, 22));
+    expect(res.times.get('dormir')).toEqual(s('dormir', 22, 24));
+  });
+
+  test('intercambio de igual duración con espacio abajo: vecino en otro día sube al hueco liberado', () => {
+    const acts = [
+      act('a', '10:00', '11:00', [0, 2]),
+      act('b', '11:00', '12:00', [0]),
+      act('c', '11:00', '12:00', [2])
+    ];
+    const res = propagateWeekly(acts, 'a', 11, 22, codec, [0, 2], undefined, 7, false, {
+      day: 0,
+      slots: [s('b', 10, 11), s('a', 11, 12)]
+    });
+    expect(res.valido).toBe(true);
+    expect(res.times.get('b')).toEqual(s('b', 10, 11));
+    expect(res.times.get('a')).toEqual(s('a', 11, 12));
+    expect(res.times.get('c')).toEqual(s('c', 10, 11));
+  });
+
+  test('cadena bidireccional multi-día: sube Organizar en Miércoles y baja snack en Martes', () => {
+    const acts = [
+      act('cena', '19:30', '20:00', [0, 1, 2, 3, 4, 5]),
+      act('snack', '20:00', '20:30', [1]),
+      act('wafles', '20:00', '20:30', [0, 2, 4, 5]),
+      act('bano', '20:30', '22:00', [0, 3, 5]),
+      act('organizar', '20:30', '22:00', [1, 2, 4]),
+      act('dormir', '22:00', '24:00', [0, 1, 2, 3, 4, 5])
+    ];
+    const res = propagateWeekly(acts, 'wafles', 21.5, 24, codec, [0, 2, 4, 5], undefined, 7, false, {
+      day: 0,
+      slots: [s('cena', 19.5, 20), s('bano', 20, 21.5), s('wafles', 21.5, 22), s('dormir', 22, 24)]
+    });
+    expect({ valido: res.valido, motivo: res.motivo }).toEqual({ valido: true, motivo: '' });
+    expect(res.times.get('organizar')).toEqual(s('organizar', 20, 21.5));
+    expect(res.times.get('snack')).toEqual(s('snack', 21.5, 22));
+    expect(res.times.get('dormir')).toEqual(s('dormir', 22, 24));
+    for (const [d, m] of res.byDay) {
+      const arr = [...m.values()];
+      for (let i = 0; i < arr.length; i++) {
+        for (let j = i + 1; j < arr.length; j++) {
+          expect(arr[i].start < arr[j].end && arr[j].start < arr[i].end,
+            `solape en día ${d}: ${arr[i].id} vs ${arr[j].id}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  test('imposibilidad real con startHour > 0: si no cabe ni arriba ni abajo en Miércoles → rechazo', () => {
+    const acts = [
+      act('lleno', '07:00', '20:00', [2]),
+      act('a', '20:00', '21:00', [0, 2]),
+      act('x', '21:00', '21:30', [0]),
+      act('tarde', '21:00', '22:00', [2])
+    ];
+    const res = propagateWeekly(acts, 'a', 20.5, 22, codec, [0, 2], undefined, 7, false, {
+      day: 0,
+      slots: [s('x', 20, 20.5), s('a', 20.5, 21.5)]
+    });
+    expect(res.valido).toBe(false);
+    expect(res.motivo).toContain('Miércoles');
+    expect(res.times.size).toBe(0);
+  });
+
+  test('bloque pre-fuera-de-rango no veta intercambios válidos pero rechaza empujarlo más abajo', () => {
+    const base = [
+      act('rutina', '06:45', '07:45', [0, 2]),
+      act('wafles', '20:00', '20:30', [0, 2]),
+      act('bano', '20:30', '22:00', [0]),
+      act('organizar', '20:30', '22:00', [2]),
+      act('dormir', '22:00', '24:00', [0, 2])
+    ];
+    const ok = propagateWeekly(base, 'wafles', 21.5, 24, codec, [0, 2], undefined, 7, false, {
+      day: 0,
+      slots: [s('rutina', 6.75, 7.75), s('bano', 20, 21.5), s('wafles', 21.5, 22), s('dormir', 22, 24)]
+    });
+    expect(ok.valido).toBe(true);
+    expect(ok.times.get('rutina')).toEqual(s('rutina', 6.75, 7.75));
+
+    const peor = [
+      act('rutina', '06:45', '07:45', [2]),
+      act('a', '07:45', '08:15', [0, 2]),
+      act('b', '08:15', '08:45', [0]),
+      act('c', '08:15', '09:15', [2]),
+      act('dormir', '09:15', '24:00', [2])
+    ];
+    const bad = propagateWeekly(peor, 'a', 8.25, 24, codec, [0, 2], undefined, 7, false, {
+      day: 0,
+      slots: [s('b', 7.75, 8.25), s('a', 8.25, 8.75)]
+    });
+    expect(bad.valido).toBe(false);
+    expect(bad.motivo).toContain('Miércoles');
+    expect(bad.times.size).toBe(0);
+  });
+
+  test('respaldo resolveParedDividida: reparte bloques arriba y abajo cuando un solo sentido no cabe', () => {
+    const acts = [
+      act('p', '07:00', '09:00', [0]),
+      act('c1', '08:00', '10:00', [2]),
+      act('c2', '10:00', '11:00', [2])
+    ];
+    const res = propagateWeekly(acts, 'p', 9, 12, codec, [2], undefined, 7);
+    expect({ valido: res.valido, motivo: res.motivo }).toEqual({ valido: true, motivo: '' });
+    expect(res.times.get('c1')).toEqual(s('c1', 7, 9));
+    expect(res.times.get('p')).toEqual(s('p', 9, 11));
+    expect(res.times.get('c2')).toEqual(s('c2', 11, 12));
+  });
 });
 
 describe('capacidadResizeDay/Weekly — estirar SIEMPRE topa (nunca rechaza)', () => {
